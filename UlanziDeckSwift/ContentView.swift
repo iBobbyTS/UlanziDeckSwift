@@ -24,7 +24,7 @@ struct ContentView: View {
                 Text("Ulanzi Deck H200")
                     .font(.title.bold())
 
-                Text("14 keys, local interaction prototype")
+                Text("14 个按键，本地交互原型")
                     .foregroundStyle(.secondary)
             }
 
@@ -83,16 +83,16 @@ struct ContentView: View {
     private var statusBar: some View {
         HStack {
             if let selectedKeyID = interactionState.selectedKeyID {
-                Text("Key \(selectedKeyID) pressed")
+                Text("按键 \(selectedKeyID) 已按下")
                     .font(.headline)
 
                 Spacer()
 
-                Text("Tap count: \(interactionState.tapCount(for: selectedKeyID))")
+                Text("点击次数：\(interactionState.tapCount(for: selectedKeyID))")
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
             } else {
-                Text("Press a key to test the grid response.")
+                Text("按下任意格子以测试响应。")
                     .font(.headline)
                     .foregroundStyle(.secondary)
 
@@ -108,11 +108,11 @@ struct ContentView: View {
 private extension ContentView {
     var connectionLabel: String {
         guard let connectedDevice else {
-            return "Checking H200"
+            return "正在检测 H200"
         }
 
         if connectedDevice.serialNumber.isEmpty {
-            return "H200 connected"
+            return "H200 已连接"
         }
 
         return "H200 \(connectedDevice.serialNumber)"
@@ -132,7 +132,7 @@ private struct DeckKeyButton: View {
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .monospacedDigit()
 
-                Text(tapCount == 0 ? "ready" : "\(tapCount)x")
+                Text(tapCount == 0 ? "就绪" : "\(tapCount) 次")
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(isSelected ? .white.opacity(0.82) : .secondary)
@@ -151,8 +151,8 @@ private struct DeckKeyButton: View {
             .shadow(color: .black.opacity(isSelected ? 0.24 : 0.16), radius: isSelected ? 12 : 7, y: isSelected ? 7 : 4)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Deck key \(number)")
-        .accessibilityValue("Tap count \(tapCount)")
+        .accessibilityLabel("设备按键 \(number)")
+        .accessibilityValue("点击次数 \(tapCount)")
     }
 }
 

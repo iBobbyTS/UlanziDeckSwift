@@ -12,7 +12,7 @@ struct DeckGridLayout: Equatable {
     let keys: [Key]
 
     static let h200Prototype = DeckGridLayout(
-        name: "H200 Prototype",
+        name: "H200 原型",
         columnCount: 5,
         keys: (1...14).map { number in
             let zeroBasedIndex = number - 1
