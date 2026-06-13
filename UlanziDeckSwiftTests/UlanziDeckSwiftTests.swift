@@ -67,6 +67,26 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func managerExclusiveAccessShowsOccupiedPortAlert() {
+        let code = Self.exclusiveAccessReturnCode()
+        let model = H200ConnectionModel(discovery: FakeH200Discovery(results: [.communicationPortOccupied(code)]))
+
+        model.checkOnLaunch()
+
+        #expect(model.status == .communicationPortOccupied(code))
+        #expect(model.alert?.title == "H200 通信端口被占用")
+        #expect(model.alert?.message.contains("有其他应用正在占用 H200 通信端口") == true)
+        #expect(model.alert?.message.contains("kIOReturnExclusiveAccess") == true)
+    }
+
+    @Test func exclusiveAccessReturnCodeMeansOccupiedPort() {
+        let code = Self.exclusiveAccessReturnCode()
+
+        #expect(code.name == "kIOReturnExclusiveAccess")
+        #expect(code.indicatesOccupiedPort)
+    }
+
+    @MainActor
     @Test func retryUpdatesStateWhenH200Appears() async throws {
         let connectedIdentity = Self.protocolInterfaceIdentity()
         let model = H200ConnectionModel(discovery: FakeH200Discovery(results: [
@@ -96,6 +116,10 @@ struct UlanziDeckSwiftTests {
             manufacturer: "rockchip",
             product: ""
         )
+    }
+
+    private static func exclusiveAccessReturnCode() -> HIDReturnCode {
+        HIDReturnCode(rawValue: Int32(bitPattern: 0xe00002c5))
     }
 }
 

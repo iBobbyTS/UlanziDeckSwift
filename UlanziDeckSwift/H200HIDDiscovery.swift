@@ -15,9 +15,13 @@ struct H200HIDDiscovery: H200Discovering {
 
         IOHIDManagerSetDeviceMatching(manager, matching as CFDictionary)
 
-        let managerOpenResult = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
-        guard managerOpenResult == kIOReturnSuccess else {
-            return .managerOpenFailed(HIDReturnCode(rawValue: managerOpenResult))
+        let managerOpenResult = HIDReturnCode(rawValue: IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone)))
+        guard managerOpenResult.rawValue == kIOReturnSuccess else {
+            if managerOpenResult.indicatesOccupiedPort {
+                return .communicationPortOccupied(managerOpenResult)
+            }
+
+            return .managerOpenFailed(managerOpenResult)
         }
         defer {
             IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))

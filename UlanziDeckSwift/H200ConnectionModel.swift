@@ -54,6 +54,7 @@ enum H200ConnectionStatus: Equatable {
     case checking
     case connected(H200DeviceIdentity)
     case notConnected
+    case communicationPortOccupied(HIDReturnCode)
     case occupied(H200DeviceIdentity, HIDReturnCode)
     case permissionDenied(H200DeviceIdentity, HIDReturnCode)
     case openFailed(H200DeviceIdentity, HIDReturnCode)
@@ -65,6 +66,8 @@ enum H200ConnectionStatus: Equatable {
             self = .connected(device)
         case .notConnected:
             self = .notConnected
+        case let .communicationPortOccupied(code):
+            self = .communicationPortOccupied(code)
         case let .occupied(device, code):
             self = .occupied(device, code)
         case let .permissionDenied(device, code):
@@ -89,9 +92,12 @@ struct H200ConnectionAlert: Identifiable, Equatable {
         case .notConnected:
             title = "未检测到 H200"
             message = "请确认 Ulanzi Deck H200 已通过 USB-C 连接并处于开机状态，然后重试。"
+        case let .communicationPortOccupied(code):
+            title = "H200 通信端口被占用"
+            message = "有其他应用正在占用 H200 通信端口。请关闭 Ulanzi Studio 或其他控制软件后重试。返回码：\(code.name)。"
         case let .occupied(device, code):
-            title = "H200 正被其他应用占用"
-            message = "检测到 H200 通信接口 \(device.shortIdentifier)，但无法独占打开。请关闭 Ulanzi Studio 或其他控制软件后重试。返回码：\(code.name)。"
+            title = "H200 通信端口被占用"
+            message = "检测到 H200 通信接口 \(device.shortIdentifier)，但有其他应用正在占用 H200 通信端口。请关闭 Ulanzi Studio 或其他控制软件后重试。返回码：\(code.name)。"
         case let .permissionDenied(device, code):
             title = "没有权限访问 H200"
             message = "检测到 H200 通信接口 \(device.shortIdentifier)，但 macOS 拒绝访问。返回码：\(code.name)。"

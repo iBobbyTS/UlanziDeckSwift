@@ -57,11 +57,16 @@ struct HIDReturnCode: Equatable {
             return String(format: "0x%08x", UInt32(bitPattern: rawValue))
         }
     }
+
+    var indicatesOccupiedPort: Bool {
+        rawValue == KnownCodes.busy || rawValue == KnownCodes.exclusiveAccess
+    }
 }
 
 enum H200DiscoveryResult: Equatable {
     case connected(H200DeviceIdentity)
     case notConnected
+    case communicationPortOccupied(HIDReturnCode)
     case occupied(H200DeviceIdentity, HIDReturnCode)
     case permissionDenied(H200DeviceIdentity, HIDReturnCode)
     case openFailed(H200DeviceIdentity, HIDReturnCode)
