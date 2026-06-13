@@ -1,59 +1,172 @@
-//
-//  ContentView.swift
-//  UlanziDeckSwift
-//
-//  Created by iBobby on 2026-06-13.
-//
-
 import SwiftUI
-import SwiftData
 
 struct ContentView: View {
-    @Environment(\.modelContext) private var modelContext
-    @Query private var items: [Item]
+    let connectedDevice: H200DeviceIdentity?
+
+    private let layout = DeckGridLayout.h200Prototype
+
+    @State private var interactionState = DeckGridInteractionState(layout: .h200Prototype)
 
     var body: some View {
-        NavigationSplitView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))")
-                    } label: {
-                        Text(item.timestamp, format: Date.FormatStyle(date: .numeric, time: .standard))
-                    }
-                }
-                .onDelete(perform: deleteItems)
+        VStack(spacing: 24) {
+            header
+            deckSurface
+            statusBar
+        }
+        .padding(32)
+        .frame(minWidth: 620, minHeight: 520)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Ulanzi Deck H200")
+                    .font(.title.bold())
+
+                Text("14 keys, local interaction prototype")
+                    .foregroundStyle(.secondary)
             }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .toolbar {
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
-                    }
-                }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(layout.name)
+                    .font(.callout.weight(.medium))
+                    .foregroundStyle(.secondary)
+
+                Text(connectionLabel)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(connectedDevice == nil ? Color.secondary : Color.green)
             }
-        } detail: {
-            Text("Select an item")
         }
     }
 
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(timestamp: Date())
-            modelContext.insert(newItem)
-        }
-    }
-
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            for index in offsets {
-                modelContext.delete(items[index])
+    private var deckSurface: some View {
+        VStack(spacing: 16) {
+            ForEach(Array(layout.rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: 16) {
+                    ForEach(row) { key in
+                        DeckKeyButton(
+                            number: key.id,
+                            tapCount: interactionState.tapCount(for: key.id),
+                            isSelected: interactionState.selectedKeyID == key.id
+                        ) {
+                            withAnimation(.snappy(duration: 0.18)) {
+                                interactionState.press(keyID: key.id)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
             }
         }
+        .padding(28)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.linearGradient(
+                    colors: [
+                        Color(nsColor: .controlBackgroundColor),
+                        Color(nsColor: .underPageBackgroundColor)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.14), radius: 18, y: 10)
+    }
+
+    private var statusBar: some View {
+        HStack {
+            if let selectedKeyID = interactionState.selectedKeyID {
+                Text("Key \(selectedKeyID) pressed")
+                    .font(.headline)
+
+                Spacer()
+
+                Text("Tap count: \(interactionState.tapCount(for: selectedKeyID))")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Press a key to test the grid response.")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 14)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+}
+
+private extension ContentView {
+    var connectionLabel: String {
+        guard let connectedDevice else {
+            return "Checking H200"
+        }
+
+        if connectedDevice.serialNumber.isEmpty {
+            return "H200 connected"
+        }
+
+        return "H200 \(connectedDevice.serialNumber)"
+    }
+}
+
+private struct DeckKeyButton: View {
+    let number: Int
+    let tapCount: Int
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Text("\(number)")
+                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+
+                Text(tapCount == 0 ? "ready" : "\(tapCount)x")
+                    .font(.caption.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(isSelected ? .white.opacity(0.82) : .secondary)
+            }
+            .frame(width: 82, height: 82)
+            .foregroundStyle(isSelected ? .white : .primary)
+            .background {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected ? Color.accentColor : Color(nsColor: .textBackgroundColor))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(isSelected ? Color.white.opacity(0.35) : Color(nsColor: .separatorColor), lineWidth: 1)
+            }
+            .scaleEffect(isSelected ? 1.04 : 1)
+            .shadow(color: .black.opacity(isSelected ? 0.24 : 0.16), radius: isSelected ? 12 : 7, y: isSelected ? 7 : 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Deck key \(number)")
+        .accessibilityValue("Tap count \(tapCount)")
     }
 }
 
 #Preview {
-    ContentView()
-        .modelContainer(for: Item.self, inMemory: true)
+    ContentView(connectedDevice: H200DeviceIdentity(
+        vendorID: H200DeviceTarget.vendorID,
+        productID: H200DeviceTarget.productID,
+        locationID: 0x01124300,
+        primaryUsagePage: H200DeviceTarget.primaryUsagePage,
+        primaryUsage: H200DeviceTarget.primaryUsage,
+        maxInputReportSize: H200DeviceTarget.reportSize,
+        maxOutputReportSize: H200DeviceTarget.reportSize,
+        serialNumber: "preview",
+        manufacturer: "rockchip",
+        product: ""
+    ))
 }
