@@ -16,6 +16,10 @@ final class H200ConnectionModel: ObservableObject {
         self.syncer = syncer
     }
 
+    deinit {
+        syncer.close()
+    }
+
     var connectedDevice: H200DeviceIdentity? {
         if case let .connected(device) = status {
             return device
@@ -44,6 +48,7 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func refresh() {
+        syncer.close()
         status = .checking
         syncSummary = nil
         alert = nil

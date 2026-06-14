@@ -210,6 +210,25 @@ struct UlanziDeckSwiftTests {
         #expect(packets[1][2] == 0x00)
     }
 
+    @Test func startupPacketsSetButtonsThenSmallWindowBackgroundMode() {
+        let package = H200ButtonPackage(
+            payload: Data(repeating: 0xab, count: H200PacketBuilder.firstChunkDataSize + 2),
+            manifestData: Data(),
+            displayCount: 14
+        )
+
+        let packets = H200StartupPacketBuilder.buildStartupPackets(package: package)
+        let smallWindowPacket = packets.last!
+        let smallWindowLength = Self.payloadLength(in: smallWindowPacket)
+        let smallWindowPayload = smallWindowPacket.subdata(in: H200PacketBuilder.headerSize..<(H200PacketBuilder.headerSize + smallWindowLength))
+
+        #expect(packets.count == 3)
+        #expect(Array(packets[0].prefix(4)) == [0x7c, 0x7c, 0x00, 0x01])
+        #expect(Array(smallWindowPacket.prefix(4)) == [0x7c, 0x7c, 0x00, 0x06])
+        #expect(smallWindowPayload == H200SmallWindowDataPacketBuilder.backgroundModePayload)
+        #expect(String(data: smallWindowPayload, encoding: .utf8) == "2|0|0|00:00:00|0|24H|")
+    }
+
     private static func protocolInterfaceIdentity() -> H200DeviceIdentity {
         H200DeviceIdentity(
             vendorID: H200DeviceTarget.vendorID,
@@ -227,6 +246,13 @@ struct UlanziDeckSwiftTests {
 
     private static func exclusiveAccessReturnCode() -> HIDReturnCode {
         HIDReturnCode(rawValue: Int32(bitPattern: 0xe00002c5))
+    }
+
+    private static func payloadLength(in packet: Data) -> Int {
+        Int(packet[4])
+            | (Int(packet[5]) << 8)
+            | (Int(packet[6]) << 16)
+            | (Int(packet[7]) << 24)
     }
 }
 

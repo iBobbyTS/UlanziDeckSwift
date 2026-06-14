@@ -2,6 +2,7 @@ import Foundation
 
 nonisolated enum H200Command {
     static let outSetButtons: UInt16 = 0x0001
+    static let outSetSmallWindowData: UInt16 = 0x0006
     static let outPartiallyUpdateButtons: UInt16 = 0x000d
 }
 
@@ -28,6 +29,10 @@ nonisolated enum H200PacketBuilder {
         }
 
         return packets
+    }
+
+    static func buildSimplePacket(command: UInt16, payload: Data) -> Data {
+        buildFramedPacket(command: command, payloadLength: payload.count, data: payload)
     }
 
     static func isPayloadSafe(_ payload: Data) -> Bool {
@@ -63,6 +68,28 @@ nonisolated enum H200PacketBuilder {
         }
 
         return packet
+    }
+}
+
+nonisolated enum H200StartupPacketBuilder {
+    static func buildStartupPackets(package: H200ButtonPackage) -> [Data] {
+        var packets = H200PacketBuilder.buildChunkedPackets(
+            command: H200Command.outSetButtons,
+            payload: package.payload
+        )
+        packets.append(H200SmallWindowDataPacketBuilder.backgroundModePacket())
+        return packets
+    }
+}
+
+nonisolated enum H200SmallWindowDataPacketBuilder {
+    static let backgroundModePayload = Data("2|0|0|00:00:00|0|24H|".utf8)
+
+    static func backgroundModePacket() -> Data {
+        H200PacketBuilder.buildSimplePacket(
+            command: H200Command.outSetSmallWindowData,
+            payload: backgroundModePayload
+        )
     }
 }
 

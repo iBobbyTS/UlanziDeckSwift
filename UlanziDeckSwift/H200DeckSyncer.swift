@@ -1,4 +1,5 @@
 import Foundation
+import Dispatch
 import IOKit.hid
 
 nonisolated struct H200DeckSyncSummary: Equatable {
@@ -53,13 +54,23 @@ nonisolated enum H200DeckSyncFailure: Error, Equatable {
 
 nonisolated protocol H200DeckSyncing {
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult
+    func close()
 }
 
-nonisolated struct H200HIDDeckSyncer: H200DeckSyncing {
+extension H200DeckSyncing {
+    nonisolated func close() {}
+}
+
+nonisolated final class H200HIDDeckSyncer: H200DeckSyncing {
     private let packageBuilder: H200ButtonPackageBuilder
+    private var connection: H200HIDConnection?
 
     nonisolated init(packageBuilder: H200ButtonPackageBuilder = H200ButtonPackageBuilder()) {
         self.packageBuilder = packageBuilder
+    }
+
+    deinit {
+        close()
     }
 
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
@@ -70,11 +81,42 @@ nonisolated struct H200HIDDeckSyncer: H200DeckSyncing {
             return .failure(.packageBuildFailed(String(describing: error)))
         }
 
-        let packets = H200PacketBuilder.buildChunkedPackets(command: H200Command.outSetButtons, payload: package.payload)
+        let packets = H200StartupPacketBuilder.buildStartupPackets(package: package)
         return sendPackets(packets, package: package)
     }
 
+    func close() {
+        connection?.close()
+        connection = nil
+    }
+
     private func sendPackets(_ packets: [Data], package: H200ButtonPackage) -> H200DeckSyncResult {
+        let connection: H200HIDConnection
+        switch openConnectionIfNeeded() {
+        case let .success(openConnection):
+            connection = openConnection
+        case let .failure(error):
+            return .failure(error)
+        }
+
+        if let error = connection.writePackets(packets) {
+            close()
+            return .failure(error)
+        }
+        connection.startKeepAlive()
+
+        return .success(H200DeckSyncSummary(
+            payloadByteCount: package.payload.count,
+            packetCount: packets.count,
+            displayCount: package.displayCount
+        ))
+    }
+
+    private func openConnectionIfNeeded() -> Result<H200HIDConnection, H200DeckSyncFailure> {
+        if let connection {
+            return .success(connection)
+        }
+
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
         let matching: [String: Any] = [
             kIOHIDVendorIDKey as String: H200DeviceTarget.vendorID,
@@ -93,9 +135,6 @@ nonisolated struct H200HIDDeckSyncer: H200DeckSyncing {
 
             return .failure(.openFailed(managerOpenResult))
         }
-        defer {
-            IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
-        }
 
         guard let devices = IOHIDManagerCopyDevices(manager) as? Set<IOHIDDevice>,
               let device = devices
@@ -110,11 +149,13 @@ nonisolated struct H200HIDDeckSyncer: H200DeckSyncing {
                 })
                 .first
         else {
+            IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
             return .failure(.notConnected)
         }
 
         let openResult = HIDReturnCode(rawValue: IOHIDDeviceOpen(device.device, IOOptionBits(kIOHIDOptionsTypeSeizeDevice)))
         guard openResult.rawValue == kIOReturnSuccess else {
+            IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
             if openResult.indicatesOccupiedPort {
                 return .failure(.communicationPortOccupied(openResult))
             }
@@ -124,14 +165,88 @@ nonisolated struct H200HIDDeckSyncer: H200DeckSyncing {
 
             return .failure(.openFailed(openResult))
         }
-        defer {
-            IOHIDDeviceClose(device.device, IOOptionBits(kIOHIDOptionsTypeNone))
-        }
 
+        let connection = H200HIDConnection(manager: manager, device: device.device)
+        self.connection = connection
+        return .success(connection)
+    }
+}
+
+// HID 句柄只通过内部串行队列访问；DispatchSource 的 @Sendable 闭包需要显式声明。
+nonisolated private final class H200HIDConnection: @unchecked Sendable {
+    private static let keepAliveInitialDelay: DispatchTimeInterval = .seconds(1)
+    private static let keepAliveInterval: DispatchTimeInterval = .seconds(2)
+
+    private let manager: IOHIDManager
+    private let device: IOHIDDevice
+    private let queue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200HIDConnection")
+    private var keepAliveTimer: DispatchSourceTimer?
+    private var isOpen = true
+
+    init(manager: IOHIDManager, device: IOHIDDevice) {
+        self.manager = manager
+        self.device = device
+    }
+
+    deinit {
+        close()
+    }
+
+    func close() {
+        queue.sync {
+            guard isOpen else {
+                return
+            }
+
+            stopKeepAliveOnQueue()
+            IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone))
+            IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
+            isOpen = false
+        }
+    }
+
+    func writePackets(_ packets: [Data]) -> H200DeckSyncFailure? {
+        queue.sync {
+            guard isOpen else {
+                return .notConnected
+            }
+
+            return writePacketsOnQueue(packets)
+        }
+    }
+
+    func startKeepAlive() {
+        queue.async { [weak self] in
+            guard let self, self.isOpen else {
+                return
+            }
+
+            self.stopKeepAliveOnQueue()
+            let timer = DispatchSource.makeTimerSource(queue: self.queue)
+            timer.schedule(deadline: .now() + Self.keepAliveInitialDelay, repeating: Self.keepAliveInterval)
+            timer.setEventHandler { [weak self] in
+                guard let self, self.isOpen else {
+                    return
+                }
+
+                _ = self.writePacketsOnQueue([H200SmallWindowDataPacketBuilder.backgroundModePacket()])
+            }
+            self.keepAliveTimer = timer
+            timer.resume()
+        }
+    }
+
+    private func stopKeepAliveOnQueue() {
+        keepAliveTimer?.setEventHandler {}
+        keepAliveTimer?.cancel()
+        keepAliveTimer = nil
+    }
+
+    private func writePacketsOnQueue(_ packets: [Data]) -> H200DeckSyncFailure? {
         for packet in packets {
             let writeResult = packet.withUnsafeBytes { rawBuffer in
                 IOHIDDeviceSetReport(
-                    device.device,
+                    device,
                     kIOHIDReportTypeOutput,
                     CFIndex(0),
                     rawBuffer.bindMemory(to: UInt8.self).baseAddress!,
@@ -139,15 +254,11 @@ nonisolated struct H200HIDDeckSyncer: H200DeckSyncing {
                 )
             }
             guard writeResult == kIOReturnSuccess else {
-                return .failure(.writeFailed(HIDReturnCode(rawValue: writeResult)))
+                return .writeFailed(HIDReturnCode(rawValue: writeResult))
             }
         }
 
-        return .success(H200DeckSyncSummary(
-            payloadByteCount: package.payload.count,
-            packetCount: packets.count,
-            displayCount: package.displayCount
-        ))
+        return nil
     }
 }
 
