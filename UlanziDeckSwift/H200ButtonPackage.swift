@@ -182,13 +182,14 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         let cardRect = rect.insetBy(dx: inset, dy: inset)
         let radius = rect.height * 0.12
         let cardPath = NSBezierPath(roundedRect: cardRect, xRadius: radius, yRadius: radius)
-        let background = display.isSelected
+        let isActive = display.isSelected || display.isPressed
+        let background = isActive
             ? NSColor.controlAccentColor
             : NSColor(calibratedRed: 0.14, green: 0.15, blue: 0.17, alpha: 1)
         background.setFill()
         cardPath.fill()
 
-        NSColor(calibratedWhite: display.isSelected ? 1 : 0.32, alpha: display.isSelected ? 0.4 : 1).setStroke()
+        NSColor(calibratedWhite: isActive ? 1 : 0.32, alpha: isActive ? 0.4 : 1).setStroke()
         cardPath.lineWidth = max(2, rect.height * 0.012)
         cardPath.stroke()
 

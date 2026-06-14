@@ -15,17 +15,17 @@ struct UlanziDeckSwiftTests {
         #expect(layout.keyID(forSequentialInputIndex: 14) == nil)
     }
 
-    @Test func pressingAKeySelectsItAndTracksTapCount() {
+    @Test func shortPressingAKeySelectsItAndIncrementsTally() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
 
-        state.press(keyID: 7)
-        state.press(keyID: 7)
-        state.press(keyID: 14)
+        state.triggerShortPress(keyID: 7)
+        state.triggerShortPress(keyID: 7)
+        state.triggerShortPress(keyID: 14)
 
         #expect(state.selectedKeyID == 14)
-        #expect(state.tapCount(for: 7) == 2)
-        #expect(state.tapCount(for: 14) == 1)
+        #expect(state.tallyValue(for: 7) == 2)
+        #expect(state.tallyValue(for: 14) == 1)
     }
 
     @Test func displayModelUsesTheSameTextAsTheStartupPackage() {
@@ -33,20 +33,35 @@ struct UlanziDeckSwiftTests {
         let state = DeckGridInteractionState(layout: layout)
         let displays = state.displays(for: layout)
 
-        #expect(displays.map(\.title) == Array(1...14).map(String.init))
-        #expect(displays.allSatisfy { $0.subtitle == "就绪" })
+        #expect(displays.map(\.title) == Array(repeating: "0", count: 14))
+        #expect(displays.allSatisfy { $0.subtitle == "默认 0" })
+        #expect(displays.first?.isSelected == true)
         #expect(displays.last?.isWide == true)
         #expect(displays.last?.devicePixelSize == H200DeviceTarget.smallWindowIconSize)
     }
 
-    @Test func pressingUnknownKeyDoesNotChangeState() {
+    @Test func unknownKeyDoesNotChangeTallyState() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
 
-        state.press(keyID: 99)
+        state.triggerShortPress(keyID: 99)
 
-        #expect(state.selectedKeyID == nil)
-        #expect(state.tapCounts.values.allSatisfy { $0 == 0 })
+        #expect(state.selectedKeyID == 1)
+        #expect(state.configurations.values.allSatisfy { $0.tally.value == 0 })
+        #expect(state.pressedKeyIDs.isEmpty)
+    }
+
+    @Test func tallyDefaultValueIsAlsoTheResetTarget() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.setTallyDefaultValue(12, for: 4)
+        state.triggerShortPress(keyID: 4)
+        state.resetTally(keyID: 4)
+
+        #expect(state.selectedKeyID == 4)
+        #expect(state.tallyDefaultValue(for: 4) == 12)
+        #expect(state.tallyValue(for: 4) == 12)
     }
 
     @Test func h200ProtocolInterfaceMatchesObservedReportShape() {
@@ -143,14 +158,14 @@ struct UlanziDeckSwiftTests {
         model.checkOnLaunch()
 
         #expect(syncer.sentDisplays.count == 1)
-        #expect(syncer.sentDisplays.first?.map(\.title) == Array(1...14).map(String.init))
-        #expect(syncer.sentDisplays.first?.allSatisfy { $0.subtitle == "就绪" } == true)
+        #expect(syncer.sentDisplays.first?.map(\.title) == Array(repeating: "0", count: 14))
+        #expect(syncer.sentDisplays.first?.allSatisfy { $0.subtitle == "默认 0" } == true)
         #expect(syncer.sentDisplays.first?.last?.isWide == true)
         #expect(model.syncSummary?.packetCount == 4)
     }
 
     @MainActor
-    @Test func mouseAndPhysicalButtonPressShareInteractionState() async throws {
+    @Test func mouseAndPhysicalButtonShortPressShareInteractionState() async throws {
         let connectedIdentity = Self.protocolInterfaceIdentity()
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
@@ -159,12 +174,15 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
-        model.pressKey(keyID: 7)
+        model.beginKeyPress(keyID: 7)
+        model.endKeyPress(keyID: 7)
         syncer.emitInput(H200InputEvent(state: 1, index: 6, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 6, type: .button, action: .release))
         try await Task.sleep(nanoseconds: 50_000_000)
 
         #expect(model.interactionState.selectedKeyID == 7)
-        #expect(model.interactionState.tapCount(for: 7) == 2)
+        #expect(model.interactionState.tallyValue(for: 7) == 2)
     }
 
     @MainActor
@@ -181,8 +199,31 @@ struct UlanziDeckSwiftTests {
         syncer.emitInput(H200InputEvent(state: 1, index: 17, type: .encoder, action: .press))
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        #expect(model.interactionState.selectedKeyID == nil)
-        #expect(model.interactionState.tapCounts.values.allSatisfy { $0 == 0 })
+        #expect(model.interactionState.selectedKeyID == 1)
+        #expect(model.interactionState.configurations.values.allSatisfy { $0.tally.value == 0 })
+    }
+
+    @MainActor
+    @Test func longPressResetsTallyToConfiguredDefault() async throws {
+        let connectedIdentity = Self.protocolInterfaceIdentity()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
+            syncer: syncer,
+            longPressDurationNanoseconds: 10_000_000
+        )
+
+        model.checkOnLaunch()
+        model.setSelectedTallyDefaultValue(5)
+        model.beginKeyPress(keyID: 1)
+        model.endKeyPress(keyID: 1)
+        model.beginKeyPress(keyID: 1)
+        try await Task.sleep(nanoseconds: 30_000_000)
+        model.endKeyPress(keyID: 1)
+
+        #expect(model.interactionState.tallyDefaultValue(for: 1) == 5)
+        #expect(model.interactionState.tallyValue(for: 1) == 5)
+        #expect(model.interactionState.pressedKeyIDs.isEmpty)
     }
 
     @MainActor
@@ -286,7 +327,7 @@ struct UlanziDeckSwiftTests {
 
         #expect(H200InputReportParser.parse(wrongCommand) == nil)
         #expect(releaseEvent == H200InputEvent(state: 0x00, index: 0, type: .button, action: .release))
-        #expect(H200DeckInputMapper.keyID(for: releaseEvent!, layout: .h200Prototype) == nil)
+        #expect(H200DeckInputMapper.keyID(for: releaseEvent!, layout: .h200Prototype) == 1)
     }
 
     private static func protocolInterfaceIdentity() -> H200DeviceIdentity {

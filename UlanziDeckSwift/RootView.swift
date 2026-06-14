@@ -13,7 +13,13 @@ struct RootView: View {
             syncSummary: connectionModel.syncSummary,
             interactionState: connectionModel.interactionState
         ) { keyID in
-            connectionModel.pressKey(keyID: keyID)
+            connectionModel.beginKeyPress(keyID: keyID)
+        } onKeyPressEnded: { keyID in
+            connectionModel.endKeyPress(keyID: keyID)
+        } onFunctionSelection: { function in
+            connectionModel.assignSelectedFunction(function)
+        } onTallyDefaultValueChange: { value in
+            connectionModel.setSelectedTallyDefaultValue(value)
         }
             .task {
                 connectionModel.checkOnLaunch()

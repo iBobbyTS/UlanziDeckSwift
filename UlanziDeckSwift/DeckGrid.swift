@@ -58,15 +58,17 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let title: String
     let subtitle: String
     let isSelected: Bool
+    let isPressed: Bool
 
-    init(key: DeckGridLayout.Key, tapCount: Int, isSelected: Bool) {
+    init(key: DeckGridLayout.Key, configuration: DeckKeyConfiguration, isSelected: Bool, isPressed: Bool) {
         id = key.id
         row = key.row
         column = key.column
         columnSpan = key.columnSpan
-        title = "\(key.id)"
-        subtitle = tapCount == 0 ? "就绪" : "\(tapCount) 次"
+        title = "\(configuration.tally.value)"
+        subtitle = "默认 \(configuration.tally.defaultValue)"
         self.isSelected = isSelected
+        self.isPressed = isPressed
     }
 
     var isWide: Bool {
@@ -78,35 +80,139 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     }
 }
 
+nonisolated enum DeckKeyFunction: Equatable, CaseIterable {
+    case tally
+
+    var title: String {
+        switch self {
+        case .tally:
+            return "计数器"
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .tally:
+            return "number.square"
+        }
+    }
+}
+
+nonisolated struct DeckKeyTallyConfiguration: Equatable {
+    var defaultValue: Int
+    var value: Int
+
+    init(defaultValue: Int = 0, value: Int? = nil) {
+        self.defaultValue = defaultValue
+        self.value = value ?? defaultValue
+    }
+}
+
+nonisolated struct DeckKeyConfiguration: Equatable {
+    var function: DeckKeyFunction
+    var tally: DeckKeyTallyConfiguration
+
+    static let tallyDefault = DeckKeyConfiguration(
+        function: .tally,
+        tally: DeckKeyTallyConfiguration()
+    )
+}
+
 nonisolated struct DeckGridInteractionState: Equatable {
     private(set) var selectedKeyID: Int?
-    private(set) var tapCounts: [Int: Int]
+    private(set) var configurations: [Int: DeckKeyConfiguration]
+    private(set) var pressedKeyIDs: Set<Int>
     private let validKeyIDs: Set<Int>
 
     init(layout: DeckGridLayout) {
-        selectedKeyID = nil
-        tapCounts = Dictionary(uniqueKeysWithValues: layout.keys.map { ($0.id, 0) })
+        selectedKeyID = layout.keys.first?.id
+        configurations = Dictionary(uniqueKeysWithValues: layout.keys.map { ($0.id, .tallyDefault) })
+        pressedKeyIDs = []
         validKeyIDs = Set(layout.keys.map(\.id))
     }
 
-    mutating func press(keyID: Int) {
+    mutating func select(keyID: Int) {
         guard validKeyIDs.contains(keyID) else {
             return
         }
 
         selectedKeyID = keyID
-        tapCounts[keyID, default: 0] += 1
     }
 
-    func tapCount(for keyID: Int) -> Int {
-        tapCounts[keyID, default: 0]
+    mutating func beginPress(keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID), !pressedKeyIDs.contains(keyID) else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        pressedKeyIDs.insert(keyID)
+        return true
+    }
+
+    mutating func endPress(keyID: Int) {
+        pressedKeyIDs.remove(keyID)
+    }
+
+    mutating func triggerShortPress(keyID: Int) {
+        guard validKeyIDs.contains(keyID) else {
+            return
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].tally.value += 1
+    }
+
+    mutating func resetTally(keyID: Int) {
+        guard validKeyIDs.contains(keyID) else {
+            return
+        }
+
+        selectedKeyID = keyID
+        let defaultValue = configurations[keyID, default: .tallyDefault].tally.defaultValue
+        configurations[keyID, default: .tallyDefault].tally.value = defaultValue
+    }
+
+    mutating func setTallyDefaultValue(_ value: Int, for keyID: Int) {
+        guard validKeyIDs.contains(keyID) else {
+            return
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].tally.defaultValue = value
+        configurations[keyID, default: .tallyDefault].tally.value = value
+    }
+
+    mutating func assign(_ function: DeckKeyFunction, to keyID: Int) {
+        guard validKeyIDs.contains(keyID) else {
+            return
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].function = function
+    }
+
+    func configuration(for keyID: Int) -> DeckKeyConfiguration? {
+        configurations[keyID]
+    }
+
+    func tallyValue(for keyID: Int) -> Int {
+        configurations[keyID, default: .tallyDefault].tally.value
+    }
+
+    func tallyDefaultValue(for keyID: Int) -> Int {
+        configurations[keyID, default: .tallyDefault].tally.defaultValue
+    }
+
+    func isPressed(keyID: Int) -> Bool {
+        pressedKeyIDs.contains(keyID)
     }
 
     func display(for key: DeckGridLayout.Key) -> DeckKeyDisplay {
         DeckKeyDisplay(
             key: key,
-            tapCount: tapCount(for: key.id),
-            isSelected: selectedKeyID == key.id
+            configuration: configurations[key.id, default: .tallyDefault],
+            isSelected: selectedKeyID == key.id,
+            isPressed: isPressed(keyID: key.id)
         )
     }
 

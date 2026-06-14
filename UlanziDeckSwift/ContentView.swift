@@ -4,18 +4,20 @@ struct ContentView: View {
     let connectedDevice: H200DeviceIdentity?
     let syncSummary: H200DeckSyncSummary?
     let interactionState: DeckGridInteractionState
-    let onKeyPress: (Int) -> Void
+    let onKeyPressBegan: (Int) -> Void
+    let onKeyPressEnded: (Int) -> Void
+    let onFunctionSelection: (DeckKeyFunction) -> Void
+    let onTallyDefaultValueChange: (Int) -> Void
 
     private let layout = DeckGridLayout.h200Prototype
 
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 0) {
             header
-            deckSurface
-            statusBar
+            Divider()
+            workbench
         }
-        .padding(32)
-        .frame(minWidth: 620, minHeight: 520)
+        .frame(minWidth: 940, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -25,22 +27,43 @@ struct ContentView: View {
                 Text("Ulanzi Deck H200")
                     .font(.title.bold())
 
-                Text("14 个按键，本地交互原型")
+                Text(layout.name)
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 4) {
-                Text(layout.name)
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(.secondary)
-
-                Text(connectionLabel)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(connectedDevice == nil ? Color.secondary : Color.green)
-            }
+            Text(connectionLabel)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(connectedDevice == nil ? Color.secondary : Color.green)
         }
+        .padding(.horizontal, 28)
+        .padding(.vertical, 18)
+    }
+
+    private var workbench: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                deckPreviewArea
+                Divider()
+                parameterPanel
+            }
+
+            Divider()
+
+            functionSidebar
+                .frame(width: 270)
+        }
+    }
+
+    private var deckPreviewArea: some View {
+        VStack(spacing: 18) {
+            Spacer(minLength: 8)
+            deckSurface
+            pageSelector
+            Spacer(minLength: 8)
+        }
+        .padding(28)
     }
 
     private var deckSurface: some View {
@@ -49,12 +72,14 @@ struct ContentView: View {
                 HStack(spacing: 16) {
                     ForEach(row) { key in
                         DeckKeyButton(
-                            display: interactionState.display(for: key)
-                        ) {
-                            withAnimation(.snappy(duration: 0.18)) {
-                                onKeyPress(key.id)
+                            display: interactionState.display(for: key),
+                            onPressBegan: {
+                                onKeyPressBegan(key.id)
+                            },
+                            onPressEnded: {
+                                onKeyPressEnded(key.id)
                             }
-                        }
+                        )
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -67,7 +92,7 @@ struct ContentView: View {
                 .fill(.linearGradient(
                     colors: [
                         Color(nsColor: .controlBackgroundColor),
-                        Color(nsColor: .underPageBackgroundColor)
+                        Color(nsColor: .underPageBackgroundColor),
                     ],
                     startPoint: .topLeading,
                     endPoint: .bottomTrailing
@@ -80,32 +105,144 @@ struct ContentView: View {
         .shadow(color: .black.opacity(0.14), radius: 18, y: 10)
     }
 
-    private var statusBar: some View {
-        HStack {
-            if let selectedKeyID = interactionState.selectedKeyID {
-                Text("按键 \(selectedKeyID) 已按下")
+    private var pageSelector: some View {
+        HStack(spacing: 0) {
+            Text("1")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 34, height: 22)
+                .background(Color.accentColor, in: Capsule())
+
+            Text("2")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 22)
+
+            Image(systemName: "plus")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 34, height: 22)
+        }
+        .padding(2)
+        .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+    }
+
+    private var functionSidebar: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("按键功能")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("基础")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                ForEach(DeckKeyFunction.allCases, id: \.self) { function in
+                    FunctionRow(
+                        function: function,
+                        isSelected: selectedConfiguration?.function == function
+                    ) {
+                        onFunctionSelection(function)
+                    }
+                }
+            }
+
+            Spacer()
+        }
+        .padding(18)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var parameterPanel: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("功能参数")
                     .font(.headline)
 
                 Spacer()
 
-                Text("点击次数：\(interactionState.tapCount(for: selectedKeyID))")
-                    .font(.callout.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                if let selectedKeyID = interactionState.selectedKeyID {
+                    Text("按键 \(selectedKeyID)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Divider()
+
+            if let selectedConfiguration {
+                HStack(spacing: 28) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("功能")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        Label(selectedConfiguration.function.title, systemImage: selectedConfiguration.function.systemImageName)
+                            .font(.callout.weight(.medium))
+                    }
+                    .frame(width: 150, alignment: .leading)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("当前值")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        Text("\(selectedConfiguration.tally.value)")
+                            .font(.title2.monospacedDigit().weight(.semibold))
+                    }
+                    .frame(width: 110, alignment: .leading)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("默认数值")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 10) {
+                            TextField("默认数值", value: selectedTallyDefaultValueBinding, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 96)
+
+                            Stepper("默认数值", value: selectedTallyDefaultValueBinding, in: -999...999)
+                                .labelsHidden()
+                        }
+                    }
+
+                    Spacer()
+                }
             } else {
-                Text("按下任意格子以测试响应。")
-                    .font(.headline)
+                Text("选择一个按键")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
-
-                Spacer()
             }
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, 28)
+        .padding(.vertical, 18)
+        .frame(height: 174, alignment: .top)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
 private extension ContentView {
+    var selectedConfiguration: DeckKeyConfiguration? {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return nil
+        }
+
+        return interactionState.configuration(for: selectedKeyID)
+    }
+
+    var selectedTallyDefaultValueBinding: Binding<Int> {
+        Binding(
+            get: {
+                selectedConfiguration?.tally.defaultValue ?? 0
+            },
+            set: { value in
+                onTallyDefaultValueChange(value)
+            }
+        )
+    }
+
     var connectionLabel: String {
         guard let connectedDevice else {
             return "正在检测 H200"
@@ -131,38 +268,99 @@ private extension ContentView {
     }
 }
 
-private struct DeckKeyButton: View {
-    let display: DeckKeyDisplay
+private struct FunctionRow: View {
+    let function: DeckKeyFunction
+    let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
-                Text(display.title)
-                    .font(.system(size: 34, weight: .bold, design: .rounded))
-                    .monospacedDigit()
+            HStack(spacing: 10) {
+                Image(systemName: function.systemImageName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .frame(width: 20)
 
-                Text(display.subtitle)
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(display.isSelected ? .white.opacity(0.82) : .secondary)
+                Text(function.title)
+                    .font(.callout.weight(.medium))
+
+                Spacer()
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                }
             }
-            .frame(width: buttonWidth, height: 82)
-            .foregroundStyle(display.isSelected ? .white : .primary)
-            .background {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(display.isSelected ? Color.accentColor : Color(nsColor: .textBackgroundColor))
-            }
+            .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(display.isSelected ? Color.white.opacity(0.35) : Color(nsColor: .separatorColor), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(isSelected ? Color.accentColor.opacity(0.5) : Color(nsColor: .separatorColor), lineWidth: 1)
             }
-            .scaleEffect(display.isSelected ? 1.04 : 1)
-            .shadow(color: .black.opacity(display.isSelected ? 0.24 : 0.16), radius: display.isSelected ? 12 : 7, y: display.isSelected ? 7 : 4)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(function.title)
+    }
+}
+
+private struct DeckKeyButton: View {
+    let display: DeckKeyDisplay
+    let onPressBegan: () -> Void
+    let onPressEnded: () -> Void
+
+    @State private var isPointerDown = false
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text(display.title)
+                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .monospacedDigit()
+
+            Text(display.subtitle)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(active ? .white.opacity(0.82) : .secondary)
+        }
+        .frame(width: buttonWidth, height: 82)
+        .foregroundStyle(active ? .white : .primary)
+        .background {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(active ? Color.accentColor : Color(nsColor: .textBackgroundColor))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(active ? Color.white.opacity(0.35) : Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+        .scaleEffect(display.isPressed ? 0.98 : (display.isSelected ? 1.04 : 1))
+        .shadow(color: .black.opacity(active ? 0.24 : 0.16), radius: active ? 12 : 7, y: active ? 7 : 4)
+        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in
+                    guard !isPointerDown else {
+                        return
+                    }
+
+                    isPointerDown = true
+                    onPressBegan()
+                }
+                .onEnded { _ in
+                    guard isPointerDown else {
+                        return
+                    }
+
+                    isPointerDown = false
+                    onPressEnded()
+                }
+        )
         .accessibilityLabel("设备按键 \(display.id)")
-        .accessibilityValue(display.subtitle)
+        .accessibilityValue("\(display.title)，\(display.subtitle)")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var active: Bool {
+        display.isSelected || display.isPressed
     }
 
     private var buttonWidth: CGFloat {
@@ -171,16 +369,24 @@ private struct DeckKeyButton: View {
 }
 
 #Preview {
-    ContentView(connectedDevice: H200DeviceIdentity(
-        vendorID: H200DeviceTarget.vendorID,
-        productID: H200DeviceTarget.productID,
-        locationID: 0x01124300,
-        primaryUsagePage: H200DeviceTarget.primaryUsagePage,
-        primaryUsage: H200DeviceTarget.primaryUsage,
-        maxInputReportSize: H200DeviceTarget.reportSize,
-        maxOutputReportSize: H200DeviceTarget.reportSize,
-        serialNumber: "preview",
-        manufacturer: "rockchip",
-        product: ""
-    ), syncSummary: H200DeckSyncSummary(payloadByteCount: 4096, packetCount: 4, displayCount: 14), interactionState: DeckGridInteractionState(layout: .h200Prototype)) { _ in }
+    ContentView(
+        connectedDevice: H200DeviceIdentity(
+            vendorID: H200DeviceTarget.vendorID,
+            productID: H200DeviceTarget.productID,
+            locationID: 0x01124300,
+            primaryUsagePage: H200DeviceTarget.primaryUsagePage,
+            primaryUsage: H200DeviceTarget.primaryUsage,
+            maxInputReportSize: H200DeviceTarget.reportSize,
+            maxOutputReportSize: H200DeviceTarget.reportSize,
+            serialNumber: "preview",
+            manufacturer: "rockchip",
+            product: ""
+        ),
+        syncSummary: H200DeckSyncSummary(payloadByteCount: 4096, packetCount: 4, displayCount: 14),
+        interactionState: DeckGridInteractionState(layout: .h200Prototype),
+        onKeyPressBegan: { _ in },
+        onKeyPressEnded: { _ in },
+        onFunctionSelection: { _ in },
+        onTallyDefaultValueChange: { _ in }
+    )
 }

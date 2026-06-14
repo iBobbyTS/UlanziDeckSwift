@@ -162,7 +162,7 @@ nonisolated enum H200InputReportParser {
 
 nonisolated enum H200DeckInputMapper {
     static func keyID(for event: H200InputEvent, layout: DeckGridLayout) -> Int? {
-        guard event.type == .button, event.action == .press else {
+        guard event.type == .button else {
             return nil
         }
 
