@@ -3,10 +3,10 @@ import SwiftUI
 struct ContentView: View {
     let connectedDevice: H200DeviceIdentity?
     let syncSummary: H200DeckSyncSummary?
+    let interactionState: DeckGridInteractionState
+    let onKeyPress: (Int) -> Void
 
     private let layout = DeckGridLayout.h200Prototype
-
-    @State private var interactionState = DeckGridInteractionState(layout: .h200Prototype)
 
     var body: some View {
         VStack(spacing: 24) {
@@ -52,7 +52,7 @@ struct ContentView: View {
                             display: interactionState.display(for: key)
                         ) {
                             withAnimation(.snappy(duration: 0.18)) {
-                                interactionState.press(keyID: key.id)
+                                onKeyPress(key.id)
                             }
                         }
                     }
@@ -61,6 +61,7 @@ struct ContentView: View {
             }
         }
         .padding(28)
+        .animation(.snappy(duration: 0.18), value: interactionState)
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.linearGradient(
@@ -181,5 +182,5 @@ private struct DeckKeyButton: View {
         serialNumber: "preview",
         manufacturer: "rockchip",
         product: ""
-    ), syncSummary: H200DeckSyncSummary(payloadByteCount: 4096, packetCount: 4, displayCount: 14))
+    ), syncSummary: H200DeckSyncSummary(payloadByteCount: 4096, packetCount: 4, displayCount: 14), interactionState: DeckGridInteractionState(layout: .h200Prototype)) { _ in }
 }

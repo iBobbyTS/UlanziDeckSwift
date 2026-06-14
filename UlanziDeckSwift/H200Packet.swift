@@ -4,6 +4,7 @@ nonisolated enum H200Command {
     static let outSetButtons: UInt16 = 0x0001
     static let outSetSmallWindowData: UInt16 = 0x0006
     static let outPartiallyUpdateButtons: UInt16 = 0x000d
+    static let inButton: UInt16 = 0x0101
 }
 
 nonisolated enum H200PacketBuilder {
@@ -90,6 +91,82 @@ nonisolated enum H200SmallWindowDataPacketBuilder {
             command: H200Command.outSetSmallWindowData,
             payload: backgroundModePayload
         )
+    }
+}
+
+nonisolated struct H200InputEvent: Equatable, Sendable {
+    let state: UInt8
+    let index: UInt8
+    let type: H200InputEventType
+    let action: H200InputAction
+}
+
+nonisolated enum H200InputEventType: Equatable, Sendable {
+    case button
+    case encoder
+}
+
+nonisolated enum H200InputAction: Equatable, Sendable {
+    case press
+    case release
+    case left
+    case right
+}
+
+nonisolated enum H200InputReportParser {
+    static func parse(_ report: Data) -> H200InputEvent? {
+        guard report.count >= H200PacketBuilder.headerSize else {
+            return nil
+        }
+        guard report[0] == 0x7c, report[1] == 0x7c else {
+            return nil
+        }
+
+        let command = UInt16(report[2]) << 8 | UInt16(report[3])
+        guard command == H200Command.inButton else {
+            return nil
+        }
+
+        let payloadLength = Int(report[4])
+            | (Int(report[5]) << 8)
+            | (Int(report[6]) << 16)
+            | (Int(report[7]) << 24)
+        let payloadStart = H200PacketBuilder.headerSize
+        let payloadEnd = payloadStart + payloadLength
+        guard payloadLength >= 4, payloadEnd <= report.count else {
+            return nil
+        }
+
+        let payload = report[payloadStart..<payloadEnd]
+        return H200InputEvent(
+            state: payload[payload.startIndex],
+            index: payload[payload.startIndex + 1],
+            type: payload[payload.startIndex + 2] == 0x02 ? .encoder : .button,
+            action: action(from: payload[payload.startIndex + 3])
+        )
+    }
+
+    private static func action(from byte: UInt8) -> H200InputAction {
+        switch byte {
+        case 0x01:
+            return .press
+        case 0x02:
+            return .left
+        case 0x03:
+            return .right
+        default:
+            return .release
+        }
+    }
+}
+
+nonisolated enum H200DeckInputMapper {
+    static func keyID(for event: H200InputEvent, layout: DeckGridLayout) -> Int? {
+        guard event.type == .button, event.action == .press else {
+            return nil
+        }
+
+        return layout.keyID(forSequentialInputIndex: Int(event.index))
     }
 }
 

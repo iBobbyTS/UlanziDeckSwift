@@ -10,6 +10,9 @@ struct UlanziDeckSwiftTests {
         #expect(layout.rows.map(\.count) == [5, 5, 4])
         #expect(layout.columnCount == 5)
         #expect(layout.keys.last?.columnSpan == 2)
+        #expect(layout.keyID(forSequentialInputIndex: 0) == 1)
+        #expect(layout.keyID(forSequentialInputIndex: 13) == 14)
+        #expect(layout.keyID(forSequentialInputIndex: 14) == nil)
     }
 
     @Test func pressingAKeySelectsItAndTracksTapCount() {
@@ -147,6 +150,42 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func mouseAndPhysicalButtonPressShareInteractionState() async throws {
+        let connectedIdentity = Self.protocolInterfaceIdentity()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
+            syncer: syncer
+        )
+
+        model.checkOnLaunch()
+        model.pressKey(keyID: 7)
+        syncer.emitInput(H200InputEvent(state: 1, index: 6, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(model.interactionState.selectedKeyID == 7)
+        #expect(model.interactionState.tapCount(for: 7) == 2)
+    }
+
+    @MainActor
+    @Test func physicalReleaseAndEncoderEventsDoNotTriggerGridPresses() async throws {
+        let connectedIdentity = Self.protocolInterfaceIdentity()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
+            syncer: syncer
+        )
+
+        model.checkOnLaunch()
+        syncer.emitInput(H200InputEvent(state: 1, index: 6, type: .button, action: .release))
+        syncer.emitInput(H200InputEvent(state: 1, index: 17, type: .encoder, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(model.interactionState.selectedKeyID == nil)
+        #expect(model.interactionState.tapCounts.values.allSatisfy { $0 == 0 })
+    }
+
+    @MainActor
     @Test func syncFailureShowsPackageNotSentAlert() {
         let code = Self.exclusiveAccessReturnCode()
         let syncer = FakeH200DeckSyncer(results: [.failure(.communicationPortOccupied(code))])
@@ -229,6 +268,27 @@ struct UlanziDeckSwiftTests {
         #expect(String(data: smallWindowPayload, encoding: .utf8) == "2|0|0|00:00:00|0|24H|")
     }
 
+    @Test func inputReportParserRecognizesButtonPressReports() {
+        let report = Self.inputReport(state: 0x01, index: 13, type: 0x01, action: 0x01)
+
+        let event = H200InputReportParser.parse(report)
+
+        #expect(event == H200InputEvent(state: 0x01, index: 13, type: .button, action: .press))
+        #expect(H200DeckInputMapper.keyID(for: event!, layout: .h200Prototype) == 14)
+    }
+
+    @Test func inputReportParserIgnoresUnknownReportsAndMapsRelease() {
+        var wrongCommand = Self.inputReport(state: 0x01, index: 0, type: 0x01, action: 0x01)
+        wrongCommand[3] = 0x02
+        let release = Self.inputReport(state: 0x00, index: 0, type: 0x01, action: 0x00)
+
+        let releaseEvent = H200InputReportParser.parse(release)
+
+        #expect(H200InputReportParser.parse(wrongCommand) == nil)
+        #expect(releaseEvent == H200InputEvent(state: 0x00, index: 0, type: .button, action: .release))
+        #expect(H200DeckInputMapper.keyID(for: releaseEvent!, layout: .h200Prototype) == nil)
+    }
+
     private static func protocolInterfaceIdentity() -> H200DeviceIdentity {
         H200DeviceIdentity(
             vendorID: H200DeviceTarget.vendorID,
@@ -254,11 +314,26 @@ struct UlanziDeckSwiftTests {
             | (Int(packet[6]) << 16)
             | (Int(packet[7]) << 24)
     }
+
+    private static func inputReport(state: UInt8, index: UInt8, type: UInt8, action: UInt8) -> Data {
+        var report = Data()
+        report.append(0x7c)
+        report.append(0x7c)
+        report.appendUInt16BE(H200Command.inButton)
+        report.appendUInt32LE(4)
+        report.append(state)
+        report.append(index)
+        report.append(type)
+        report.append(action)
+        report.append(Data(repeating: 0, count: H200DeviceTarget.reportSize - report.count))
+        return report
+    }
 }
 
 private final class FakeH200DeckSyncer: H200DeckSyncing {
     private var results: [H200DeckSyncResult]
     private(set) var sentDisplays: [[DeckKeyDisplay]] = []
+    private var inputHandler: H200InputHandler?
 
     init(results: [H200DeckSyncResult] = []) {
         self.results = results
@@ -276,6 +351,14 @@ private final class FakeH200DeckSyncer: H200DeckSyncing {
         }
 
         return results.removeFirst()
+    }
+
+    func setInputHandler(_ handler: H200InputHandler?) {
+        inputHandler = handler
+    }
+
+    func emitInput(_ event: H200InputEvent) {
+        inputHandler?(event)
     }
 }
 

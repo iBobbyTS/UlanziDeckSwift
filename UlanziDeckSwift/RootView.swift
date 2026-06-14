@@ -8,7 +8,13 @@ struct RootView: View {
     }
 
     var body: some View {
-        ContentView(connectedDevice: connectionModel.connectedDevice, syncSummary: connectionModel.syncSummary)
+        ContentView(
+            connectedDevice: connectionModel.connectedDevice,
+            syncSummary: connectionModel.syncSummary,
+            interactionState: connectionModel.interactionState
+        ) { keyID in
+            connectionModel.pressKey(keyID: keyID)
+        }
             .task {
                 connectionModel.checkOnLaunch()
             }

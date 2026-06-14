@@ -39,6 +39,15 @@ nonisolated struct DeckGridLayout: Equatable {
                 }
             }
     }
+
+    func keyID(forSequentialInputIndex index: Int) -> Int? {
+        let orderedKeys = rows.flatMap { $0 }
+        guard orderedKeys.indices.contains(index) else {
+            return nil
+        }
+
+        return orderedKeys[index].id
+    }
 }
 
 nonisolated struct DeckKeyDisplay: Equatable, Identifiable {

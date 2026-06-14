@@ -6,17 +6,25 @@ import Foundation
 final class H200ConnectionModel: ObservableObject {
     @Published private(set) var status: H200ConnectionStatus = .checking
     @Published private(set) var syncSummary: H200DeckSyncSummary?
+    @Published private(set) var interactionState = DeckGridInteractionState(layout: .h200Prototype)
     @Published var alert: H200ConnectionAlert?
 
+    private let layout = DeckGridLayout.h200Prototype
     private let discovery: H200Discovering
     private let syncer: H200DeckSyncing
 
     init(discovery: H200Discovering = H200HIDDiscovery(), syncer: H200DeckSyncing = H200HIDDeckSyncer()) {
         self.discovery = discovery
         self.syncer = syncer
+        self.syncer.setInputHandler { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleInputEvent(event)
+            }
+        }
     }
 
     deinit {
+        syncer.setInputHandler(nil)
         syncer.close()
     }
 
@@ -47,6 +55,10 @@ final class H200ConnectionModel: ObservableObject {
         NSApplication.shared.terminate(nil)
     }
 
+    func pressKey(keyID: Int) {
+        interactionState.press(keyID: keyID)
+    }
+
     private func refresh() {
         syncer.close()
         status = .checking
@@ -61,13 +73,21 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        let initialDisplays = DeckGridInteractionState(layout: .h200Prototype).displays(for: .h200Prototype)
+        let initialDisplays = interactionState.displays(for: layout)
         switch syncer.sendStartupPackage(displays: initialDisplays) {
         case let .success(summary):
             syncSummary = summary
         case let .failure(error):
             alert = H200ConnectionAlert(syncFailure: error)
         }
+    }
+
+    private func handleInputEvent(_ event: H200InputEvent) {
+        guard let keyID = H200DeckInputMapper.keyID(for: event, layout: layout) else {
+            return
+        }
+
+        pressKey(keyID: keyID)
     }
 }
 

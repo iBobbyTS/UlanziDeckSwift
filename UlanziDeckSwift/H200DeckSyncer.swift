@@ -2,6 +2,8 @@ import Foundation
 import Dispatch
 import IOKit.hid
 
+typealias H200InputHandler = @Sendable (H200InputEvent) -> Void
+
 nonisolated struct H200DeckSyncSummary: Equatable {
     let payloadByteCount: Int
     let packetCount: Int
@@ -54,16 +56,19 @@ nonisolated enum H200DeckSyncFailure: Error, Equatable {
 
 nonisolated protocol H200DeckSyncing {
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult
+    func setInputHandler(_ handler: H200InputHandler?)
     func close()
 }
 
 extension H200DeckSyncing {
+    nonisolated func setInputHandler(_ handler: H200InputHandler?) {}
     nonisolated func close() {}
 }
 
 nonisolated final class H200HIDDeckSyncer: H200DeckSyncing {
     private let packageBuilder: H200ButtonPackageBuilder
     private var connection: H200HIDConnection?
+    private var inputHandler: H200InputHandler?
 
     nonisolated init(packageBuilder: H200ButtonPackageBuilder = H200ButtonPackageBuilder()) {
         self.packageBuilder = packageBuilder
@@ -88,6 +93,11 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing {
     func close() {
         connection?.close()
         connection = nil
+    }
+
+    func setInputHandler(_ handler: H200InputHandler?) {
+        inputHandler = handler
+        connection?.setInputHandler(handler)
     }
 
     private func sendPackets(_ packets: [Data], package: H200ButtonPackage) -> H200DeckSyncResult {
@@ -167,6 +177,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing {
         }
 
         let connection = H200HIDConnection(manager: manager, device: device.device)
+        connection.setInputHandler(inputHandler)
         self.connection = connection
         return .success(connection)
     }
@@ -180,16 +191,21 @@ nonisolated private final class H200HIDConnection: @unchecked Sendable {
     private let manager: IOHIDManager
     private let device: IOHIDDevice
     private let queue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200HIDConnection")
+    private let inputReportBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: H200DeviceTarget.reportSize)
     private var keepAliveTimer: DispatchSourceTimer?
+    private var inputHandler: H200InputHandler?
     private var isOpen = true
 
     init(manager: IOHIDManager, device: IOHIDDevice) {
         self.manager = manager
         self.device = device
+        inputReportBuffer.initialize(repeating: 0, count: H200DeviceTarget.reportSize)
+        startInputReports()
     }
 
     deinit {
         close()
+        inputReportBuffer.deallocate()
     }
 
     func close() {
@@ -199,9 +215,16 @@ nonisolated private final class H200HIDConnection: @unchecked Sendable {
             }
 
             stopKeepAliveOnQueue()
+            stopInputReportsOnQueue()
             IOHIDDeviceClose(device, IOOptionBits(kIOHIDOptionsTypeNone))
             IOHIDManagerClose(manager, IOOptionBits(kIOHIDOptionsTypeNone))
             isOpen = false
+        }
+    }
+
+    func setInputHandler(_ handler: H200InputHandler?) {
+        queue.async { [weak self] in
+            self?.inputHandler = handler
         }
     }
 
@@ -240,6 +263,46 @@ nonisolated private final class H200HIDConnection: @unchecked Sendable {
         keepAliveTimer?.setEventHandler {}
         keepAliveTimer?.cancel()
         keepAliveTimer = nil
+    }
+
+    private func startInputReports() {
+        IOHIDDeviceRegisterInputReportCallback(
+            device,
+            inputReportBuffer,
+            CFIndex(H200DeviceTarget.reportSize),
+            Self.inputReportCallback,
+            Unmanaged.passUnretained(self).toOpaque()
+        )
+        IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+    }
+
+    private func stopInputReportsOnQueue() {
+        IOHIDDeviceUnscheduleFromRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+        IOHIDDeviceRegisterInputReportCallback(device, inputReportBuffer, 0, nil, nil)
+    }
+
+    private static let inputReportCallback: IOHIDReportCallback = { context, result, _, _, _, report, reportLength in
+        guard let context else {
+            return
+        }
+
+        let connection = Unmanaged<H200HIDConnection>.fromOpaque(context).takeUnretainedValue()
+        connection.handleInputReport(result: result, report: report, reportLength: reportLength)
+    }
+
+    private func handleInputReport(result: IOReturn, report: UnsafeMutablePointer<UInt8>?, reportLength: CFIndex) {
+        guard result == kIOReturnSuccess, let report, reportLength > 0 else {
+            return
+        }
+
+        let reportData = Data(bytes: report, count: reportLength)
+        queue.async { [weak self] in
+            guard let self, self.isOpen, let event = H200InputReportParser.parse(reportData) else {
+                return
+            }
+
+            self.inputHandler?(event)
+        }
     }
 
     private func writePacketsOnQueue(_ packets: [Data]) -> H200DeckSyncFailure? {
