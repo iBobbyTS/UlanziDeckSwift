@@ -5,6 +5,7 @@
 ## 文档索引
 
 - [research.md](research.md)：Ulanzi Deck 产品线、官方软件、社区逆向项目和 D200/H200 HID 协议调研。
+- [h200-startup-sync.md](h200-startup-sync.md)：启动成功后向 H200 同步 14 格数字包的实现约定。
 
 ## 更新规则
 

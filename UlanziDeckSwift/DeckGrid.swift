@@ -1,10 +1,11 @@
 import Foundation
 
-struct DeckGridLayout: Equatable {
-    struct Key: Identifiable, Equatable {
+nonisolated struct DeckGridLayout: Equatable {
+    nonisolated struct Key: Identifiable, Equatable {
         let id: Int
         let row: Int
         let column: Int
+        let columnSpan: Int
     }
 
     let name: String
@@ -19,7 +20,8 @@ struct DeckGridLayout: Equatable {
             return Key(
                 id: number,
                 row: zeroBasedIndex / 5,
-                column: zeroBasedIndex % 5
+                column: zeroBasedIndex % 5,
+                columnSpan: number == 14 ? 2 : 1
             )
         }
     )
@@ -39,7 +41,35 @@ struct DeckGridLayout: Equatable {
     }
 }
 
-struct DeckGridInteractionState: Equatable {
+nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
+    let id: Int
+    let row: Int
+    let column: Int
+    let columnSpan: Int
+    let title: String
+    let subtitle: String
+    let isSelected: Bool
+
+    init(key: DeckGridLayout.Key, tapCount: Int, isSelected: Bool) {
+        id = key.id
+        row = key.row
+        column = key.column
+        columnSpan = key.columnSpan
+        title = "\(key.id)"
+        subtitle = tapCount == 0 ? "就绪" : "\(tapCount) 次"
+        self.isSelected = isSelected
+    }
+
+    var isWide: Bool {
+        columnSpan > 1
+    }
+
+    var devicePixelSize: H200DeviceTarget.PixelSize {
+        isWide ? H200DeviceTarget.smallWindowIconSize : H200DeviceTarget.buttonIconSize
+    }
+}
+
+nonisolated struct DeckGridInteractionState: Equatable {
     private(set) var selectedKeyID: Int?
     private(set) var tapCounts: [Int: Int]
     private let validKeyIDs: Set<Int>
@@ -61,5 +91,17 @@ struct DeckGridInteractionState: Equatable {
 
     func tapCount(for keyID: Int) -> Int {
         tapCounts[keyID, default: 0]
+    }
+
+    func display(for key: DeckGridLayout.Key) -> DeckKeyDisplay {
+        DeckKeyDisplay(
+            key: key,
+            tapCount: tapCount(for: key.id),
+            isSelected: selectedKeyID == key.id
+        )
+    }
+
+    func displays(for layout: DeckGridLayout) -> [DeckKeyDisplay] {
+        layout.keys.map(display(for:))
     }
 }

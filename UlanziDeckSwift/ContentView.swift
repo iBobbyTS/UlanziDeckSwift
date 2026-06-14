@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     let connectedDevice: H200DeviceIdentity?
+    let syncSummary: H200DeckSyncSummary?
 
     private let layout = DeckGridLayout.h200Prototype
 
@@ -48,9 +49,7 @@ struct ContentView: View {
                 HStack(spacing: 16) {
                     ForEach(row) { key in
                         DeckKeyButton(
-                            number: key.id,
-                            tapCount: interactionState.tapCount(for: key.id),
-                            isSelected: interactionState.selectedKeyID == key.id
+                            display: interactionState.display(for: key)
                         ) {
                             withAnimation(.snappy(duration: 0.18)) {
                                 interactionState.press(keyID: key.id)
@@ -112,47 +111,61 @@ private extension ContentView {
         }
 
         if connectedDevice.serialNumber.isEmpty {
-            return "H200 已连接"
+            return syncSummaryLabel ?? "H200 已连接"
+        }
+
+        if let syncSummaryLabel {
+            return "H200 \(connectedDevice.serialNumber)，\(syncSummaryLabel)"
         }
 
         return "H200 \(connectedDevice.serialNumber)"
     }
+
+    var syncSummaryLabel: String? {
+        guard let syncSummary else {
+            return nil
+        }
+
+        return "已同步 \(syncSummary.displayCount) 个格子"
+    }
 }
 
 private struct DeckKeyButton: View {
-    let number: Int
-    let tapCount: Int
-    let isSelected: Bool
+    let display: DeckKeyDisplay
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                Text("\(number)")
+                Text(display.title)
                     .font(.system(size: 34, weight: .bold, design: .rounded))
                     .monospacedDigit()
 
-                Text(tapCount == 0 ? "就绪" : "\(tapCount) 次")
+                Text(display.subtitle)
                     .font(.caption.weight(.semibold))
                     .monospacedDigit()
-                    .foregroundStyle(isSelected ? .white.opacity(0.82) : .secondary)
+                    .foregroundStyle(display.isSelected ? .white.opacity(0.82) : .secondary)
             }
-            .frame(width: 82, height: 82)
-            .foregroundStyle(isSelected ? .white : .primary)
+            .frame(width: buttonWidth, height: 82)
+            .foregroundStyle(display.isSelected ? .white : .primary)
             .background {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isSelected ? Color.accentColor : Color(nsColor: .textBackgroundColor))
+                    .fill(display.isSelected ? Color.accentColor : Color(nsColor: .textBackgroundColor))
             }
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(isSelected ? Color.white.opacity(0.35) : Color(nsColor: .separatorColor), lineWidth: 1)
+                    .strokeBorder(display.isSelected ? Color.white.opacity(0.35) : Color(nsColor: .separatorColor), lineWidth: 1)
             }
-            .scaleEffect(isSelected ? 1.04 : 1)
-            .shadow(color: .black.opacity(isSelected ? 0.24 : 0.16), radius: isSelected ? 12 : 7, y: isSelected ? 7 : 4)
+            .scaleEffect(display.isSelected ? 1.04 : 1)
+            .shadow(color: .black.opacity(display.isSelected ? 0.24 : 0.16), radius: display.isSelected ? 12 : 7, y: display.isSelected ? 7 : 4)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("设备按键 \(number)")
-        .accessibilityValue("点击次数 \(tapCount)")
+        .accessibilityLabel("设备按键 \(display.id)")
+        .accessibilityValue(display.subtitle)
+    }
+
+    private var buttonWidth: CGFloat {
+        82 * CGFloat(display.columnSpan) + 16 * CGFloat(display.columnSpan - 1)
     }
 }
 
@@ -168,5 +181,5 @@ private struct DeckKeyButton: View {
         serialNumber: "preview",
         manufacturer: "rockchip",
         product: ""
-    ))
+    ), syncSummary: H200DeckSyncSummary(payloadByteCount: 4096, packetCount: 4, displayCount: 14))
 }

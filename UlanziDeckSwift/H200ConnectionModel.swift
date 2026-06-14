@@ -5,12 +5,15 @@ import Foundation
 @MainActor
 final class H200ConnectionModel: ObservableObject {
     @Published private(set) var status: H200ConnectionStatus = .checking
+    @Published private(set) var syncSummary: H200DeckSyncSummary?
     @Published var alert: H200ConnectionAlert?
 
     private let discovery: H200Discovering
+    private let syncer: H200DeckSyncing
 
-    init(discovery: H200Discovering = H200HIDDiscovery()) {
+    init(discovery: H200Discovering = H200HIDDiscovery(), syncer: H200DeckSyncing = H200HIDDeckSyncer()) {
         self.discovery = discovery
+        self.syncer = syncer
     }
 
     var connectedDevice: H200DeviceIdentity? {
@@ -42,11 +45,24 @@ final class H200ConnectionModel: ObservableObject {
 
     private func refresh() {
         status = .checking
+        syncSummary = nil
         alert = nil
 
         let result = discovery.discoverH200()
         status = H200ConnectionStatus(result: result)
         alert = H200ConnectionAlert(result: result)
+
+        guard case .connected = result else {
+            return
+        }
+
+        let initialDisplays = DeckGridInteractionState(layout: .h200Prototype).displays(for: .h200Prototype)
+        switch syncer.sendStartupPackage(displays: initialDisplays) {
+        case let .success(summary):
+            syncSummary = summary
+        case let .failure(error):
+            alert = H200ConnectionAlert(syncFailure: error)
+        }
     }
 }
 
@@ -108,6 +124,11 @@ struct H200ConnectionAlert: Identifiable, Equatable {
             title = "无法扫描 HID 设备"
             message = "macOS HID 管理器初始化失败。返回码：\(code.name)。"
         }
+    }
+
+    init(syncFailure: H200DeckSyncFailure) {
+        title = syncFailure.alertTitle
+        message = syncFailure.alertMessage
     }
 }
 

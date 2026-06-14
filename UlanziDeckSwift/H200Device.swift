@@ -1,6 +1,6 @@
 import Foundation
 
-struct H200DeviceIdentity: Equatable {
+nonisolated struct H200DeviceIdentity: Equatable {
     let vendorID: Int
     let productID: Int
     let locationID: Int
@@ -22,15 +22,22 @@ struct H200DeviceIdentity: Equatable {
     }
 }
 
-enum H200DeviceTarget {
+nonisolated enum H200DeviceTarget {
+    struct PixelSize: Equatable {
+        let width: Int
+        let height: Int
+    }
+
     static let vendorID = 0x2207
     static let productID = 0x0019
     static let primaryUsagePage = 12
     static let primaryUsage = 1
     static let reportSize = 1024
+    static let buttonIconSize = PixelSize(width: 196, height: 196)
+    static let smallWindowIconSize = PixelSize(width: 458, height: 196)
 }
 
-struct HIDReturnCode: Equatable {
+nonisolated struct HIDReturnCode: Equatable {
     let rawValue: Int32
 
     private enum KnownCodes {
@@ -61,9 +68,13 @@ struct HIDReturnCode: Equatable {
     var indicatesOccupiedPort: Bool {
         rawValue == KnownCodes.busy || rawValue == KnownCodes.exclusiveAccess
     }
+
+    var indicatesPermissionDenied: Bool {
+        rawValue == KnownCodes.notPermitted || rawValue == KnownCodes.notPrivileged
+    }
 }
 
-enum H200DiscoveryResult: Equatable {
+nonisolated enum H200DiscoveryResult: Equatable {
     case connected(H200DeviceIdentity)
     case notConnected
     case communicationPortOccupied(HIDReturnCode)

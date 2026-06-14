@@ -3,12 +3,12 @@ import SwiftUI
 struct RootView: View {
     @StateObject private var connectionModel: H200ConnectionModel
 
-    init(discovery: H200Discovering = H200HIDDiscovery()) {
-        _connectionModel = StateObject(wrappedValue: H200ConnectionModel(discovery: discovery))
+    init(discovery: H200Discovering = H200HIDDiscovery(), syncer: H200DeckSyncing = H200HIDDeckSyncer()) {
+        _connectionModel = StateObject(wrappedValue: H200ConnectionModel(discovery: discovery, syncer: syncer))
     }
 
     var body: some View {
-        ContentView(connectedDevice: connectionModel.connectedDevice)
+        ContentView(connectedDevice: connectionModel.connectedDevice, syncSummary: connectionModel.syncSummary)
             .task {
                 connectionModel.checkOnLaunch()
             }
@@ -28,7 +28,7 @@ struct RootView: View {
 }
 
 #Preview {
-    RootView(discovery: PreviewH200Discovery())
+    RootView(discovery: PreviewH200Discovery(), syncer: PreviewH200DeckSyncer())
 }
 
 private struct PreviewH200Discovery: H200Discovering {
@@ -45,5 +45,11 @@ private struct PreviewH200Discovery: H200Discovering {
             manufacturer: "rockchip",
             product: ""
         ))
+    }
+}
+
+private struct PreviewH200DeckSyncer: H200DeckSyncing {
+    func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
+        .success(H200DeckSyncSummary(payloadByteCount: 4096, packetCount: 4, displayCount: displays.count))
     }
 }
