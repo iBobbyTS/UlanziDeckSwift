@@ -6,12 +6,14 @@ struct RootView: View {
     init(
         discovery: H200Discovering = H200HIDDiscovery(),
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
-        configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore()
+        configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
+        folderOpener: FinderFolderOpening? = nil
     ) {
         _connectionModel = StateObject(wrappedValue: H200ConnectionModel(
             discovery: discovery,
             syncer: syncer,
-            configurationStore: configurationStore
+            configurationStore: configurationStore,
+            folderOpener: folderOpener
         ))
     }
 
@@ -31,6 +33,9 @@ struct RootView: View {
             },
             onTallyDefaultValueChange: { value in
                 connectionModel.setSelectedTallyDefaultValue(value)
+            },
+            onFolderPathSelection: { path in
+                connectionModel.setSelectedFolderPath(path)
             }
         )
             .task {

@@ -9,6 +9,7 @@ struct ContentView: View {
     let onKeyFunctionDeletion: (Int) -> Void
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
+    let onFolderPathSelection: (String) -> Void
 
     private let layout = DeckGridLayout.h200Prototype
     private let previewMetrics = DeckPreviewGridMetrics.h200
@@ -249,6 +250,41 @@ struct ContentView: View {
 
                 Spacer()
             }
+
+        case .openFolder:
+            HStack(spacing: 28) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("功能")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
+                        .font(.callout.weight(.medium))
+                }
+                .frame(width: 150, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("文件夹")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text(configuration.openFolder.path ?? "未选择文件夹")
+                        .font(.callout)
+                        .foregroundStyle(configuration.openFolder.path == nil ? Color.secondary : Color.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                Button {
+                    chooseFolder()
+                } label: {
+                    Label("选择文件夹", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+            }
         }
     }
 }
@@ -271,6 +307,24 @@ private extension ContentView {
                 onTallyDefaultValueChange(value)
             }
         )
+    }
+
+    func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.title = "选择文件夹"
+        panel.prompt = "选择"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK,
+              let url = panel.url
+        else {
+            return
+        }
+
+        onFolderPathSelection(url.path)
     }
 
     var connectionLabel: String {
@@ -418,6 +472,7 @@ private struct DeckKeyRenderedImage: View, Equatable {
         onKeySelection: { _ in },
         onKeyFunctionDeletion: { _ in },
         onFunctionSelection: { _ in },
-        onTallyDefaultValueChange: { _ in }
+        onTallyDefaultValueChange: { _ in },
+        onFolderPathSelection: { _ in }
     )
 }

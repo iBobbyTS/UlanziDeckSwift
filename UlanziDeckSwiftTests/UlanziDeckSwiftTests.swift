@@ -109,6 +109,19 @@ struct UlanziDeckSwiftTests {
         #expect(state.tallyValue(for: 4) == 12)
     }
 
+    @Test func openFolderFunctionDisplaysSelectedFolderName() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.assign(.openFolder, to: 5)
+        state.setFolderPath("/Users/ibobby/Documents/Codex", for: 5)
+        let display = state.display(for: layout.keys[4])
+
+        #expect(display.title == "打开")
+        #expect(display.subtitle == "Codex")
+        #expect(state.folderPath(for: 5) == "/Users/ibobby/Documents/Codex")
+    }
+
     @Test func userDefaultsStoreRestoresSavedKeyConfiguration() throws {
         let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -122,6 +135,8 @@ struct UlanziDeckSwiftTests {
         state.setTallyDefaultValue(6, for: 3)
         state.triggerShortPress(keyID: 3)
         state.clearFunction(keyID: 8)
+        state.assign(.openFolder, to: 9)
+        state.setFolderPath("/Users/ibobby/Documents", for: 9)
 
         store.saveInteractionState(state, for: layout)
 
@@ -129,6 +144,8 @@ struct UlanziDeckSwiftTests {
         #expect(restored.tallyDefaultValue(for: 3) == 6)
         #expect(restored.tallyValue(for: 3) == 7)
         #expect(restored.configuration(for: 8)?.function == DeckKeyFunction.none)
+        #expect(restored.configuration(for: 9)?.function == DeckKeyFunction.openFolder)
+        #expect(restored.folderPath(for: 9) == "/Users/ibobby/Documents")
         #expect(restored.pressedKeyIDs.isEmpty)
         #expect(restored.selectedKeyID == 1)
     }
@@ -389,6 +406,30 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func selectingOpenFolderFunctionSyncsAndPersistsFolderPath() {
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            folderOpener: FakeFinderFolderOpener()
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openFolder)
+        model.setSelectedFolderPath("/Users/ibobby/Documents")
+
+        #expect(model.interactionState.configuration(for: 4)?.function == DeckKeyFunction.openFolder)
+        #expect(model.interactionState.folderPath(for: 4) == "/Users/ibobby/Documents")
+        #expect(syncer.sentDisplays.count == 3)
+        #expect(syncer.sentDisplays.last?[3].title == "打开")
+        #expect(syncer.sentDisplays.last?[3].subtitle == "Documents")
+        #expect(store.savedStates.last?.folderPath(for: 4) == "/Users/ibobby/Documents")
+    }
+
+    @MainActor
     @Test func physicalButtonShortPressIncrementsTallyWithoutChangingUISelection() async throws {
         let connectedIdentity = Self.protocolInterfaceIdentity()
         let syncer = FakeH200DeckSyncer()
@@ -411,6 +452,78 @@ struct UlanziDeckSwiftTests {
 
         #expect(model.interactionState.selectedKeyID == 3)
         #expect(model.interactionState.tallyValue(for: 7) == 2)
+    }
+
+    @MainActor
+    @Test func physicalButtonShortPressOpensConfiguredFolderWithoutSyncingDisplay() async throws {
+        let opener = FakeFinderFolderOpener()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            folderOpener: opener
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openFolder)
+        model.setSelectedFolderPath("/Users/ibobby/Documents")
+        let sentDisplayCount = syncer.sentDisplays.count
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(opener.openedPaths == ["/Users/ibobby/Documents"])
+        #expect(syncer.sentDisplays.count == sentDisplayCount)
+        #expect(model.interactionState.selectedKeyID == 4)
+    }
+
+    @MainActor
+    @Test func physicalButtonOpenFolderWithoutFolderDoesNothing() async throws {
+        let opener = FakeFinderFolderOpener()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            folderOpener: opener
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openFolder)
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(opener.openedPaths.isEmpty)
+    }
+
+    @MainActor
+    @Test func longPressOpenFolderIsNotSuppressedByTallyResetLogic() async throws {
+        let opener = FakeFinderFolderOpener()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            folderOpener: opener,
+            longPressDurationNanoseconds: 10_000_000
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openFolder)
+        model.setSelectedFolderPath("/Users/ibobby/Documents")
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 30_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(opener.openedPaths == ["/Users/ibobby/Documents"])
     }
 
     @MainActor
@@ -699,5 +812,15 @@ private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
 
     func saveInteractionState(_ state: DeckGridInteractionState, for layout: DeckGridLayout) {
         savedStates.append(state)
+    }
+}
+
+@MainActor
+private final class FakeFinderFolderOpener: FinderFolderOpening {
+    private(set) var openedPaths: [String] = []
+
+    func openFolder(at path: String) -> Bool {
+        openedPaths.append(path)
+        return true
     }
 }

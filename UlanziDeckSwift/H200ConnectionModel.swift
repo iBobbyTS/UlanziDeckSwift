@@ -13,6 +13,7 @@ final class H200ConnectionModel: ObservableObject {
     private let discovery: H200Discovering
     private let syncer: H200DeckSyncing
     private let configurationStore: DeckConfigurationStoring
+    private let folderOpener: FinderFolderOpening
     private let longPressDurationNanoseconds: UInt64
     private var longPressTasks: [Int: Task<Void, Never>] = [:]
     private var longPressResetKeyIDs: Set<Int> = []
@@ -21,11 +22,13 @@ final class H200ConnectionModel: ObservableObject {
         discovery: H200Discovering = H200HIDDiscovery(),
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
+        folderOpener: FinderFolderOpening? = nil,
         longPressDurationNanoseconds: UInt64 = 1_000_000_000
     ) {
         self.discovery = discovery
         self.syncer = syncer
         self.configurationStore = configurationStore
+        self.folderOpener = folderOpener ?? FinderFolderOpener()
         self.longPressDurationNanoseconds = longPressDurationNanoseconds
         interactionState = configurationStore.loadInteractionState(for: layout) ?? DeckGridInteractionState(layout: layout)
         self.syncer.setInputHandler { [weak self] event in
@@ -115,9 +118,16 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        if interactionState.triggerShortPress(keyID: keyID) {
-            persistCurrentConfiguration()
-            syncCurrentDisplays()
+        switch interactionState.configuration(for: keyID)?.function {
+        case .some(.tally):
+            if interactionState.triggerShortPress(keyID: keyID) {
+                persistCurrentConfiguration()
+                syncCurrentDisplays()
+            }
+        case .some(.openFolder):
+            openFolder(for: keyID)
+        case .some(.none), nil:
+            return
         }
     }
 
@@ -143,6 +153,17 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         if interactionState.setTallyDefaultValue(value, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            syncCurrentDisplays()
+        }
+    }
+
+    func setSelectedFolderPath(_ path: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        if interactionState.setFolderPath(path, for: selectedKeyID) {
             persistCurrentConfiguration()
             syncCurrentDisplays()
         }
@@ -192,11 +213,19 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        longPressResetKeyIDs.insert(keyID)
         if interactionState.resetTally(keyID: keyID) {
+            longPressResetKeyIDs.insert(keyID)
             persistCurrentConfiguration()
             syncCurrentDisplays()
         }
+    }
+
+    private func openFolder(for keyID: Int) {
+        guard let path = interactionState.folderPath(for: keyID), !path.isEmpty else {
+            return
+        }
+
+        _ = folderOpener.openFolder(at: path)
     }
 
     private func persistCurrentConfiguration() {

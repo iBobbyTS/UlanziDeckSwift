@@ -74,6 +74,9 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         case .tally:
             title = "\(configuration.tally.value)"
             subtitle = "默认 \(configuration.tally.defaultValue)"
+        case .openFolder:
+            title = "打开"
+            subtitle = configuration.openFolder.displayName
         }
         self.isSelected = isSelected
         self.isPressed = isPressed
@@ -133,8 +136,9 @@ nonisolated struct DeckPreviewGridMetrics: Equatable {
 nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case none
     case tally
+    case openFolder
 
-    static let assignableCases: [DeckKeyFunction] = [.tally]
+    static let assignableCases: [DeckKeyFunction] = [.tally, .openFolder]
 
     var title: String {
         switch self {
@@ -142,6 +146,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "无功能"
         case .tally:
             return "计数器"
+        case .openFolder:
+            return "打开文件夹"
         }
     }
 
@@ -151,6 +157,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "minus.circle"
         case .tally:
             return "number.square"
+        case .openFolder:
+            return "folder"
         }
     }
 }
@@ -165,19 +173,69 @@ nonisolated struct DeckKeyTallyConfiguration: Codable, Equatable {
     }
 }
 
+nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
+    var path: String?
+
+    init(path: String? = nil) {
+        self.path = path
+    }
+
+    var displayName: String {
+        guard let path, !path.isEmpty else {
+            return "选择文件夹"
+        }
+
+        let name = URL(fileURLWithPath: path, isDirectory: true).lastPathComponent
+        return name.isEmpty ? path : name
+    }
+}
+
 nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var function: DeckKeyFunction
     var tally: DeckKeyTallyConfiguration
+    var openFolder: DeckKeyOpenFolderConfiguration
 
     static let empty = DeckKeyConfiguration(
         function: .none,
-        tally: DeckKeyTallyConfiguration()
+        tally: DeckKeyTallyConfiguration(),
+        openFolder: DeckKeyOpenFolderConfiguration()
     )
 
     static let tallyDefault = DeckKeyConfiguration(
         function: .tally,
-        tally: DeckKeyTallyConfiguration()
+        tally: DeckKeyTallyConfiguration(),
+        openFolder: DeckKeyOpenFolderConfiguration()
     )
+
+    init(
+        function: DeckKeyFunction,
+        tally: DeckKeyTallyConfiguration = DeckKeyTallyConfiguration(),
+        openFolder: DeckKeyOpenFolderConfiguration = DeckKeyOpenFolderConfiguration()
+    ) {
+        self.function = function
+        self.tally = tally
+        self.openFolder = openFolder
+    }
+
+    enum CodingKeys: CodingKey {
+        case function
+        case tally
+        case openFolder
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        function = try container.decode(DeckKeyFunction.self, forKey: .function)
+        tally = try container.decodeIfPresent(DeckKeyTallyConfiguration.self, forKey: .tally) ?? DeckKeyTallyConfiguration()
+        openFolder = try container.decodeIfPresent(DeckKeyOpenFolderConfiguration.self, forKey: .openFolder) ?? DeckKeyOpenFolderConfiguration()
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(function, forKey: .function)
+        try container.encode(tally, forKey: .tally)
+        try container.encode(openFolder, forKey: .openFolder)
+    }
 }
 
 nonisolated struct DeckGridInteractionState: Equatable {
@@ -244,6 +302,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         return true
     }
 
+    func folderPath(for keyID: Int) -> String? {
+        configurations[keyID, default: .tallyDefault].openFolder.path
+    }
+
     @discardableResult
     mutating func resetTally(keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
@@ -268,6 +330,19 @@ nonisolated struct DeckGridInteractionState: Equatable {
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].tally.defaultValue = value
         configurations[keyID, default: .tallyDefault].tally.value = value
+        return true
+    }
+
+    @discardableResult
+    mutating func setFolderPath(_ path: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .openFolder
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].openFolder.path = path
         return true
     }
 
