@@ -56,17 +56,20 @@ nonisolated enum H200DeckSyncFailure: Error, Equatable {
 
 nonisolated protocol H200DeckSyncing {
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult
+    func setBrightness(percent: Int) -> H200DeckSyncFailure?
     func setInputHandler(_ handler: H200InputHandler?)
     func close()
 }
 
 extension H200DeckSyncing {
+    nonisolated func setBrightness(percent: Int) -> H200DeckSyncFailure? { nil }
     nonisolated func setInputHandler(_ handler: H200InputHandler?) {}
     nonisolated func close() {}
 }
 
 nonisolated final class H200HIDDeckSyncer: H200DeckSyncing {
     private let packageBuilder: H200ButtonPackageBuilder
+    private let operationQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200HIDDeckSyncer")
     private var connection: H200HIDConnection?
     private var inputHandler: H200InputHandler?
 
@@ -79,6 +82,31 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing {
     }
 
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
+        operationQueue.sync {
+            sendStartupPackageOnQueue(displays: displays)
+        }
+    }
+
+    func close() {
+        operationQueue.sync {
+            closeOnQueue()
+        }
+    }
+
+    func setInputHandler(_ handler: H200InputHandler?) {
+        operationQueue.async { [weak self] in
+            self?.inputHandler = handler
+            self?.connection?.setInputHandler(handler)
+        }
+    }
+
+    func setBrightness(percent: Int) -> H200DeckSyncFailure? {
+        operationQueue.sync {
+            setBrightnessOnQueue(percent: percent)
+        }
+    }
+
+    private func sendStartupPackageOnQueue(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
         let package: H200ButtonPackage
         do {
             package = try packageBuilder.buildPackage(displays: displays)
@@ -90,14 +118,27 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing {
         return sendPackets(packets, package: package)
     }
 
-    func close() {
+    private func closeOnQueue() {
         connection?.close()
         connection = nil
     }
 
-    func setInputHandler(_ handler: H200InputHandler?) {
-        inputHandler = handler
-        connection?.setInputHandler(handler)
+    private func setBrightnessOnQueue(percent: Int) -> H200DeckSyncFailure? {
+        let connection: H200HIDConnection
+        switch openConnectionIfNeeded() {
+        case let .success(openConnection):
+            connection = openConnection
+        case let .failure(error):
+            return error
+        }
+
+        if let error = connection.writePackets([H200BrightnessPacketBuilder.packet(percent: percent)]) {
+            closeOnQueue()
+            return error
+        }
+
+        connection.startKeepAlive()
+        return nil
     }
 
     private func sendPackets(_ packets: [Data], package: H200ButtonPackage) -> H200DeckSyncResult {
@@ -110,7 +151,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing {
         }
 
         if let error = connection.writePackets(packets) {
-            close()
+            closeOnQueue()
             return .failure(error)
         }
         connection.startKeepAlive()

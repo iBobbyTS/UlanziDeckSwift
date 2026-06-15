@@ -3,6 +3,7 @@ import Foundation
 nonisolated enum H200Command {
     static let outSetButtons: UInt16 = 0x0001
     static let outSetSmallWindowData: UInt16 = 0x0006
+    static let outSetBrightness: UInt16 = 0x000a
     static let outPartiallyUpdateButtons: UInt16 = 0x000d
     static let inButton: UInt16 = 0x0101
 }
@@ -90,6 +91,19 @@ nonisolated enum H200SmallWindowDataPacketBuilder {
         H200PacketBuilder.buildSimplePacket(
             command: H200Command.outSetSmallWindowData,
             payload: backgroundModePayload
+        )
+    }
+}
+
+nonisolated enum H200BrightnessPacketBuilder {
+    static func payload(percent: Int) -> Data {
+        Data(String(DeckKeyBrightnessConfiguration.clamped(percent)).utf8)
+    }
+
+    static func packet(percent: Int) -> Data {
+        H200PacketBuilder.buildSimplePacket(
+            command: H200Command.outSetBrightness,
+            payload: payload(percent: percent)
         )
     }
 }

@@ -77,6 +77,9 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         case .openFolder:
             title = "打开"
             subtitle = configuration.openFolder.displayName
+        case .brightness:
+            title = "亮度"
+            subtitle = "\(configuration.brightness.percent)%"
         }
         self.isSelected = isSelected
         self.isPressed = isPressed
@@ -137,8 +140,9 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case none
     case tally
     case openFolder
+    case brightness
 
-    static let assignableCases: [DeckKeyFunction] = [.tally, .openFolder]
+    static let assignableCases: [DeckKeyFunction] = [.tally, .openFolder, .brightness]
 
     var title: String {
         switch self {
@@ -148,6 +152,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "计数器"
         case .openFolder:
             return "打开文件夹"
+        case .brightness:
+            return "亮度调节"
         }
     }
 
@@ -159,6 +165,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "number.square"
         case .openFolder:
             return "folder"
+        case .brightness:
+            return "sun.max"
         }
     }
 }
@@ -190,37 +198,55 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
     }
 }
 
+nonisolated struct DeckKeyBrightnessConfiguration: Codable, Equatable {
+    var percent: Int
+
+    init(percent: Int = 50) {
+        self.percent = Self.clamped(percent)
+    }
+
+    static func clamped(_ percent: Int) -> Int {
+        min(100, max(0, percent))
+    }
+}
+
 nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var function: DeckKeyFunction
     var tally: DeckKeyTallyConfiguration
     var openFolder: DeckKeyOpenFolderConfiguration
+    var brightness: DeckKeyBrightnessConfiguration
 
     static let empty = DeckKeyConfiguration(
         function: .none,
         tally: DeckKeyTallyConfiguration(),
-        openFolder: DeckKeyOpenFolderConfiguration()
+        openFolder: DeckKeyOpenFolderConfiguration(),
+        brightness: DeckKeyBrightnessConfiguration()
     )
 
     static let tallyDefault = DeckKeyConfiguration(
         function: .tally,
         tally: DeckKeyTallyConfiguration(),
-        openFolder: DeckKeyOpenFolderConfiguration()
+        openFolder: DeckKeyOpenFolderConfiguration(),
+        brightness: DeckKeyBrightnessConfiguration()
     )
 
     init(
         function: DeckKeyFunction,
         tally: DeckKeyTallyConfiguration = DeckKeyTallyConfiguration(),
-        openFolder: DeckKeyOpenFolderConfiguration = DeckKeyOpenFolderConfiguration()
+        openFolder: DeckKeyOpenFolderConfiguration = DeckKeyOpenFolderConfiguration(),
+        brightness: DeckKeyBrightnessConfiguration = DeckKeyBrightnessConfiguration()
     ) {
         self.function = function
         self.tally = tally
         self.openFolder = openFolder
+        self.brightness = brightness
     }
 
     enum CodingKeys: CodingKey {
         case function
         case tally
         case openFolder
+        case brightness
     }
 
     init(from decoder: Decoder) throws {
@@ -228,6 +254,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         function = try container.decode(DeckKeyFunction.self, forKey: .function)
         tally = try container.decodeIfPresent(DeckKeyTallyConfiguration.self, forKey: .tally) ?? DeckKeyTallyConfiguration()
         openFolder = try container.decodeIfPresent(DeckKeyOpenFolderConfiguration.self, forKey: .openFolder) ?? DeckKeyOpenFolderConfiguration()
+        brightness = try container.decodeIfPresent(DeckKeyBrightnessConfiguration.self, forKey: .brightness) ?? DeckKeyBrightnessConfiguration()
     }
 
     func encode(to encoder: Encoder) throws {
@@ -235,6 +262,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         try container.encode(function, forKey: .function)
         try container.encode(tally, forKey: .tally)
         try container.encode(openFolder, forKey: .openFolder)
+        try container.encode(brightness, forKey: .brightness)
     }
 }
 
@@ -306,6 +334,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations[keyID, default: .tallyDefault].openFolder.path
     }
 
+    func brightnessPercent(for keyID: Int) -> Int {
+        configurations[keyID, default: .tallyDefault].brightness.percent
+    }
+
     @discardableResult
     mutating func resetTally(keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
@@ -343,6 +375,25 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].openFolder.path = path
+        return true
+    }
+
+    @discardableResult
+    mutating func setBrightnessPercent(_ percent: Int, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .brightness
+        else {
+            return false
+        }
+
+        let clampedPercent = DeckKeyBrightnessConfiguration.clamped(percent)
+        guard configurations[keyID, default: .tallyDefault].brightness.percent != clampedPercent else {
+            selectedKeyID = keyID
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].brightness.percent = clampedPercent
         return true
     }
 

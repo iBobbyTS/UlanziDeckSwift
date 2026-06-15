@@ -10,6 +10,7 @@ struct ContentView: View {
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
     let onFolderPathSelection: (String) -> Void
+    let onBrightnessPercentChange: (Int) -> Void
 
     private let layout = DeckGridLayout.h200Prototype
     private let previewMetrics = DeckPreviewGridMetrics.h200
@@ -285,6 +286,38 @@ struct ContentView: View {
 
                 Spacer()
             }
+
+        case .brightness:
+            HStack(spacing: 28) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("功能")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
+                        .font(.callout.weight(.medium))
+                }
+                .frame(width: 150, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("亮度")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text("\(configuration.brightness.percent)%")
+                        .font(.title2.monospacedDigit().weight(.semibold))
+                }
+                .frame(width: 90, alignment: .leading)
+
+                Slider(value: selectedBrightnessPercentSliderBinding, in: 0...100, step: 1)
+                    .frame(width: 210)
+                    .accessibilityLabel("亮度")
+
+                Stepper("亮度", value: selectedBrightnessPercentBinding, in: 0...100)
+                    .labelsHidden()
+
+                Spacer()
+            }
         }
     }
 }
@@ -305,6 +338,28 @@ private extension ContentView {
             },
             set: { value in
                 onTallyDefaultValueChange(value)
+            }
+        )
+    }
+
+    var selectedBrightnessPercentBinding: Binding<Int> {
+        Binding(
+            get: {
+                selectedConfiguration?.brightness.percent ?? 50
+            },
+            set: { value in
+                onBrightnessPercentChange(value)
+            }
+        )
+    }
+
+    var selectedBrightnessPercentSliderBinding: Binding<Double> {
+        Binding(
+            get: {
+                Double(selectedBrightnessPercentBinding.wrappedValue)
+            },
+            set: { value in
+                onBrightnessPercentChange(Int(value.rounded()))
             }
         )
     }
@@ -473,6 +528,7 @@ private struct DeckKeyRenderedImage: View, Equatable {
         onKeyFunctionDeletion: { _ in },
         onFunctionSelection: { _ in },
         onTallyDefaultValueChange: { _ in },
-        onFolderPathSelection: { _ in }
+        onFolderPathSelection: { _ in },
+        onBrightnessPercentChange: { _ in }
     )
 }

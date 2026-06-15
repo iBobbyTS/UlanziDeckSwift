@@ -122,6 +122,19 @@ struct UlanziDeckSwiftTests {
         #expect(state.folderPath(for: 5) == "/Users/ibobby/Documents/Codex")
     }
 
+    @Test func brightnessFunctionDisplaysClampedPercent() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.assign(.brightness, to: 6)
+        state.setBrightnessPercent(140, for: 6)
+        let display = state.display(for: layout.keys[5])
+
+        #expect(display.title == "亮度")
+        #expect(display.subtitle == "100%")
+        #expect(state.brightnessPercent(for: 6) == 100)
+    }
+
     @Test func userDefaultsStoreRestoresSavedKeyConfiguration() throws {
         let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -137,6 +150,8 @@ struct UlanziDeckSwiftTests {
         state.clearFunction(keyID: 8)
         state.assign(.openFolder, to: 9)
         state.setFolderPath("/Users/ibobby/Documents", for: 9)
+        state.assign(.brightness, to: 10)
+        state.setBrightnessPercent(30, for: 10)
 
         store.saveInteractionState(state, for: layout)
 
@@ -146,6 +161,8 @@ struct UlanziDeckSwiftTests {
         #expect(restored.configuration(for: 8)?.function == DeckKeyFunction.none)
         #expect(restored.configuration(for: 9)?.function == DeckKeyFunction.openFolder)
         #expect(restored.folderPath(for: 9) == "/Users/ibobby/Documents")
+        #expect(restored.configuration(for: 10)?.function == DeckKeyFunction.brightness)
+        #expect(restored.brightnessPercent(for: 10) == 30)
         #expect(restored.pressedKeyIDs.isEmpty)
         #expect(restored.selectedKeyID == 1)
     }
@@ -430,6 +447,61 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func selectingBrightnessFunctionSyncsAndPersistsPercent() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            folderOpener: FakeFinderFolderOpener()
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 5)
+        model.assignSelectedFunction(.brightness)
+        model.setSelectedBrightnessPercent(25)
+
+        #expect(model.interactionState.configuration(for: 5)?.function == DeckKeyFunction.brightness)
+        #expect(model.interactionState.brightnessPercent(for: 5) == 25)
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 3 && syncer.brightnessPercents == [25]
+        }
+        #expect(syncer.sentDisplays.count == 3)
+        #expect(syncer.sentDisplays.last?[4].title == "亮度")
+        #expect(syncer.sentDisplays.last?[4].subtitle == "25%")
+        #expect(store.savedStates.last?.brightnessPercent(for: 5) == 25)
+    }
+
+    @MainActor
+    @Test func brightnessParameterChangesSendLatestValueWithoutPilingUp() async throws {
+        let syncer = FakeH200DeckSyncer(brightnessDelayNanoseconds: 100_000_000)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            folderOpener: FakeFinderFolderOpener()
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 5)
+        model.assignSelectedFunction(.brightness)
+        let displayCountAfterAssign = syncer.sentDisplays.count
+
+        model.setSelectedBrightnessPercent(10)
+        model.setSelectedBrightnessPercent(20)
+        model.setSelectedBrightnessPercent(30)
+
+        #expect(model.interactionState.brightnessPercent(for: 5) == 30)
+        try await Self.waitUntil {
+            syncer.brightnessPercents == [10, 30]
+                && syncer.sentDisplays.count == displayCountAfterAssign + 1
+        }
+        #expect(syncer.sentDisplays.last?[4].title == "亮度")
+        #expect(syncer.sentDisplays.last?[4].subtitle == "30%")
+    }
+
+    @MainActor
     @Test func physicalButtonShortPressIncrementsTallyWithoutChangingUISelection() async throws {
         let connectedIdentity = Self.protocolInterfaceIdentity()
         let syncer = FakeH200DeckSyncer()
@@ -500,6 +572,60 @@ struct UlanziDeckSwiftTests {
         try await Task.sleep(nanoseconds: 50_000_000)
 
         #expect(opener.openedPaths.isEmpty)
+    }
+
+    @MainActor
+    @Test func physicalButtonShortPressSetsConfiguredBrightnessWithoutSyncingDisplay() async throws {
+        let layout = DeckGridLayout.h200Prototype
+        var persistedState = DeckGridInteractionState(layout: layout)
+        persistedState.assign(.brightness, to: 5)
+        persistedState.setBrightnessPercent(35, for: 5)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: persistedState),
+            folderOpener: FakeFinderFolderOpener()
+        )
+
+        model.checkOnLaunch()
+        let sentDisplayCount = syncer.sentDisplays.count
+        syncer.emitInput(H200InputEvent(state: 1, index: 4, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 4, type: .button, action: .release))
+        try await Self.waitUntil {
+            syncer.brightnessPercents == [35]
+        }
+
+        #expect(syncer.brightnessPercents == [35])
+        #expect(syncer.sentDisplays.count == sentDisplayCount)
+        #expect(model.alert == nil)
+    }
+
+    @MainActor
+    @Test func physicalButtonBrightnessFailureShowsAlert() async throws {
+        let code = Self.exclusiveAccessReturnCode()
+        let syncer = FakeH200DeckSyncer(brightnessFailures: [.communicationPortOccupied(code)])
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            folderOpener: FakeFinderFolderOpener()
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 5)
+        model.assignSelectedFunction(.brightness)
+        syncer.emitInput(H200InputEvent(state: 1, index: 4, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 4, type: .button, action: .release))
+        try await Self.waitUntil {
+            model.alert?.title == "H200 通信端口被占用"
+        }
+
+        #expect(syncer.brightnessPercents == [50])
+        #expect(model.alert?.title == "H200 通信端口被占用")
+        #expect(model.alert?.message.contains("有其他应用正在占用 H200 通信端口") == true)
     }
 
     @MainActor
@@ -682,6 +808,16 @@ struct UlanziDeckSwiftTests {
         #expect(String(data: smallWindowPayload, encoding: .utf8) == "2|0|0|00:00:00|0|24H|")
     }
 
+    @Test func brightnessPacketUsesObservedSimpleFrame() {
+        let packet = H200BrightnessPacketBuilder.packet(percent: 140)
+        let payloadLength = Self.payloadLength(in: packet)
+        let payload = packet.subdata(in: H200PacketBuilder.headerSize..<(H200PacketBuilder.headerSize + payloadLength))
+
+        #expect(packet.count == H200PacketBuilder.packetSize)
+        #expect(Array(packet.prefix(4)) == [0x7c, 0x7c, 0x00, 0x0a])
+        #expect(String(data: payload, encoding: .utf8) == "100")
+    }
+
     @Test func inputReportParserRecognizesButtonPressReports() {
         let report = Self.inputReport(state: 0x01, index: 13, type: 0x01, action: 0x01)
 
@@ -742,37 +878,93 @@ struct UlanziDeckSwiftTests {
         report.append(Data(repeating: 0, count: H200DeviceTarget.reportSize - report.count))
         return report
     }
+
+    private static func waitUntil(_ condition: @escaping () -> Bool) async throws {
+        for _ in 0..<30 {
+            if condition() {
+                return
+            }
+
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        #expect(condition())
+    }
 }
 
 private final class FakeH200DeckSyncer: H200DeckSyncing {
+    private let lock = NSLock()
     private var results: [H200DeckSyncResult]
-    private(set) var sentDisplays: [[DeckKeyDisplay]] = []
+    private var brightnessFailures: [H200DeckSyncFailure]
+    private var storedSentDisplays: [[DeckKeyDisplay]] = []
+    private var storedBrightnessPercents: [Int] = []
     private var inputHandler: H200InputHandler?
+    private let brightnessDelayNanoseconds: UInt64
 
-    init(results: [H200DeckSyncResult] = []) {
+    var sentDisplays: [[DeckKeyDisplay]] {
+        locked { storedSentDisplays }
+    }
+
+    var brightnessPercents: [Int] {
+        locked { storedBrightnessPercents }
+    }
+
+    init(
+        results: [H200DeckSyncResult] = [],
+        brightnessFailures: [H200DeckSyncFailure] = [],
+        brightnessDelayNanoseconds: UInt64 = 0
+    ) {
         self.results = results
+        self.brightnessFailures = brightnessFailures
+        self.brightnessDelayNanoseconds = brightnessDelayNanoseconds
     }
 
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
-        sentDisplays.append(displays)
+        locked {
+            storedSentDisplays.append(displays)
 
-        guard !results.isEmpty else {
-            return .success(H200DeckSyncSummary(
-                payloadByteCount: displays.count,
-                packetCount: 1,
-                displayCount: displays.count
-            ))
+            guard !results.isEmpty else {
+                return .success(H200DeckSyncSummary(
+                    payloadByteCount: displays.count,
+                    packetCount: 1,
+                    displayCount: displays.count
+                ))
+            }
+
+            return results.removeFirst()
+        }
+    }
+
+    func setBrightness(percent: Int) -> H200DeckSyncFailure? {
+        if brightnessDelayNanoseconds > 0 {
+            Thread.sleep(forTimeInterval: Double(brightnessDelayNanoseconds) / 1_000_000_000)
         }
 
-        return results.removeFirst()
+        return locked {
+            storedBrightnessPercents.append(percent)
+            guard !brightnessFailures.isEmpty else {
+                return nil
+            }
+
+            return brightnessFailures.removeFirst()
+        }
     }
 
     func setInputHandler(_ handler: H200InputHandler?) {
-        inputHandler = handler
+        locked {
+            inputHandler = handler
+        }
     }
 
     func emitInput(_ event: H200InputEvent) {
-        inputHandler?(event)
+        let handler = locked { inputHandler }
+        handler?(event)
+    }
+
+    private func locked<Value>(_ body: () -> Value) -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
     }
 }
 

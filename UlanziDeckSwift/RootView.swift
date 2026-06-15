@@ -36,6 +36,9 @@ struct RootView: View {
             },
             onFolderPathSelection: { path in
                 connectionModel.setSelectedFolderPath(path)
+            },
+            onBrightnessPercentChange: { percent in
+                connectionModel.setSelectedBrightnessPercent(percent)
             }
         )
             .task {
