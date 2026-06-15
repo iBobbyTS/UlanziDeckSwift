@@ -63,12 +63,7 @@ final class H200ConnectionModel: ObservableObject {
         NSApplication.shared.terminate(nil)
     }
 
-    func pressKey(keyID: Int) {
-        interactionState.triggerShortPress(keyID: keyID)
-        syncCurrentDisplays()
-    }
-
-    func beginKeyPress(keyID: Int) {
+    private func beginKeyPress(keyID: Int) {
         guard interactionState.beginPress(keyID: keyID) else {
             return
         }
@@ -86,7 +81,7 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
-    func endKeyPress(keyID: Int) {
+    private func endKeyPress(keyID: Int) {
         guard interactionState.isPressed(keyID: keyID) else {
             return
         }

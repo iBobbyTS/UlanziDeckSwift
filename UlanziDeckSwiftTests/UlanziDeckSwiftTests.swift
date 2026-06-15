@@ -165,7 +165,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func mouseAndPhysicalButtonShortPressShareInteractionState() async throws {
+    @Test func physicalButtonShortPressIncrementsTally() async throws {
         let connectedIdentity = Self.protocolInterfaceIdentity()
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
@@ -174,8 +174,10 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
-        model.beginKeyPress(keyID: 7)
-        model.endKeyPress(keyID: 7)
+        syncer.emitInput(H200InputEvent(state: 1, index: 6, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 6, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
         syncer.emitInput(H200InputEvent(state: 1, index: 6, type: .button, action: .press))
         try await Task.sleep(nanoseconds: 50_000_000)
         syncer.emitInput(H200InputEvent(state: 0, index: 6, type: .button, action: .release))
@@ -215,11 +217,14 @@ struct UlanziDeckSwiftTests {
 
         model.checkOnLaunch()
         model.setSelectedTallyDefaultValue(5)
-        model.beginKeyPress(keyID: 1)
-        model.endKeyPress(keyID: 1)
-        model.beginKeyPress(keyID: 1)
+        syncer.emitInput(H200InputEvent(state: 1, index: 0, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 5_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 0, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 20_000_000)
+        syncer.emitInput(H200InputEvent(state: 1, index: 0, type: .button, action: .press))
         try await Task.sleep(nanoseconds: 30_000_000)
-        model.endKeyPress(keyID: 1)
+        syncer.emitInput(H200InputEvent(state: 0, index: 0, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 20_000_000)
 
         #expect(model.interactionState.tallyDefaultValue(for: 1) == 5)
         #expect(model.interactionState.tallyValue(for: 1) == 5)

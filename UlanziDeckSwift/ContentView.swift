@@ -1,11 +1,10 @@
+import AppKit
 import SwiftUI
 
 struct ContentView: View {
     let connectedDevice: H200DeviceIdentity?
     let syncSummary: H200DeckSyncSummary?
     let interactionState: DeckGridInteractionState
-    let onKeyPressBegan: (Int) -> Void
-    let onKeyPressEnded: (Int) -> Void
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
 
@@ -71,15 +70,7 @@ struct ContentView: View {
             ForEach(Array(layout.rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: 16) {
                     ForEach(row) { key in
-                        DeckKeyButton(
-                            display: interactionState.display(for: key),
-                            onPressBegan: {
-                                onKeyPressBegan(key.id)
-                            },
-                            onPressEnded: {
-                                onKeyPressEnded(key.id)
-                            }
-                        )
+                        DeckKeyButton(display: interactionState.display(for: key))
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -306,65 +297,35 @@ private struct FunctionRow: View {
 
 private struct DeckKeyButton: View {
     let display: DeckKeyDisplay
-    let onPressBegan: () -> Void
-    let onPressEnded: () -> Void
-
-    @State private var isPointerDown = false
 
     var body: some View {
-        VStack(spacing: 6) {
-            Text(display.title)
-                .font(.system(size: 34, weight: .bold, design: .rounded))
-                .monospacedDigit()
-
-            Text(display.subtitle)
-                .font(.caption.weight(.semibold))
-                .monospacedDigit()
-                .foregroundStyle(active ? .white.opacity(0.82) : .secondary)
-        }
-        .frame(width: buttonWidth, height: 82)
-        .foregroundStyle(active ? .white : .primary)
-        .background {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(active ? Color.accentColor : Color(nsColor: .textBackgroundColor))
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(active ? Color.white.opacity(0.35) : Color(nsColor: .separatorColor), lineWidth: 1)
-        }
-        .scaleEffect(display.isPressed ? 0.98 : (display.isSelected ? 1.04 : 1))
-        .shadow(color: .black.opacity(active ? 0.24 : 0.16), radius: active ? 12 : 7, y: active ? 7 : 4)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .gesture(
-            DragGesture(minimumDistance: 0)
-                .onChanged { _ in
-                    guard !isPointerDown else {
-                        return
-                    }
-
-                    isPointerDown = true
-                    onPressBegan()
-                }
-                .onEnded { _ in
-                    guard isPointerDown else {
-                        return
-                    }
-
-                    isPointerDown = false
-                    onPressEnded()
-                }
-        )
+        renderedImage
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(aspectRatio, contentMode: .fit)
+            .frame(width: buttonWidth, height: 82)
+            .shadow(color: .black.opacity(0.22), radius: 7, y: 4)
         .accessibilityLabel("设备按键 \(display.id)")
         .accessibilityValue("\(display.title)，\(display.subtitle)")
-        .accessibilityAddTraits(.isButton)
     }
 
-    private var active: Bool {
-        display.isSelected || display.isPressed
+    private var renderedImage: Image {
+        let renderer = H200ButtonIconRenderer()
+        guard let png = try? renderer.pngData(for: display),
+              let image = NSImage(data: png)
+        else {
+            return Image(systemName: "xmark.square")
+        }
+
+        return Image(nsImage: image)
+    }
+
+    private var aspectRatio: CGFloat {
+        CGFloat(display.devicePixelSize.width) / CGFloat(display.devicePixelSize.height)
     }
 
     private var buttonWidth: CGFloat {
-        82 * CGFloat(display.columnSpan) + 16 * CGFloat(display.columnSpan - 1)
+        82 * aspectRatio
     }
 }
 
@@ -384,8 +345,6 @@ private struct DeckKeyButton: View {
         ),
         syncSummary: H200DeckSyncSummary(payloadByteCount: 4096, packetCount: 4, displayCount: 14),
         interactionState: DeckGridInteractionState(layout: .h200Prototype),
-        onKeyPressBegan: { _ in },
-        onKeyPressEnded: { _ in },
         onFunctionSelection: { _ in },
         onTallyDefaultValueChange: { _ in }
     )

@@ -12,11 +12,7 @@ struct RootView: View {
             connectedDevice: connectionModel.connectedDevice,
             syncSummary: connectionModel.syncSummary,
             interactionState: connectionModel.interactionState
-        ) { keyID in
-            connectionModel.beginKeyPress(keyID: keyID)
-        } onKeyPressEnded: { keyID in
-            connectionModel.endKeyPress(keyID: keyID)
-        } onFunctionSelection: { function in
+        ) { function in
             connectionModel.assignSelectedFunction(function)
         } onTallyDefaultValueChange: { value in
             connectionModel.setSelectedTallyDefaultValue(value)
