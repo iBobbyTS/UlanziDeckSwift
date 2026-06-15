@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     let connectedDevice: H200DeviceIdentity?
     let syncSummary: H200DeckSyncSummary?
+    let brightnessPercent: Int
     let interactionState: DeckGridInteractionState
     let onKeySelection: (Int) -> Void
     let onKeyFunctionDeletion: (Int) -> Void
@@ -26,7 +27,7 @@ struct ContentView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Ulanzi Deck H200")
                     .font(.title.bold())
@@ -37,12 +38,36 @@ struct ContentView: View {
 
             Spacer()
 
-            Text(connectionLabel)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(connectedDevice == nil ? Color.secondary : Color.green)
+            HStack(spacing: 16) {
+                brightnessControl
+
+                Text(connectionLabel)
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(connectedDevice == nil ? Color.secondary : Color.green)
+            }
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 18)
+    }
+
+    private var brightnessControl: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "sun.max")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.secondary)
+
+            Slider(value: brightnessPercentSliderBinding, in: 0...100, step: 1)
+                .frame(width: 150)
+                .disabled(connectedDevice == nil)
+
+            Text("\(brightnessPercent)%")
+                .font(.caption.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 38, alignment: .trailing)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("亮度")
+        .accessibilityValue("\(brightnessPercent)%")
     }
 
     private var workbench: some View {
@@ -187,7 +212,7 @@ struct ContentView: View {
     @ViewBuilder
     private func parameterContent(for configuration: DeckKeyConfiguration) -> some View {
         switch configuration.function {
-        case .none:
+        case .none, .brightness:
             HStack(spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("功能")
@@ -287,37 +312,6 @@ struct ContentView: View {
                 Spacer()
             }
 
-        case .brightness:
-            HStack(spacing: 28) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("功能")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
-                        .font(.callout.weight(.medium))
-                }
-                .frame(width: 150, alignment: .leading)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("亮度")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    Text("\(configuration.brightness.percent)%")
-                        .font(.title2.monospacedDigit().weight(.semibold))
-                }
-                .frame(width: 90, alignment: .leading)
-
-                Slider(value: selectedBrightnessPercentSliderBinding, in: 0...100, step: 1)
-                    .frame(width: 210)
-                    .accessibilityLabel("亮度")
-
-                Stepper("亮度", value: selectedBrightnessPercentBinding, in: 0...100)
-                    .labelsHidden()
-
-                Spacer()
-            }
         }
     }
 }
@@ -342,21 +336,10 @@ private extension ContentView {
         )
     }
 
-    var selectedBrightnessPercentBinding: Binding<Int> {
+    var brightnessPercentSliderBinding: Binding<Double> {
         Binding(
             get: {
-                selectedConfiguration?.brightness.percent ?? 50
-            },
-            set: { value in
-                onBrightnessPercentChange(value)
-            }
-        )
-    }
-
-    var selectedBrightnessPercentSliderBinding: Binding<Double> {
-        Binding(
-            get: {
-                Double(selectedBrightnessPercentBinding.wrappedValue)
+                Double(brightnessPercent)
             },
             set: { value in
                 onBrightnessPercentChange(Int(value.rounded()))
@@ -523,6 +506,7 @@ private struct DeckKeyRenderedImage: View, Equatable {
             product: ""
         ),
         syncSummary: H200DeckSyncSummary(payloadByteCount: 4096, packetCount: 4, displayCount: 14),
+        brightnessPercent: DeckBrightnessConfiguration.defaultPercent,
         interactionState: DeckGridInteractionState(layout: .h200Prototype),
         onKeySelection: { _ in },
         onKeyFunctionDeletion: { _ in },

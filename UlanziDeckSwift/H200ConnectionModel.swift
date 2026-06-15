@@ -7,6 +7,7 @@ final class H200ConnectionModel: ObservableObject {
     @Published private(set) var status: H200ConnectionStatus = .checking
     @Published private(set) var syncSummary: H200DeckSyncSummary?
     @Published private(set) var interactionState = DeckGridInteractionState(layout: .h200Prototype)
+    @Published private(set) var brightnessPercent = DeckBrightnessConfiguration.defaultPercent
     @Published var alert: H200ConnectionAlert?
 
     private let layout = DeckGridLayout.h200Prototype
@@ -24,7 +25,6 @@ final class H200ConnectionModel: ObservableObject {
 
     private struct BrightnessUpdateRequest {
         let percent: Int
-        let displays: [DeckKeyDisplay]?
     }
 
     init(
@@ -40,6 +40,7 @@ final class H200ConnectionModel: ObservableObject {
         self.folderOpener = folderOpener ?? FinderFolderOpener()
         self.longPressDurationNanoseconds = longPressDurationNanoseconds
         interactionState = configurationStore.loadInteractionState(for: layout) ?? DeckGridInteractionState(layout: layout)
+        brightnessPercent = configurationStore.loadBrightnessPercent() ?? DeckBrightnessConfiguration.defaultPercent
         self.syncer.setInputHandler { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handleInputEvent(event)
@@ -135,9 +136,7 @@ final class H200ConnectionModel: ObservableObject {
             }
         case .some(.openFolder):
             openFolder(for: keyID)
-        case .some(.brightness):
-            setBrightness(for: keyID)
-        case .some(.none), nil:
+        case .some(.brightness), .some(.none), nil:
             return
         }
     }
@@ -180,17 +179,15 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
-    func setSelectedBrightnessPercent(_ percent: Int) {
-        guard let selectedKeyID = interactionState.selectedKeyID else {
+    func setBrightnessPercent(_ percent: Int) {
+        let clampedPercent = DeckBrightnessConfiguration.clamped(percent)
+        guard brightnessPercent != clampedPercent else {
             return
         }
 
-        if interactionState.setBrightnessPercent(percent, for: selectedKeyID) {
-            let currentPercent = interactionState.brightnessPercent(for: selectedKeyID)
-            let displays = interactionState.displays(for: layout)
-            persistCurrentConfiguration()
-            requestBrightnessUpdate(percent: currentPercent, displays: displays)
-        }
+        brightnessPercent = clampedPercent
+        configurationStore.saveBrightnessPercent(clampedPercent)
+        requestBrightnessUpdate(percent: clampedPercent)
     }
 
     private func refresh() {
@@ -252,20 +249,12 @@ final class H200ConnectionModel: ObservableObject {
         _ = folderOpener.openFolder(at: path)
     }
 
-    private func setBrightness(for keyID: Int) {
-        let percent = interactionState.brightnessPercent(for: keyID)
-        requestBrightnessUpdate(percent: percent, displays: nil)
-    }
-
-    private func requestBrightnessUpdate(percent: Int, displays: [DeckKeyDisplay]?) {
+    private func requestBrightnessUpdate(percent: Int) {
         guard case .connected = status else {
             return
         }
 
-        let request = BrightnessUpdateRequest(
-            percent: DeckKeyBrightnessConfiguration.clamped(percent),
-            displays: displays
-        )
+        let request = BrightnessUpdateRequest(percent: DeckBrightnessConfiguration.clamped(percent))
         latestBrightnessUpdate = request
         brightnessUpdateRevision += 1
 
@@ -293,39 +282,6 @@ final class H200ConnectionModel: ObservableObject {
         error: H200DeckSyncFailure?
     ) {
         if let error {
-            brightnessUpdateInProgress = false
-            alert = H200ConnectionAlert(syncFailure: error)
-            return
-        }
-
-        if brightnessUpdateRevision != revision, let latestBrightnessUpdate {
-            startBrightnessCommand(request: latestBrightnessUpdate, revision: brightnessUpdateRevision)
-            return
-        }
-
-        guard let displays = request.displays else {
-            brightnessUpdateInProgress = false
-            return
-        }
-
-        startBrightnessDisplaySync(displays: displays, revision: revision)
-    }
-
-    private func startBrightnessDisplaySync(displays: [DeckKeyDisplay], revision: Int) {
-        let syncer = syncer
-        brightnessUpdateQueue.async { [weak self] in
-            let result = syncer.sendStartupPackage(displays: displays)
-            DispatchQueue.main.async { [weak self] in
-                self?.finishBrightnessDisplaySync(revision: revision, result: result)
-            }
-        }
-    }
-
-    private func finishBrightnessDisplaySync(revision: Int, result: H200DeckSyncResult) {
-        switch result {
-        case let .success(summary):
-            syncSummary = summary
-        case let .failure(error):
             brightnessUpdateInProgress = false
             alert = H200ConnectionAlert(syncFailure: error)
             return

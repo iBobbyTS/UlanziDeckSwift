@@ -21,6 +21,7 @@ struct RootView: View {
         ContentView(
             connectedDevice: connectionModel.connectedDevice,
             syncSummary: connectionModel.syncSummary,
+            brightnessPercent: connectionModel.brightnessPercent,
             interactionState: connectionModel.interactionState,
             onKeySelection: { keyID in
                 connectionModel.selectKey(keyID: keyID)
@@ -38,7 +39,7 @@ struct RootView: View {
                 connectionModel.setSelectedFolderPath(path)
             },
             onBrightnessPercentChange: { percent in
-                connectionModel.setSelectedBrightnessPercent(percent)
+                connectionModel.setBrightnessPercent(percent)
             }
         )
             .task {

@@ -122,17 +122,21 @@ struct UlanziDeckSwiftTests {
         #expect(state.folderPath(for: 5) == "/Users/ibobby/Documents/Codex")
     }
 
-    @Test func brightnessFunctionDisplaysClampedPercent() {
+    @Test func legacyBrightnessKeyFunctionIsNormalizedToNoFunction() {
         let layout = DeckGridLayout.h200Prototype
-        var state = DeckGridInteractionState(layout: layout)
-
-        state.assign(.brightness, to: 6)
-        state.setBrightnessPercent(140, for: 6)
+        var state = DeckGridInteractionState(
+            layout: layout,
+            configurations: [
+                6: DeckKeyConfiguration(function: .brightness),
+            ]
+        )
         let display = state.display(for: layout.keys[5])
+        let didBeginPress = state.beginPress(keyID: 6)
 
-        #expect(display.title == "亮度")
-        #expect(display.subtitle == "100%")
-        #expect(state.brightnessPercent(for: 6) == 100)
+        #expect(state.configuration(for: 6)?.function == DeckKeyFunction.none)
+        #expect(!didBeginPress)
+        #expect(display.title.isEmpty)
+        #expect(display.subtitle.isEmpty)
     }
 
     @Test func userDefaultsStoreRestoresSavedKeyConfiguration() throws {
@@ -143,17 +147,20 @@ struct UlanziDeckSwiftTests {
         }
 
         let layout = DeckGridLayout.h200Prototype
-        let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: "deckConfiguration")
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: "deckConfiguration",
+            brightnessStorageKey: "brightness"
+        )
         var state = DeckGridInteractionState(layout: layout)
         state.setTallyDefaultValue(6, for: 3)
         state.triggerShortPress(keyID: 3)
         state.clearFunction(keyID: 8)
         state.assign(.openFolder, to: 9)
         state.setFolderPath("/Users/ibobby/Documents", for: 9)
-        state.assign(.brightness, to: 10)
-        state.setBrightnessPercent(30, for: 10)
 
         store.saveInteractionState(state, for: layout)
+        store.saveBrightnessPercent(140)
 
         let restored = try #require(store.loadInteractionState(for: layout))
         #expect(restored.tallyDefaultValue(for: 3) == 6)
@@ -161,8 +168,7 @@ struct UlanziDeckSwiftTests {
         #expect(restored.configuration(for: 8)?.function == DeckKeyFunction.none)
         #expect(restored.configuration(for: 9)?.function == DeckKeyFunction.openFolder)
         #expect(restored.folderPath(for: 9) == "/Users/ibobby/Documents")
-        #expect(restored.configuration(for: 10)?.function == DeckKeyFunction.brightness)
-        #expect(restored.brightnessPercent(for: 10) == 30)
+        #expect(store.loadBrightnessPercent() == 100)
         #expect(restored.pressedKeyIDs.isEmpty)
         #expect(restored.selectedKeyID == 1)
     }
@@ -447,8 +453,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func selectingBrightnessFunctionSyncsAndPersistsPercent() async throws {
-        let syncer = FakeH200DeckSyncer()
+    @Test func topBrightnessSliderSendsLatestValueWithoutPilingUp() async throws {
+        let syncer = FakeH200DeckSyncer(brightnessDelayNanoseconds: 100_000_000)
         let store = FakeDeckConfigurationStore()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
@@ -458,24 +464,37 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
-        model.selectKey(keyID: 5)
-        model.assignSelectedFunction(.brightness)
-        model.setSelectedBrightnessPercent(25)
+        let sentDisplayCount = syncer.sentDisplays.count
 
-        #expect(model.interactionState.configuration(for: 5)?.function == DeckKeyFunction.brightness)
-        #expect(model.interactionState.brightnessPercent(for: 5) == 25)
+        model.setBrightnessPercent(10)
+        model.setBrightnessPercent(20)
+        model.setBrightnessPercent(30)
+
+        #expect(model.brightnessPercent == 30)
+        #expect(store.savedBrightnessPercents == [10, 20, 30])
         try await Self.waitUntil {
-            syncer.sentDisplays.count == 3 && syncer.brightnessPercents == [25]
+            syncer.brightnessPercents == [10, 30]
+                && syncer.sentDisplays.count == sentDisplayCount
         }
-        #expect(syncer.sentDisplays.count == 3)
-        #expect(syncer.sentDisplays.last?[4].title == "亮度")
-        #expect(syncer.sentDisplays.last?[4].subtitle == "25%")
-        #expect(store.savedStates.last?.brightnessPercent(for: 5) == 25)
     }
 
     @MainActor
-    @Test func brightnessParameterChangesSendLatestValueWithoutPilingUp() async throws {
-        let syncer = FakeH200DeckSyncer(brightnessDelayNanoseconds: 100_000_000)
+    @Test func topBrightnessSliderLoadsPersistedValue() {
+        let store = FakeDeckConfigurationStore(loadedBrightnessPercent: 65)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.notConnected]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: store,
+            folderOpener: FakeFinderFolderOpener()
+        )
+
+        #expect(model.brightnessPercent == 65)
+    }
+
+    @MainActor
+    @Test func topBrightnessSliderFailureShowsAlert() async throws {
+        let code = Self.exclusiveAccessReturnCode()
+        let syncer = FakeH200DeckSyncer(brightnessFailures: [.communicationPortOccupied(code)])
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
             syncer: syncer,
@@ -484,21 +503,13 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
-        model.selectKey(keyID: 5)
-        model.assignSelectedFunction(.brightness)
-        let displayCountAfterAssign = syncer.sentDisplays.count
-
-        model.setSelectedBrightnessPercent(10)
-        model.setSelectedBrightnessPercent(20)
-        model.setSelectedBrightnessPercent(30)
-
-        #expect(model.interactionState.brightnessPercent(for: 5) == 30)
+        model.setBrightnessPercent(25)
         try await Self.waitUntil {
-            syncer.brightnessPercents == [10, 30]
-                && syncer.sentDisplays.count == displayCountAfterAssign + 1
+            model.alert?.title == "H200 通信端口被占用"
         }
-        #expect(syncer.sentDisplays.last?[4].title == "亮度")
-        #expect(syncer.sentDisplays.last?[4].subtitle == "30%")
+
+        #expect(syncer.brightnessPercents == [25])
+        #expect(model.alert?.message.contains("有其他应用正在占用 H200 通信端口") == true)
     }
 
     @MainActor
@@ -572,60 +583,6 @@ struct UlanziDeckSwiftTests {
         try await Task.sleep(nanoseconds: 50_000_000)
 
         #expect(opener.openedPaths.isEmpty)
-    }
-
-    @MainActor
-    @Test func physicalButtonShortPressSetsConfiguredBrightnessWithoutSyncingDisplay() async throws {
-        let layout = DeckGridLayout.h200Prototype
-        var persistedState = DeckGridInteractionState(layout: layout)
-        persistedState.assign(.brightness, to: 5)
-        persistedState.setBrightnessPercent(35, for: 5)
-        let syncer = FakeH200DeckSyncer()
-        let model = H200ConnectionModel(
-            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
-            syncer: syncer,
-            configurationStore: FakeDeckConfigurationStore(loadedState: persistedState),
-            folderOpener: FakeFinderFolderOpener()
-        )
-
-        model.checkOnLaunch()
-        let sentDisplayCount = syncer.sentDisplays.count
-        syncer.emitInput(H200InputEvent(state: 1, index: 4, type: .button, action: .press))
-        try await Task.sleep(nanoseconds: 50_000_000)
-        syncer.emitInput(H200InputEvent(state: 0, index: 4, type: .button, action: .release))
-        try await Self.waitUntil {
-            syncer.brightnessPercents == [35]
-        }
-
-        #expect(syncer.brightnessPercents == [35])
-        #expect(syncer.sentDisplays.count == sentDisplayCount)
-        #expect(model.alert == nil)
-    }
-
-    @MainActor
-    @Test func physicalButtonBrightnessFailureShowsAlert() async throws {
-        let code = Self.exclusiveAccessReturnCode()
-        let syncer = FakeH200DeckSyncer(brightnessFailures: [.communicationPortOccupied(code)])
-        let model = H200ConnectionModel(
-            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
-            syncer: syncer,
-            configurationStore: FakeDeckConfigurationStore(),
-            folderOpener: FakeFinderFolderOpener()
-        )
-
-        model.checkOnLaunch()
-        model.selectKey(keyID: 5)
-        model.assignSelectedFunction(.brightness)
-        syncer.emitInput(H200InputEvent(state: 1, index: 4, type: .button, action: .press))
-        try await Task.sleep(nanoseconds: 50_000_000)
-        syncer.emitInput(H200InputEvent(state: 0, index: 4, type: .button, action: .release))
-        try await Self.waitUntil {
-            model.alert?.title == "H200 通信端口被占用"
-        }
-
-        #expect(syncer.brightnessPercents == [50])
-        #expect(model.alert?.title == "H200 通信端口被占用")
-        #expect(model.alert?.message.contains("有其他应用正在占用 H200 通信端口") == true)
     }
 
     @MainActor
@@ -992,10 +949,13 @@ private final class FakeH200Discovery: H200Discovering {
 
 private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
     private let loadedState: DeckGridInteractionState?
+    private let loadedBrightnessPercent: Int?
     private(set) var savedStates: [DeckGridInteractionState] = []
+    private(set) var savedBrightnessPercents: [Int] = []
 
-    init(loadedState: DeckGridInteractionState? = nil) {
+    init(loadedState: DeckGridInteractionState? = nil, loadedBrightnessPercent: Int? = nil) {
         self.loadedState = loadedState
+        self.loadedBrightnessPercent = loadedBrightnessPercent
     }
 
     func loadInteractionState(for layout: DeckGridLayout) -> DeckGridInteractionState? {
@@ -1004,6 +964,14 @@ private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
 
     func saveInteractionState(_ state: DeckGridInteractionState, for layout: DeckGridLayout) {
         savedStates.append(state)
+    }
+
+    func loadBrightnessPercent() -> Int? {
+        loadedBrightnessPercent
+    }
+
+    func saveBrightnessPercent(_ percent: Int) {
+        savedBrightnessPercents.append(percent)
     }
 }
 

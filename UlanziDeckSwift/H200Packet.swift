@@ -97,7 +97,7 @@ nonisolated enum H200SmallWindowDataPacketBuilder {
 
 nonisolated enum H200BrightnessPacketBuilder {
     static func payload(percent: Int) -> Data {
-        Data(String(DeckKeyBrightnessConfiguration.clamped(percent)).utf8)
+        Data(String(DeckBrightnessConfiguration.clamped(percent)).utf8)
     }
 
     static func packet(percent: Int) -> Data {
