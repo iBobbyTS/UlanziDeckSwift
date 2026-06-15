@@ -269,6 +269,19 @@ struct UlanziDeckSwiftTests {
         #expect(smallViewParam?["Icon"] as? String == "Images/key_14.png")
     }
 
+    @Test func realButtonPackageBuilderCreatesSafePayload() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.triggerShortPress(keyID: 7)
+        state.triggerShortPress(keyID: 7)
+        state.setTallyDefaultValue(12, for: 14)
+
+        let package = try H200ButtonPackageBuilder().buildPackage(displays: state.displays(for: layout))
+
+        #expect(package.displayCount == 14)
+        #expect(H200PacketBuilder.isPayloadSafe(package.payload))
+    }
+
     @Test func realIconRendererCreatesPNGForWideDisplay() throws {
         let display = DeckGridInteractionState(layout: .h200Prototype)
             .displays(for: .h200Prototype)
@@ -278,6 +291,19 @@ struct UlanziDeckSwiftTests {
 
         #expect(Array(png.prefix(4)) == [0x89, 0x50, 0x4e, 0x47])
         #expect(!png.isEmpty)
+    }
+
+    @Test func iconRendererDoesNotTintSelectedDisplay() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        let selectedDisplay = state.display(for: layout.keys[0])
+        state.select(keyID: 2)
+        let unselectedDisplay = state.display(for: layout.keys[0])
+        let renderer = H200ButtonIconRenderer()
+
+        #expect(selectedDisplay.isSelected)
+        #expect(!unselectedDisplay.isSelected)
+        #expect(try renderer.pngData(for: selectedDisplay) == renderer.pngData(for: unselectedDisplay))
     }
 
     @Test func chunkedPacketsUseTheObservedH200FrameFormat() {

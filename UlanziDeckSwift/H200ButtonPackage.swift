@@ -65,24 +65,58 @@ nonisolated struct H200ButtonPackageBuilder {
     }
 
     private func makeSafePayload(manifestData: Data, imageFiles: [ZIPArchiveFile]) throws -> Data {
-        var retries = 0
-        while retries <= 64 {
-            var files = [ZIPArchiveFile(path: "manifest.json", data: manifestData)]
-            if retries > 0 {
-                let dummy = String(repeating: "H200", count: retries * 5)
-                files.append(ZIPArchiveFile(path: "dummy.txt", data: Data(dummy.utf8)))
-            }
-            files.append(contentsOf: imageFiles)
+        let manifestFile = ZIPArchiveFile(path: "manifest.json", data: manifestData)
+        let baseFiles = [manifestFile] + imageFiles
+        if let payload = try makePayloadIfSafe(files: baseFiles) {
+            return payload
+        }
 
-            let payload = try ZIPArchiveBuilder.makeArchive(files: files)
-            if H200PacketBuilder.isPayloadSafe(payload) {
-                return payload
-            }
+        for placement in SafetyPaddingPlacement.allCases {
+            for paddingLength in 1...H200PacketBuilder.packetSize {
+                let paddingFile = ZIPArchiveFile(
+                    path: "__h200_padding.bin",
+                    data: makePaddingData(length: paddingLength)
+                )
+                let files = filesWithPadding(
+                    manifestFile: manifestFile,
+                    imageFiles: imageFiles,
+                    paddingFile: paddingFile,
+                    placement: placement
+                )
 
-            retries += 1
+                if let payload = try makePayloadIfSafe(files: files) {
+                    return payload
+                }
+            }
         }
 
         throw H200ButtonPackageError.unsafePayloadAfterRetries
+    }
+
+    private func makePayloadIfSafe(files: [ZIPArchiveFile]) throws -> Data? {
+        let payload = try ZIPArchiveBuilder.makeArchive(files: files)
+        return H200PacketBuilder.isPayloadSafe(payload) ? payload : nil
+    }
+
+    private func filesWithPadding(
+        manifestFile: ZIPArchiveFile,
+        imageFiles: [ZIPArchiveFile],
+        paddingFile: ZIPArchiveFile,
+        placement: SafetyPaddingPlacement
+    ) -> [ZIPArchiveFile] {
+        switch placement {
+        case .afterManifest:
+            return [manifestFile, paddingFile] + imageFiles
+        case .afterImages:
+            return [manifestFile] + imageFiles + [paddingFile]
+        case .beforeManifest:
+            return [paddingFile, manifestFile] + imageFiles
+        }
+    }
+
+    private func makePaddingData(length: Int) -> Data {
+        let pattern = Array("H200SAFE".utf8)
+        return Data((0..<length).map { pattern[$0 % pattern.count] })
     }
 
     private func iconPath(for display: DeckKeyDisplay) -> String {
@@ -92,6 +126,12 @@ nonisolated struct H200ButtonPackageBuilder {
 
 nonisolated enum H200ButtonPackageError: Error, Equatable {
     case unsafePayloadAfterRetries
+}
+
+nonisolated private enum SafetyPaddingPlacement: CaseIterable {
+    case afterManifest
+    case afterImages
+    case beforeManifest
 }
 
 nonisolated private enum H200SmallWindowMode: Int, Encodable {
@@ -182,13 +222,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         let cardRect = rect.insetBy(dx: inset, dy: inset)
         let radius = rect.height * 0.12
         let cardPath = NSBezierPath(roundedRect: cardRect, xRadius: radius, yRadius: radius)
-        let background = display.isSelected
-            ? NSColor.controlAccentColor
-            : NSColor(calibratedRed: 0.14, green: 0.15, blue: 0.17, alpha: 1)
-        background.setFill()
+        NSColor(calibratedRed: 0.14, green: 0.15, blue: 0.17, alpha: 1).setFill()
         cardPath.fill()
 
-        NSColor(calibratedWhite: display.isSelected ? 1 : 0.32, alpha: display.isSelected ? 0.4 : 1).setStroke()
+        NSColor(calibratedWhite: 0.32, alpha: 1).setStroke()
         cardPath.lineWidth = max(2, rect.height * 0.012)
         cardPath.stroke()
 
