@@ -54,7 +54,7 @@ nonisolated enum H200DeckSyncFailure: Error, Equatable {
     }
 }
 
-nonisolated protocol H200DeckSyncing {
+nonisolated protocol H200DeckSyncing: Sendable {
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult
     func setBrightness(percent: Int) -> H200DeckSyncFailure?
     func setInputHandler(_ handler: H200InputHandler?)
@@ -67,7 +67,8 @@ extension H200DeckSyncing {
     nonisolated func close() {}
 }
 
-nonisolated final class H200HIDDeckSyncer: H200DeckSyncing {
+// 同步器内部用串行队列保护连接状态；亮度后台队列会跨线程持有该对象。
+nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable {
     private let packageBuilder: H200ButtonPackageBuilder
     private let operationQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200HIDDeckSyncer")
     private var connection: H200HIDConnection?

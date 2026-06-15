@@ -2,6 +2,7 @@
 
 | file | summary |
 | --- | --- |
+| active/20260615-focus-filter-add-disabled.md | macOS 专注模式添加 Ulanzi Deck 过滤条件时“添加”无法生效，排查 AppIntents 元数据、系统设置状态和日志。 |
 
 ## Unresolved
 

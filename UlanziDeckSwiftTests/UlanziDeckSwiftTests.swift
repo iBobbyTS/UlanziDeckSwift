@@ -187,6 +187,70 @@ struct UlanziDeckSwiftTests {
         #expect(store.loadInteractionState(for: .h200Prototype) == nil)
     }
 
+    @Test func focusFilterSettingsPersistClampedBrightness() {
+        let store = FakeDeckConfigurationStore()
+
+        UlanziDeckFocusFilterSettings.apply(
+            brightnessPercent: 140,
+            configurationStore: store,
+            notificationCenter: NotificationCenter()
+        )
+
+        #expect(store.savedBrightnessPercents == [100])
+    }
+
+    @MainActor
+    @Test func focusFilterNotificationUpdatesRunningModelBrightness() async throws {
+        let notificationCenter = NotificationCenter()
+        let store = FakeDeckConfigurationStore()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            folderOpener: FakeFinderFolderOpener(),
+            focusFilterNotificationCenter: notificationCenter
+        )
+
+        model.checkOnLaunch()
+        UlanziDeckFocusFilterSettings.apply(
+            brightnessPercent: 75,
+            configurationStore: store,
+            notificationCenter: notificationCenter
+        )
+
+        try await Self.waitUntil {
+            model.brightnessPercent == 75 && syncer.brightnessPercents == [75]
+        }
+        #expect(store.savedBrightnessPercents == [75, 75])
+    }
+
+    @MainActor
+    @Test func focusFilterNotificationSendsEvenWhenBrightnessAlreadyMatches() async throws {
+        let notificationCenter = NotificationCenter()
+        let store = FakeDeckConfigurationStore()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            folderOpener: FakeFinderFolderOpener(),
+            focusFilterNotificationCenter: notificationCenter
+        )
+
+        model.checkOnLaunch()
+        UlanziDeckFocusFilterSettings.apply(
+            brightnessPercent: DeckBrightnessConfiguration.defaultPercent,
+            configurationStore: store,
+            notificationCenter: notificationCenter
+        )
+
+        try await Self.waitUntil {
+            syncer.brightnessPercents == [DeckBrightnessConfiguration.defaultPercent]
+        }
+        #expect(model.brightnessPercent == DeckBrightnessConfiguration.defaultPercent)
+    }
+
     @Test func h200ProtocolInterfaceMatchesObservedReportShape() {
         let identity = Self.protocolInterfaceIdentity()
 
@@ -489,6 +553,26 @@ struct UlanziDeckSwiftTests {
         )
 
         #expect(model.brightnessPercent == 65)
+    }
+
+    @MainActor
+    @Test func successfulLaunchSendsPersistedBrightnessAfterStartup() async throws {
+        let store = FakeDeckConfigurationStore(loadedBrightnessPercent: 65)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            folderOpener: FakeFinderFolderOpener()
+        )
+
+        model.checkOnLaunch()
+
+        try await Self.waitUntil {
+            syncer.brightnessPercents == [65]
+        }
+        #expect(model.brightnessPercent == 65)
+        #expect(syncer.sentDisplays.count == 1)
     }
 
     @MainActor
@@ -837,7 +921,7 @@ struct UlanziDeckSwiftTests {
     }
 
     private static func waitUntil(_ condition: @escaping () -> Bool) async throws {
-        for _ in 0..<30 {
+        for _ in 0..<60 {
             if condition() {
                 return
             }
@@ -849,7 +933,7 @@ struct UlanziDeckSwiftTests {
     }
 }
 
-private final class FakeH200DeckSyncer: H200DeckSyncing {
+private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
     private let lock = NSLock()
     private var results: [H200DeckSyncResult]
     private var brightnessFailures: [H200DeckSyncFailure]

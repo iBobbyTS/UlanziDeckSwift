@@ -15,8 +15,10 @@ final class H200ConnectionModel: ObservableObject {
     private let syncer: H200DeckSyncing
     private let configurationStore: DeckConfigurationStoring
     private let folderOpener: FinderFolderOpening
+    private var hasPersistedBrightnessPercent: Bool
     private let longPressDurationNanoseconds: UInt64
     private let brightnessUpdateQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200BrightnessUpdate")
+    private var focusFilterBrightnessCancellable: AnyCancellable?
     private var longPressTasks: [Int: Task<Void, Never>] = [:]
     private var longPressResetKeyIDs: Set<Int> = []
     private var brightnessUpdateRevision = 0
@@ -32,6 +34,7 @@ final class H200ConnectionModel: ObservableObject {
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         folderOpener: FinderFolderOpening? = nil,
+        focusFilterNotificationCenter: NotificationCenter = .default,
         longPressDurationNanoseconds: UInt64 = 1_000_000_000
     ) {
         self.discovery = discovery
@@ -40,12 +43,23 @@ final class H200ConnectionModel: ObservableObject {
         self.folderOpener = folderOpener ?? FinderFolderOpener()
         self.longPressDurationNanoseconds = longPressDurationNanoseconds
         interactionState = configurationStore.loadInteractionState(for: layout) ?? DeckGridInteractionState(layout: layout)
-        brightnessPercent = configurationStore.loadBrightnessPercent() ?? DeckBrightnessConfiguration.defaultPercent
+        let loadedBrightnessPercent = configurationStore.loadBrightnessPercent()
+        hasPersistedBrightnessPercent = loadedBrightnessPercent != nil
+        brightnessPercent = loadedBrightnessPercent ?? DeckBrightnessConfiguration.defaultPercent
         self.syncer.setInputHandler { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handleInputEvent(event)
             }
         }
+        focusFilterBrightnessCancellable = focusFilterNotificationCenter
+            .publisher(for: UlanziDeckFocusFilterSettings.brightnessDidChangeNotification)
+            .compactMap {
+                $0.userInfo?[UlanziDeckFocusFilterSettings.brightnessPercentUserInfoKey] as? Int
+            }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] percent in
+                self?.setBrightnessPercent(percent, forceSend: true)
+            }
     }
 
     deinit {
@@ -179,13 +193,14 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
-    func setBrightnessPercent(_ percent: Int) {
+    func setBrightnessPercent(_ percent: Int, forceSend: Bool = false) {
         let clampedPercent = DeckBrightnessConfiguration.clamped(percent)
-        guard brightnessPercent != clampedPercent else {
+        guard brightnessPercent != clampedPercent || forceSend else {
             return
         }
 
         brightnessPercent = clampedPercent
+        hasPersistedBrightnessPercent = true
         configurationStore.saveBrightnessPercent(clampedPercent)
         requestBrightnessUpdate(percent: clampedPercent)
     }
@@ -209,6 +224,9 @@ final class H200ConnectionModel: ObservableObject {
         switch syncer.sendStartupPackage(displays: initialDisplays) {
         case let .success(summary):
             syncSummary = summary
+            if hasPersistedBrightnessPercent {
+                requestBrightnessUpdate(percent: brightnessPercent)
+            }
         case let .failure(error):
             alert = H200ConnectionAlert(syncFailure: error)
         }
