@@ -12,6 +12,7 @@ final class H200ConnectionModel: ObservableObject {
     private let layout = DeckGridLayout.h200Prototype
     private let discovery: H200Discovering
     private let syncer: H200DeckSyncing
+    private let configurationStore: DeckConfigurationStoring
     private let longPressDurationNanoseconds: UInt64
     private var longPressTasks: [Int: Task<Void, Never>] = [:]
     private var longPressResetKeyIDs: Set<Int> = []
@@ -19,11 +20,14 @@ final class H200ConnectionModel: ObservableObject {
     init(
         discovery: H200Discovering = H200HIDDiscovery(),
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
+        configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         longPressDurationNanoseconds: UInt64 = 1_000_000_000
     ) {
         self.discovery = discovery
         self.syncer = syncer
+        self.configurationStore = configurationStore
         self.longPressDurationNanoseconds = longPressDurationNanoseconds
+        interactionState = configurationStore.loadInteractionState(for: layout) ?? DeckGridInteractionState(layout: layout)
         self.syncer.setInputHandler { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handleInputEvent(event)
@@ -75,6 +79,7 @@ final class H200ConnectionModel: ObservableObject {
         longPressTasks[keyID]?.cancel()
         longPressTasks[keyID] = nil
         longPressResetKeyIDs.remove(keyID)
+        persistCurrentConfiguration()
         syncCurrentDisplays()
     }
 
@@ -111,6 +116,7 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         if interactionState.triggerShortPress(keyID: keyID) {
+            persistCurrentConfiguration()
             syncCurrentDisplays()
         }
     }
@@ -126,6 +132,7 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         if interactionState.assign(function, to: selectedKeyID) {
+            persistCurrentConfiguration()
             syncCurrentDisplays()
         }
     }
@@ -136,6 +143,7 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         if interactionState.setTallyDefaultValue(value, for: selectedKeyID) {
+            persistCurrentConfiguration()
             syncCurrentDisplays()
         }
     }
@@ -186,8 +194,13 @@ final class H200ConnectionModel: ObservableObject {
 
         longPressResetKeyIDs.insert(keyID)
         if interactionState.resetTally(keyID: keyID) {
+            persistCurrentConfiguration()
             syncCurrentDisplays()
         }
+    }
+
+    private func persistCurrentConfiguration() {
+        configurationStore.saveInteractionState(interactionState, for: layout)
     }
 
     private func syncCurrentDisplays() {

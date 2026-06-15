@@ -5,8 +5,9 @@
 ## 数据来源
 
 - UI 和发送包共用 `DeckKeyDisplay`。
-- 初始包使用 `DeckGridInteractionState(layout: .h200Prototype).displays(for: .h200Prototype)` 生成 14 个格子的标题和副标题。
-- 当前初始显示内容是每个格子的 tally 当前值和默认值；默认都是 `0`。
+- 启动时先通过 `UserDefaultsDeckConfigurationStore` 尝试恢复用户上次保存的 14 格配置；没有保存内容、保存内容损坏或布局不匹配时，回退到 `DeckGridInteractionState(layout: .h200Prototype)` 的默认配置。
+- 初始包使用恢复后的 `DeckGridInteractionState.displays(for: .h200Prototype)` 生成 14 个格子的标题和副标题。
+- 当前显示内容是每个格子的功能状态、tally 当前值和默认值；默认配置下每个格子都是 tally，当前值和默认值都是 `0`。
 - 第 14 个格子对应协议里的 `3_2` 宽槽位，占 2 列；UI 也按 2 列宽显示，避免 app 预览和设备包布局不一致。
 
 ## 包格式
@@ -33,6 +34,7 @@
 
 - 参考实现没有要求按固定周期重发完整 `0x0001` 按键 ZIP 包；完整包在初始化或布局内容变化时发送。
 - 当前 tally 原型在短按计数、长按重置、修改默认值后，会用同一个完整按键包同步当前可见状态。
+- 用户修改按键功能、修改默认值、物理短按计数和长按重置后，会同步写入本地 `UserDefaults`，下次启动用同一份状态生成首包。
 - app 会在启动同步成功后持续持有 H200 协议 HID 接口连接，直到重试、退出或同步器释放。
 - 参考实现里 5 秒 `keepAlive` 针对小窗时钟/状态数据，不是完整按键包刷新。
 - 当前原型会在启动同步后继续保活：1 秒后先发送一次 `0x0006` background 小窗数据，之后每 2 秒重复发送一次，避免 H200 在几秒后恢复离线/默认显示。

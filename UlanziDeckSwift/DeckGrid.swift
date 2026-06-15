@@ -8,11 +8,13 @@ nonisolated struct DeckGridLayout: Equatable {
         let columnSpan: Int
     }
 
+    let identifier: String
     let name: String
     let columnCount: Int
     let keys: [Key]
 
     static let h200Prototype = DeckGridLayout(
+        identifier: "h200Prototype",
         name: "H200 原型",
         columnCount: 5,
         keys: (1...14).map { number in
@@ -128,7 +130,7 @@ nonisolated struct DeckPreviewGridMetrics: Equatable {
     }
 }
 
-nonisolated enum DeckKeyFunction: Equatable, CaseIterable {
+nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case none
     case tally
 
@@ -153,7 +155,7 @@ nonisolated enum DeckKeyFunction: Equatable, CaseIterable {
     }
 }
 
-nonisolated struct DeckKeyTallyConfiguration: Equatable {
+nonisolated struct DeckKeyTallyConfiguration: Codable, Equatable {
     var defaultValue: Int
     var value: Int
 
@@ -163,7 +165,7 @@ nonisolated struct DeckKeyTallyConfiguration: Equatable {
     }
 }
 
-nonisolated struct DeckKeyConfiguration: Equatable {
+nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var function: DeckKeyFunction
     var tally: DeckKeyTallyConfiguration
 
@@ -189,6 +191,21 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations = Dictionary(uniqueKeysWithValues: layout.keys.map { ($0.id, .tallyDefault) })
         pressedKeyIDs = []
         validKeyIDs = Set(layout.keys.map(\.id))
+    }
+
+    init(layout: DeckGridLayout, configurations storedConfigurations: [Int: DeckKeyConfiguration]) {
+        let validKeyIDs = Set(layout.keys.map(\.id))
+
+        selectedKeyID = layout.keys.first?.id
+        configurations = Dictionary(uniqueKeysWithValues: layout.keys.map { ($0.id, .tallyDefault) })
+        pressedKeyIDs = []
+        self.validKeyIDs = validKeyIDs
+
+        for keyID in validKeyIDs {
+            if let configuration = storedConfigurations[keyID] {
+                configurations[keyID] = configuration
+            }
+        }
     }
 
     mutating func select(keyID: Int) {

@@ -109,6 +109,44 @@ struct UlanziDeckSwiftTests {
         #expect(state.tallyValue(for: 4) == 12)
     }
 
+    @Test func userDefaultsStoreRestoresSavedKeyConfiguration() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let layout = DeckGridLayout.h200Prototype
+        let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: "deckConfiguration")
+        var state = DeckGridInteractionState(layout: layout)
+        state.setTallyDefaultValue(6, for: 3)
+        state.triggerShortPress(keyID: 3)
+        state.clearFunction(keyID: 8)
+
+        store.saveInteractionState(state, for: layout)
+
+        let restored = try #require(store.loadInteractionState(for: layout))
+        #expect(restored.tallyDefaultValue(for: 3) == 6)
+        #expect(restored.tallyValue(for: 3) == 7)
+        #expect(restored.configuration(for: 8)?.function == DeckKeyFunction.none)
+        #expect(restored.pressedKeyIDs.isEmpty)
+        #expect(restored.selectedKeyID == 1)
+    }
+
+    @Test func userDefaultsStoreIgnoresBrokenConfigurationData() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let storageKey = "deckConfiguration"
+        let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: storageKey)
+        defaults.set(Data("不是 JSON".utf8), forKey: storageKey)
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+    }
+
     @Test func h200ProtocolInterfaceMatchesObservedReportShape() {
         let identity = Self.protocolInterfaceIdentity()
 
@@ -135,7 +173,11 @@ struct UlanziDeckSwiftTests {
     @MainActor
     @Test func launchCheckShowsRetryAlertWhenH200IsMissing() {
         let syncer = FakeH200DeckSyncer()
-        let model = H200ConnectionModel(discovery: FakeH200Discovery(results: [.notConnected]), syncer: syncer)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.notConnected]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
+        )
 
         model.checkOnLaunch()
 
@@ -149,7 +191,8 @@ struct UlanziDeckSwiftTests {
         let code = Self.exclusiveAccessReturnCode()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.communicationPortOccupied(code)]),
-            syncer: FakeH200DeckSyncer()
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore()
         )
 
         model.checkOnLaunch()
@@ -176,7 +219,7 @@ struct UlanziDeckSwiftTests {
         let model = H200ConnectionModel(discovery: FakeH200Discovery(results: [
             .notConnected,
             .connected(connectedIdentity),
-        ]), syncer: syncer)
+        ]), syncer: syncer, configurationStore: FakeDeckConfigurationStore())
 
         model.checkOnLaunch()
         model.retry()
@@ -197,7 +240,8 @@ struct UlanziDeckSwiftTests {
         ])
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
-            syncer: syncer
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
         )
 
         model.checkOnLaunch()
@@ -210,12 +254,64 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func launchUsesPersistedConfigurationWhenSyncingDevice() {
+        let layout = DeckGridLayout.h200Prototype
+        var persistedState = DeckGridInteractionState(layout: layout)
+        persistedState.setTallyDefaultValue(4, for: 3)
+        persistedState.triggerShortPress(keyID: 3)
+        persistedState.clearFunction(keyID: 7)
+        let store = FakeDeckConfigurationStore(loadedState: persistedState)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store
+        )
+
+        model.checkOnLaunch()
+
+        #expect(model.interactionState.tallyDefaultValue(for: 3) == 4)
+        #expect(model.interactionState.tallyValue(for: 3) == 5)
+        #expect(model.interactionState.configuration(for: 7)?.function == DeckKeyFunction.none)
+        #expect(syncer.sentDisplays.first?[2].title == "5")
+        #expect(syncer.sentDisplays.first?[2].subtitle == "默认 4")
+        #expect(syncer.sentDisplays.first?[6].title == "")
+        #expect(syncer.sentDisplays.first?[6].subtitle == "")
+    }
+
+    @MainActor
+    @Test func configurationChangesArePersisted() async throws {
+        let store = FakeDeckConfigurationStore()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 2)
+        model.setSelectedTallyDefaultValue(3)
+        syncer.emitInput(H200InputEvent(state: 1, index: 1, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 1, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        model.clearKeyFunction(keyID: 2)
+
+        #expect(store.savedStates.count == 3)
+        #expect(store.savedStates[0].tallyDefaultValue(for: 2) == 3)
+        #expect(store.savedStates[1].tallyValue(for: 2) == 4)
+        #expect(store.savedStates[2].configuration(for: 2)?.function == DeckKeyFunction.none)
+    }
+
+    @MainActor
     @Test func uiSelectionChangesParameterTargetWithoutSyncingDisplays() {
         let connectedIdentity = Self.protocolInterfaceIdentity()
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
-            syncer: syncer
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
         )
 
         model.checkOnLaunch()
@@ -231,7 +327,8 @@ struct UlanziDeckSwiftTests {
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
-            syncer: syncer
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
         )
 
         model.checkOnLaunch()
@@ -256,7 +353,8 @@ struct UlanziDeckSwiftTests {
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
-            syncer: syncer
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
         )
 
         model.checkOnLaunch()
@@ -275,7 +373,8 @@ struct UlanziDeckSwiftTests {
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
-            syncer: syncer
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
         )
 
         model.checkOnLaunch()
@@ -295,7 +394,8 @@ struct UlanziDeckSwiftTests {
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
-            syncer: syncer
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
         )
 
         model.checkOnLaunch()
@@ -319,7 +419,8 @@ struct UlanziDeckSwiftTests {
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
-            syncer: syncer
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
         )
 
         model.checkOnLaunch()
@@ -338,6 +439,7 @@ struct UlanziDeckSwiftTests {
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
             syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
             longPressDurationNanoseconds: 10_000_000
         )
 
@@ -363,7 +465,8 @@ struct UlanziDeckSwiftTests {
         let syncer = FakeH200DeckSyncer(results: [.failure(.communicationPortOccupied(code))])
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
-            syncer: syncer
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
         )
 
         model.checkOnLaunch()
@@ -579,5 +682,22 @@ private final class FakeH200Discovery: H200Discovering {
         }
 
         return results.removeFirst()
+    }
+}
+
+private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
+    private let loadedState: DeckGridInteractionState?
+    private(set) var savedStates: [DeckGridInteractionState] = []
+
+    init(loadedState: DeckGridInteractionState? = nil) {
+        self.loadedState = loadedState
+    }
+
+    func loadInteractionState(for layout: DeckGridLayout) -> DeckGridInteractionState? {
+        loadedState
+    }
+
+    func saveInteractionState(_ state: DeckGridInteractionState, for layout: DeckGridLayout) {
+        savedStates.append(state)
     }
 }

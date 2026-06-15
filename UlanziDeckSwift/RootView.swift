@@ -3,8 +3,16 @@ import SwiftUI
 struct RootView: View {
     @StateObject private var connectionModel: H200ConnectionModel
 
-    init(discovery: H200Discovering = H200HIDDiscovery(), syncer: H200DeckSyncing = H200HIDDeckSyncer()) {
-        _connectionModel = StateObject(wrappedValue: H200ConnectionModel(discovery: discovery, syncer: syncer))
+    init(
+        discovery: H200Discovering = H200HIDDiscovery(),
+        syncer: H200DeckSyncing = H200HIDDeckSyncer(),
+        configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore()
+    ) {
+        _connectionModel = StateObject(wrappedValue: H200ConnectionModel(
+            discovery: discovery,
+            syncer: syncer,
+            configurationStore: configurationStore
+        ))
     }
 
     var body: some View {
