@@ -5,6 +5,7 @@ struct ContentView: View {
     let connectedDevice: H200DeviceIdentity?
     let syncSummary: H200DeckSyncSummary?
     let interactionState: DeckGridInteractionState
+    let onKeySelection: (Int) -> Void
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
 
@@ -71,14 +72,15 @@ struct ContentView: View {
             ForEach(Array(layout.rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: CGFloat(previewMetrics.spacing)) {
                     ForEach(row) { key in
-                        DeckKeyButton(display: interactionState.display(for: key), metrics: previewMetrics)
+                        DeckKeyButton(display: interactionState.display(for: key), metrics: previewMetrics) {
+                            onKeySelection(key.id)
+                        }
                     }
                 }
                 .frame(maxWidth: .infinity)
             }
         }
         .padding(28)
-        .animation(.snappy(duration: 0.18), value: interactionState)
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.linearGradient(
@@ -299,6 +301,33 @@ private struct FunctionRow: View {
 private struct DeckKeyButton: View {
     let display: DeckKeyDisplay
     let metrics: DeckPreviewGridMetrics
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            DeckKeyRenderedImage(display: display, metrics: metrics)
+                .equatable()
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(display.isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
+                }
+                .shadow(color: .black.opacity(0.22), radius: 7, y: 4)
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .accessibilityLabel("设备按键 \(display.id)")
+        .accessibilityValue("\(display.title)，\(display.subtitle)")
+    }
+}
+
+private struct DeckKeyRenderedImage: View, Equatable {
+    let display: DeckKeyDisplay
+    let metrics: DeckPreviewGridMetrics
+
+    static func == (lhs: DeckKeyRenderedImage, rhs: DeckKeyRenderedImage) -> Bool {
+        lhs.display.renderIdentity == rhs.display.renderIdentity
+            && lhs.metrics == rhs.metrics
+    }
 
     var body: some View {
         renderedImage
@@ -306,9 +335,6 @@ private struct DeckKeyButton: View {
             .interpolation(.high)
             .aspectRatio(aspectRatio, contentMode: .fit)
             .frame(width: buttonWidth, height: CGFloat(metrics.cellLength))
-            .shadow(color: .black.opacity(0.22), radius: 7, y: 4)
-        .accessibilityLabel("设备按键 \(display.id)")
-        .accessibilityValue("\(display.title)，\(display.subtitle)")
     }
 
     private var renderedImage: Image {
@@ -347,6 +373,7 @@ private struct DeckKeyButton: View {
         ),
         syncSummary: H200DeckSyncSummary(payloadByteCount: 4096, packetCount: 4, displayCount: 14),
         interactionState: DeckGridInteractionState(layout: .h200Prototype),
+        onKeySelection: { _ in },
         onFunctionSelection: { _ in },
         onTallyDefaultValueChange: { _ in }
     )

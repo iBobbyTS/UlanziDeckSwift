@@ -78,6 +78,28 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     var devicePixelSize: H200DeviceTarget.PixelSize {
         isWide ? H200DeviceTarget.smallWindowIconSize : H200DeviceTarget.buttonIconSize
     }
+
+    var renderIdentity: DeckKeyRenderIdentity {
+        DeckKeyRenderIdentity(
+            id: id,
+            row: row,
+            column: column,
+            columnSpan: columnSpan,
+            title: title,
+            subtitle: subtitle,
+            devicePixelSize: devicePixelSize
+        )
+    }
+}
+
+nonisolated struct DeckKeyRenderIdentity: Equatable {
+    let id: Int
+    let row: Int
+    let column: Int
+    let columnSpan: Int
+    let title: String
+    let subtitle: String
+    let devicePixelSize: H200DeviceTarget.PixelSize
 }
 
 nonisolated struct DeckPreviewGridMetrics: Equatable {
@@ -164,7 +186,6 @@ nonisolated struct DeckGridInteractionState: Equatable {
             return false
         }
 
-        selectedKeyID = keyID
         pressedKeyIDs.insert(keyID)
         return true
     }
@@ -178,7 +199,6 @@ nonisolated struct DeckGridInteractionState: Equatable {
             return
         }
 
-        selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].tally.value += 1
     }
 
@@ -187,7 +207,6 @@ nonisolated struct DeckGridInteractionState: Equatable {
             return
         }
 
-        selectedKeyID = keyID
         let defaultValue = configurations[keyID, default: .tallyDefault].tally.defaultValue
         configurations[keyID, default: .tallyDefault].tally.value = defaultValue
     }

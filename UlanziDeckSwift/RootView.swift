@@ -11,12 +11,17 @@ struct RootView: View {
         ContentView(
             connectedDevice: connectionModel.connectedDevice,
             syncSummary: connectionModel.syncSummary,
-            interactionState: connectionModel.interactionState
-        ) { function in
-            connectionModel.assignSelectedFunction(function)
-        } onTallyDefaultValueChange: { value in
-            connectionModel.setSelectedTallyDefaultValue(value)
-        }
+            interactionState: connectionModel.interactionState,
+            onKeySelection: { keyID in
+                connectionModel.selectKey(keyID: keyID)
+            },
+            onFunctionSelection: { function in
+                connectionModel.assignSelectedFunction(function)
+            },
+            onTallyDefaultValueChange: { value in
+                connectionModel.setSelectedTallyDefaultValue(value)
+            }
+        )
             .task {
                 connectionModel.checkOnLaunch()
             }

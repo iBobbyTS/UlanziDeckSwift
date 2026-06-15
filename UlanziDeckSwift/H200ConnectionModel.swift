@@ -63,6 +63,10 @@ final class H200ConnectionModel: ObservableObject {
         NSApplication.shared.terminate(nil)
     }
 
+    func selectKey(keyID: Int) {
+        interactionState.select(keyID: keyID)
+    }
+
     private func beginKeyPress(keyID: Int) {
         guard interactionState.beginPress(keyID: keyID) else {
             return

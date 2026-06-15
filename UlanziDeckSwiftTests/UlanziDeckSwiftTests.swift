@@ -24,7 +24,7 @@ struct UlanziDeckSwiftTests {
         #expect(layout.rows.map { metrics.rowWidth(for: $0) } == [474, 474, 474])
     }
 
-    @Test func shortPressingAKeySelectsItAndIncrementsTally() {
+    @Test func shortPressingAKeyDoesNotChangeUISelectionAndIncrementsTally() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
 
@@ -32,7 +32,7 @@ struct UlanziDeckSwiftTests {
         state.triggerShortPress(keyID: 7)
         state.triggerShortPress(keyID: 14)
 
-        #expect(state.selectedKeyID == 14)
+        #expect(state.selectedKeyID == 1)
         #expect(state.tallyValue(for: 7) == 2)
         #expect(state.tallyValue(for: 14) == 1)
     }
@@ -47,6 +47,20 @@ struct UlanziDeckSwiftTests {
         #expect(displays.first?.isSelected == true)
         #expect(displays.last?.isWide == true)
         #expect(displays.last?.devicePixelSize == H200DeviceTarget.smallWindowIconSize)
+    }
+
+    @Test func uiSelectionDoesNotChangeDisplayRenderIdentity() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        let initiallySelectedIdentity = state.display(for: layout.keys[0]).renderIdentity
+
+        state.select(keyID: 2)
+        let unselectedIdentity = state.display(for: layout.keys[0]).renderIdentity
+        state.triggerShortPress(keyID: 1)
+        let updatedContentIdentity = state.display(for: layout.keys[0]).renderIdentity
+
+        #expect(initiallySelectedIdentity == unselectedIdentity)
+        #expect(initiallySelectedIdentity != updatedContentIdentity)
     }
 
     @Test func unknownKeyDoesNotChangeTallyState() {
@@ -174,7 +188,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func physicalButtonShortPressIncrementsTally() async throws {
+    @Test func uiSelectionChangesParameterTargetWithoutSyncingDisplays() {
         let connectedIdentity = Self.protocolInterfaceIdentity()
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
@@ -183,6 +197,23 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        model.selectKey(keyID: 8)
+
+        #expect(model.interactionState.selectedKeyID == 8)
+        #expect(syncer.sentDisplays.count == 1)
+    }
+
+    @MainActor
+    @Test func physicalButtonShortPressIncrementsTallyWithoutChangingUISelection() async throws {
+        let connectedIdentity = Self.protocolInterfaceIdentity()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
+            syncer: syncer
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 3)
         syncer.emitInput(H200InputEvent(state: 1, index: 6, type: .button, action: .press))
         try await Task.sleep(nanoseconds: 50_000_000)
         syncer.emitInput(H200InputEvent(state: 0, index: 6, type: .button, action: .release))
@@ -192,7 +223,7 @@ struct UlanziDeckSwiftTests {
         syncer.emitInput(H200InputEvent(state: 0, index: 6, type: .button, action: .release))
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        #expect(model.interactionState.selectedKeyID == 7)
+        #expect(model.interactionState.selectedKeyID == 3)
         #expect(model.interactionState.tallyValue(for: 7) == 2)
     }
 
