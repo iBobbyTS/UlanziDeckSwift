@@ -15,6 +15,15 @@ struct UlanziDeckSwiftTests {
         #expect(layout.keyID(forSequentialInputIndex: 14) == nil)
     }
 
+    @Test func previewGridMetricsKeepsWideKeyRowAligned() {
+        let layout = DeckGridLayout.h200Prototype
+        let metrics = DeckPreviewGridMetrics.h200
+
+        #expect(metrics.slotWidth(columnSpan: 1) == 82)
+        #expect(metrics.slotWidth(columnSpan: 2) == 180)
+        #expect(layout.rows.map { metrics.rowWidth(for: $0) } == [474, 474, 474])
+    }
+
     @Test func shortPressingAKeySelectsItAndIncrementsTally() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)

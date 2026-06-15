@@ -9,6 +9,7 @@ struct ContentView: View {
     let onTallyDefaultValueChange: (Int) -> Void
 
     private let layout = DeckGridLayout.h200Prototype
+    private let previewMetrics = DeckPreviewGridMetrics.h200
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,11 +67,11 @@ struct ContentView: View {
     }
 
     private var deckSurface: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: CGFloat(previewMetrics.spacing)) {
             ForEach(Array(layout.rows.enumerated()), id: \.offset) { _, row in
-                HStack(spacing: 16) {
+                HStack(spacing: CGFloat(previewMetrics.spacing)) {
                     ForEach(row) { key in
-                        DeckKeyButton(display: interactionState.display(for: key))
+                        DeckKeyButton(display: interactionState.display(for: key), metrics: previewMetrics)
                     }
                 }
                 .frame(maxWidth: .infinity)
@@ -297,13 +298,14 @@ private struct FunctionRow: View {
 
 private struct DeckKeyButton: View {
     let display: DeckKeyDisplay
+    let metrics: DeckPreviewGridMetrics
 
     var body: some View {
         renderedImage
             .resizable()
             .interpolation(.high)
             .aspectRatio(aspectRatio, contentMode: .fit)
-            .frame(width: buttonWidth, height: 82)
+            .frame(width: buttonWidth, height: CGFloat(metrics.cellLength))
             .shadow(color: .black.opacity(0.22), radius: 7, y: 4)
         .accessibilityLabel("设备按键 \(display.id)")
         .accessibilityValue("\(display.title)，\(display.subtitle)")
@@ -325,7 +327,7 @@ private struct DeckKeyButton: View {
     }
 
     private var buttonWidth: CGFloat {
-        82 * aspectRatio
+        CGFloat(metrics.slotWidth(columnSpan: display.columnSpan))
     }
 }
 

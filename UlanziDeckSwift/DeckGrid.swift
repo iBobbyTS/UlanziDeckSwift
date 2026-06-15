@@ -80,6 +80,26 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     }
 }
 
+nonisolated struct DeckPreviewGridMetrics: Equatable {
+    let cellLength: Double
+    let spacing: Double
+
+    static let h200 = DeckPreviewGridMetrics(cellLength: 82, spacing: 16)
+
+    func slotWidth(columnSpan: Int) -> Double {
+        let safeColumnSpan = max(1, columnSpan)
+        return Double(safeColumnSpan) * cellLength + Double(safeColumnSpan - 1) * spacing
+    }
+
+    func rowWidth(for keys: [DeckGridLayout.Key]) -> Double {
+        let slotWidth = keys.reduce(0) { partialResult, key in
+            partialResult + self.slotWidth(columnSpan: key.columnSpan)
+        }
+        let visibleSpacing = Double(max(0, keys.count - 1)) * spacing
+        return slotWidth + visibleSpacing
+    }
+}
+
 nonisolated enum DeckKeyFunction: Equatable, CaseIterable {
     case tally
 
