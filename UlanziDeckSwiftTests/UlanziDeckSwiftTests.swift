@@ -63,6 +63,28 @@ struct UlanziDeckSwiftTests {
         #expect(initiallySelectedIdentity != updatedContentIdentity)
     }
 
+    @Test func clearingFunctionMakesKeyEmptyAndInactive() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        let didClear = state.clearFunction(keyID: 7)
+        let didBeginPress = state.beginPress(keyID: 7)
+        let didTriggerShortPress = state.triggerShortPress(keyID: 7)
+        let didReset = state.resetTally(keyID: 7)
+
+        let display = state.display(for: layout.keys[6])
+        #expect(didClear)
+        #expect(!didBeginPress)
+        #expect(!didTriggerShortPress)
+        #expect(!didReset)
+        #expect(state.selectedKeyID == 7)
+        #expect(state.configuration(for: 7)?.function == DeckKeyFunction.none)
+        #expect(state.tallyValue(for: 7) == 0)
+        #expect(state.pressedKeyIDs.isEmpty)
+        #expect(display.title.isEmpty)
+        #expect(display.subtitle.isEmpty)
+    }
+
     @Test func unknownKeyDoesNotChangeTallyState() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
@@ -201,6 +223,70 @@ struct UlanziDeckSwiftTests {
 
         #expect(model.interactionState.selectedKeyID == 8)
         #expect(syncer.sentDisplays.count == 1)
+    }
+
+    @MainActor
+    @Test func clearingFunctionSyncsEmptyDisplayAndIgnoresPhysicalInput() async throws {
+        let connectedIdentity = Self.protocolInterfaceIdentity()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
+            syncer: syncer
+        )
+
+        model.checkOnLaunch()
+        model.clearKeyFunction(keyID: 7)
+        syncer.emitInput(H200InputEvent(state: 1, index: 6, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 6, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(model.interactionState.selectedKeyID == 7)
+        #expect(model.interactionState.configuration(for: 7)?.function == DeckKeyFunction.none)
+        #expect(model.interactionState.tallyValue(for: 7) == 0)
+        #expect(model.interactionState.pressedKeyIDs.isEmpty)
+        #expect(syncer.sentDisplays.count == 2)
+        #expect(syncer.sentDisplays.last?[6].title == "")
+        #expect(syncer.sentDisplays.last?[6].subtitle == "")
+    }
+
+    @MainActor
+    @Test func selectingTheSameSidebarFunctionAgainClearsIt() {
+        let connectedIdentity = Self.protocolInterfaceIdentity()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
+            syncer: syncer
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 7)
+        model.assignSelectedFunction(.tally)
+
+        #expect(model.interactionState.configuration(for: 7)?.function == DeckKeyFunction.none)
+        #expect(syncer.sentDisplays.count == 2)
+        #expect(syncer.sentDisplays.last?[6].title == "")
+        #expect(syncer.sentDisplays.last?[6].subtitle == "")
+    }
+
+    @MainActor
+    @Test func sidebarFunctionCanRestoreClearedKey() {
+        let connectedIdentity = Self.protocolInterfaceIdentity()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(connectedIdentity)]),
+            syncer: syncer
+        )
+
+        model.checkOnLaunch()
+        model.clearKeyFunction(keyID: 7)
+        model.assignSelectedFunction(.tally)
+
+        #expect(model.interactionState.selectedKeyID == 7)
+        #expect(model.interactionState.configuration(for: 7)?.function == .tally)
+        #expect(syncer.sentDisplays.count == 3)
+        #expect(syncer.sentDisplays.last?[6].title == "0")
+        #expect(syncer.sentDisplays.last?[6].subtitle == "默认 0")
     }
 
     @MainActor

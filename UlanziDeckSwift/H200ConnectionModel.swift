@@ -67,6 +67,17 @@ final class H200ConnectionModel: ObservableObject {
         interactionState.select(keyID: keyID)
     }
 
+    func clearKeyFunction(keyID: Int) {
+        guard interactionState.clearFunction(keyID: keyID) else {
+            return
+        }
+
+        longPressTasks[keyID]?.cancel()
+        longPressTasks[keyID] = nil
+        longPressResetKeyIDs.remove(keyID)
+        syncCurrentDisplays()
+    }
+
     private func beginKeyPress(keyID: Int) {
         guard interactionState.beginPress(keyID: keyID) else {
             return
@@ -99,8 +110,9 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        interactionState.triggerShortPress(keyID: keyID)
-        syncCurrentDisplays()
+        if interactionState.triggerShortPress(keyID: keyID) {
+            syncCurrentDisplays()
+        }
     }
 
     func assignSelectedFunction(_ function: DeckKeyFunction) {
@@ -108,8 +120,14 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        interactionState.assign(function, to: selectedKeyID)
-        syncCurrentDisplays()
+        if interactionState.configuration(for: selectedKeyID)?.function == function {
+            clearKeyFunction(keyID: selectedKeyID)
+            return
+        }
+
+        if interactionState.assign(function, to: selectedKeyID) {
+            syncCurrentDisplays()
+        }
     }
 
     func setSelectedTallyDefaultValue(_ value: Int) {
@@ -117,8 +135,9 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        interactionState.setTallyDefaultValue(value, for: selectedKeyID)
-        syncCurrentDisplays()
+        if interactionState.setTallyDefaultValue(value, for: selectedKeyID) {
+            syncCurrentDisplays()
+        }
     }
 
     private func refresh() {
@@ -166,8 +185,9 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         longPressResetKeyIDs.insert(keyID)
-        interactionState.resetTally(keyID: keyID)
-        syncCurrentDisplays()
+        if interactionState.resetTally(keyID: keyID) {
+            syncCurrentDisplays()
+        }
     }
 
     private func syncCurrentDisplays() {

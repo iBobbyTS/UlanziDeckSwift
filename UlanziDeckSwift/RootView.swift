@@ -15,6 +15,9 @@ struct RootView: View {
             onKeySelection: { keyID in
                 connectionModel.selectKey(keyID: keyID)
             },
+            onKeyFunctionDeletion: { keyID in
+                connectionModel.clearKeyFunction(keyID: keyID)
+            },
             onFunctionSelection: { function in
                 connectionModel.assignSelectedFunction(function)
             },

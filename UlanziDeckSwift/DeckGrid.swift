@@ -65,8 +65,14 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         row = key.row
         column = key.column
         columnSpan = key.columnSpan
-        title = "\(configuration.tally.value)"
-        subtitle = "默认 \(configuration.tally.defaultValue)"
+        switch configuration.function {
+        case .none:
+            title = ""
+            subtitle = ""
+        case .tally:
+            title = "\(configuration.tally.value)"
+            subtitle = "默认 \(configuration.tally.defaultValue)"
+        }
         self.isSelected = isSelected
         self.isPressed = isPressed
     }
@@ -123,10 +129,15 @@ nonisolated struct DeckPreviewGridMetrics: Equatable {
 }
 
 nonisolated enum DeckKeyFunction: Equatable, CaseIterable {
+    case none
     case tally
+
+    static let assignableCases: [DeckKeyFunction] = [.tally]
 
     var title: String {
         switch self {
+        case .none:
+            return "无功能"
         case .tally:
             return "计数器"
         }
@@ -134,6 +145,8 @@ nonisolated enum DeckKeyFunction: Equatable, CaseIterable {
 
     var systemImageName: String {
         switch self {
+        case .none:
+            return "minus.circle"
         case .tally:
             return "number.square"
         }
@@ -153,6 +166,11 @@ nonisolated struct DeckKeyTallyConfiguration: Equatable {
 nonisolated struct DeckKeyConfiguration: Equatable {
     var function: DeckKeyFunction
     var tally: DeckKeyTallyConfiguration
+
+    static let empty = DeckKeyConfiguration(
+        function: .none,
+        tally: DeckKeyTallyConfiguration()
+    )
 
     static let tallyDefault = DeckKeyConfiguration(
         function: .tally,
@@ -182,7 +200,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
     }
 
     mutating func beginPress(keyID: Int) -> Bool {
-        guard validKeyIDs.contains(keyID), !pressedKeyIDs.contains(keyID) else {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function != .none,
+              !pressedKeyIDs.contains(keyID)
+        else {
             return false
         }
 
@@ -194,40 +215,66 @@ nonisolated struct DeckGridInteractionState: Equatable {
         pressedKeyIDs.remove(keyID)
     }
 
-    mutating func triggerShortPress(keyID: Int) {
-        guard validKeyIDs.contains(keyID) else {
-            return
+    @discardableResult
+    mutating func triggerShortPress(keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .tally
+        else {
+            return false
         }
 
         configurations[keyID, default: .tallyDefault].tally.value += 1
+        return true
     }
 
-    mutating func resetTally(keyID: Int) {
-        guard validKeyIDs.contains(keyID) else {
-            return
+    @discardableResult
+    mutating func resetTally(keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .tally
+        else {
+            return false
         }
 
         let defaultValue = configurations[keyID, default: .tallyDefault].tally.defaultValue
         configurations[keyID, default: .tallyDefault].tally.value = defaultValue
+        return true
     }
 
-    mutating func setTallyDefaultValue(_ value: Int, for keyID: Int) {
-        guard validKeyIDs.contains(keyID) else {
-            return
+    @discardableResult
+    mutating func setTallyDefaultValue(_ value: Int, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .tally
+        else {
+            return false
         }
 
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].tally.defaultValue = value
         configurations[keyID, default: .tallyDefault].tally.value = value
+        return true
     }
 
-    mutating func assign(_ function: DeckKeyFunction, to keyID: Int) {
+    @discardableResult
+    mutating func assign(_ function: DeckKeyFunction, to keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID) else {
-            return
+            return false
         }
 
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].function = function
+        return true
+    }
+
+    @discardableResult
+    mutating func clearFunction(keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID) else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        pressedKeyIDs.remove(keyID)
+        configurations[keyID] = .empty
+        return true
     }
 
     func configuration(for keyID: Int) -> DeckKeyConfiguration? {

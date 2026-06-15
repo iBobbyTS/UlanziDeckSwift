@@ -6,6 +6,7 @@ struct ContentView: View {
     let syncSummary: H200DeckSyncSummary?
     let interactionState: DeckGridInteractionState
     let onKeySelection: (Int) -> Void
+    let onKeyFunctionDeletion: (Int) -> Void
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
 
@@ -74,6 +75,8 @@ struct ContentView: View {
                     ForEach(row) { key in
                         DeckKeyButton(display: interactionState.display(for: key), metrics: previewMetrics) {
                             onKeySelection(key.id)
+                        } deleteAction: {
+                            onKeyFunctionDeletion(key.id)
                         }
                     }
                 }
@@ -131,7 +134,7 @@ struct ContentView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
 
-                ForEach(DeckKeyFunction.allCases, id: \.self) { function in
+                ForEach(DeckKeyFunction.assignableCases, id: \.self) { function in
                     FunctionRow(
                         function: function,
                         isSelected: selectedConfiguration?.function == function
@@ -166,44 +169,7 @@ struct ContentView: View {
             Divider()
 
             if let selectedConfiguration {
-                HStack(spacing: 28) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("功能")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        Label(selectedConfiguration.function.title, systemImage: selectedConfiguration.function.systemImageName)
-                            .font(.callout.weight(.medium))
-                    }
-                    .frame(width: 150, alignment: .leading)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("当前值")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        Text("\(selectedConfiguration.tally.value)")
-                            .font(.title2.monospacedDigit().weight(.semibold))
-                    }
-                    .frame(width: 110, alignment: .leading)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("默认数值")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        HStack(spacing: 10) {
-                            TextField("默认数值", value: selectedTallyDefaultValueBinding, format: .number)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 96)
-
-                            Stepper("默认数值", value: selectedTallyDefaultValueBinding, in: -999...999)
-                                .labelsHidden()
-                        }
-                    }
-
-                    Spacer()
-                }
+                parameterContent(for: selectedConfiguration)
             } else {
                 Text("选择一个按键")
                     .font(.callout)
@@ -214,6 +180,76 @@ struct ContentView: View {
         .padding(.vertical, 18)
         .frame(height: 174, alignment: .top)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    @ViewBuilder
+    private func parameterContent(for configuration: DeckKeyConfiguration) -> some View {
+        switch configuration.function {
+        case .none:
+            HStack(spacing: 28) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("功能")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
+                        .font(.callout.weight(.medium))
+                }
+                .frame(width: 150, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("参数")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text("无可配置参数")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+        case .tally:
+            HStack(spacing: 28) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("功能")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
+                        .font(.callout.weight(.medium))
+                }
+                .frame(width: 150, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("当前值")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text("\(configuration.tally.value)")
+                        .font(.title2.monospacedDigit().weight(.semibold))
+                }
+                .frame(width: 110, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("默认数值")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 10) {
+                        TextField("默认数值", value: selectedTallyDefaultValueBinding, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 96)
+
+                        Stepper("默认数值", value: selectedTallyDefaultValueBinding, in: -999...999)
+                            .labelsHidden()
+                    }
+                }
+
+                Spacer()
+            }
+        }
     }
 }
 
@@ -302,6 +338,7 @@ private struct DeckKeyButton: View {
     let display: DeckKeyDisplay
     let metrics: DeckPreviewGridMetrics
     let action: () -> Void
+    let deleteAction: () -> Void
 
     var body: some View {
         Button(action: action) {
@@ -315,8 +352,13 @@ private struct DeckKeyButton: View {
         }
         .buttonStyle(.plain)
         .focusable(false)
+        .contextMenu {
+            Button(role: .destructive, action: deleteAction) {
+                Label("删除", systemImage: "trash")
+            }
+        }
         .accessibilityLabel("设备按键 \(display.id)")
-        .accessibilityValue("\(display.title)，\(display.subtitle)")
+        .accessibilityValue(display.title.isEmpty ? "无功能" : "\(display.title)，\(display.subtitle)")
     }
 }
 
@@ -374,6 +416,7 @@ private struct DeckKeyRenderedImage: View, Equatable {
         syncSummary: H200DeckSyncSummary(payloadByteCount: 4096, packetCount: 4, displayCount: 14),
         interactionState: DeckGridInteractionState(layout: .h200Prototype),
         onKeySelection: { _ in },
+        onKeyFunctionDeletion: { _ in },
         onFunctionSelection: { _ in },
         onTallyDefaultValueChange: { _ in }
     )
