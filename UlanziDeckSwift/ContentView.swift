@@ -17,6 +17,10 @@ struct ContentView: View {
 
     private let layout = DeckGridLayout.h200Prototype
     private let previewMetrics = DeckPreviewGridMetrics.h200
+    private let previewOuterPadding: CGFloat = 28
+    private let previewInnerPadding: CGFloat = 28
+    private let previewPageSpacing: CGFloat = 18
+    private let pageSelectorHeight: CGFloat = 26
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,6 +30,24 @@ struct ContentView: View {
         }
         .frame(minWidth: 940, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var deckPreviewAreaHeight: CGFloat {
+        previewOuterPadding * 2
+            + previewGridContentHeight
+            + previewPageSpacing
+            + pageSelectorHeight
+    }
+
+    private var previewGridContentWidth: CGFloat {
+        CGFloat(previewMetrics.rowWidth(for: layout.rows.first ?? []))
+    }
+
+    private var previewGridContentHeight: CGFloat {
+        let rowCount = CGFloat(layout.rows.count)
+        let cellHeight = CGFloat(previewMetrics.cellLength) * rowCount
+        let spacingHeight = CGFloat(max(0, layout.rows.count - 1)) * CGFloat(previewMetrics.spacing)
+        return cellHeight + spacingHeight
     }
 
     private var header: some View {
@@ -85,6 +107,7 @@ struct ContentView: View {
                 Divider()
                 parameterPanel
             }
+            .frame(maxHeight: .infinity, alignment: .top)
 
             Divider()
 
@@ -94,13 +117,13 @@ struct ContentView: View {
     }
 
     private var deckPreviewArea: some View {
-        VStack(spacing: 18) {
-            Spacer(minLength: 8)
+        VStack(spacing: previewPageSpacing) {
             deckSurface
             pageSelector
-            Spacer(minLength: 8)
         }
-        .padding(28)
+        .padding(previewOuterPadding)
+        .frame(maxWidth: .infinity)
+        .frame(height: deckPreviewAreaHeight, alignment: .top)
     }
 
     private var deckSurface: some View {
@@ -115,10 +138,10 @@ struct ContentView: View {
                         }
                     }
                 }
-                .frame(maxWidth: .infinity)
+                .frame(width: previewGridContentWidth)
             }
         }
-        .padding(28)
+        .padding(previewInnerPadding)
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.linearGradient(
@@ -156,6 +179,7 @@ struct ContentView: View {
                 .frame(width: 34, height: 22)
         }
         .padding(2)
+        .frame(height: pageSelectorHeight)
         .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
     }
 
@@ -203,7 +227,7 @@ struct ContentView: View {
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 18)
-        .frame(height: 174, alignment: .top)
+        .frame(minHeight: 174, maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
