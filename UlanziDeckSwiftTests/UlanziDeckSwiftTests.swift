@@ -187,16 +187,32 @@ struct UlanziDeckSwiftTests {
         #expect(store.loadInteractionState(for: .h200Prototype) == nil)
     }
 
-    @Test func focusFilterSettingsPersistClampedBrightness() {
+    @Test func focusFilterSettingsPersistAndPostClampedBrightness() {
         let store = FakeDeckConfigurationStore()
+        let notificationCenter = NotificationCenter()
+        final class NotificationBox {
+            var brightnessPercent: Int?
+        }
+        let box = NotificationBox()
+        let token = notificationCenter.addObserver(
+            forName: UlanziDeckFocusFilterSettings.brightnessDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { notification in
+            box.brightnessPercent = notification.userInfo?[UlanziDeckFocusFilterSettings.brightnessPercentUserInfoKey] as? Int
+        }
+        defer {
+            notificationCenter.removeObserver(token)
+        }
 
         UlanziDeckFocusFilterSettings.apply(
             brightnessPercent: 140,
             configurationStore: store,
-            notificationCenter: NotificationCenter()
+            notificationCenter: notificationCenter
         )
 
         #expect(store.savedBrightnessPercents == [100])
+        #expect(box.brightnessPercent == 100)
     }
 
     @MainActor
@@ -530,12 +546,13 @@ struct UlanziDeckSwiftTests {
         model.checkOnLaunch()
         let sentDisplayCount = syncer.sentDisplays.count
 
-        model.setBrightnessPercent(10)
-        model.setBrightnessPercent(20)
-        model.setBrightnessPercent(30)
+        model.previewBrightnessPercent(10)
+        model.previewBrightnessPercent(20)
+        model.previewBrightnessPercent(30)
+        model.commitBrightnessPercent(30)
 
         #expect(model.brightnessPercent == 30)
-        #expect(store.savedBrightnessPercents == [10, 20, 30])
+        #expect(store.savedBrightnessPercents == [30])
         try await Self.waitUntil {
             syncer.brightnessPercents == [10, 30]
                 && syncer.sentDisplays.count == sentDisplayCount
@@ -587,7 +604,7 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
-        model.setBrightnessPercent(25)
+        model.commitBrightnessPercent(25)
         try await Self.waitUntil {
             model.alert?.title == "H200 通信端口被占用"
         }
@@ -936,7 +953,7 @@ struct UlanziDeckSwiftTests {
 private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
     private let lock = NSLock()
     private var results: [H200DeckSyncResult]
-    private var brightnessFailures: [H200DeckSyncFailure]
+    private var brightnessResults: [H200DeckSyncFailure?]
     private var storedSentDisplays: [[DeckKeyDisplay]] = []
     private var storedBrightnessPercents: [Int] = []
     private var inputHandler: H200InputHandler?
@@ -953,10 +970,11 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
     init(
         results: [H200DeckSyncResult] = [],
         brightnessFailures: [H200DeckSyncFailure] = [],
+        brightnessResults: [H200DeckSyncFailure?]? = nil,
         brightnessDelayNanoseconds: UInt64 = 0
     ) {
         self.results = results
-        self.brightnessFailures = brightnessFailures
+        self.brightnessResults = brightnessResults ?? brightnessFailures.map { Optional.some($0) }
         self.brightnessDelayNanoseconds = brightnessDelayNanoseconds
     }
 
@@ -983,11 +1001,11 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
 
         return locked {
             storedBrightnessPercents.append(percent)
-            guard !brightnessFailures.isEmpty else {
+            guard !brightnessResults.isEmpty else {
                 return nil
             }
 
-            return brightnessFailures.removeFirst()
+            return brightnessResults.removeFirst()
         }
     }
 

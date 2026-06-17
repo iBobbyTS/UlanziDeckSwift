@@ -199,7 +199,7 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
 }
 
 nonisolated enum DeckBrightnessConfiguration {
-    static let defaultPercent = 50
+    static let defaultPercent = 100
 
     nonisolated static func clamped(_ percent: Int) -> Int {
         min(100, max(0, percent))

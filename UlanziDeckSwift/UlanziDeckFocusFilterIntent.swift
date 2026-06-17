@@ -1,6 +1,6 @@
 import AppIntents
 
-nonisolated struct UlanziDeckFocusFilterIntent: SetFocusFilterIntent {
+struct UlanziDeckFocusFilterIntent: SetFocusFilterIntent {
     static var title: LocalizedStringResource = "Ulanzi Deck"
     static var description: IntentDescription? = "在专注模式中配置 Ulanzi Deck。"
 

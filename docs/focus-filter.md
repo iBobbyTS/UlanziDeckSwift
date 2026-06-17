@@ -11,6 +11,13 @@
 - app 正在运行且 H200 已连接时，`H200ConnectionModel` 会收到通知，然后复用顶部亮度 slider 的同一条异步发包路径。
 - app 启动并成功同步按键显示后，如果本地已有持久化亮度值，会补发一次亮度包，确保设备亮度和 app 配置一致。
 
+## 已放弃的轮询方案
+
+- 曾尝试通过 `INFocusStatusCenter.focusStatus.isFocused` 每 60 秒轮询系统是否处于任意勿扰或专注模式。
+- macOS 26.5.1 实测中，app 进程已获得 Focus 状态读取授权，`authorizationStatus.rawValue == 3`，但用户切换勿扰模式后 `isFocused` 仍保持 `Optional(false)`。
+- 因此当前项目不再使用 `INFocusStatusCenter` 做通用勿扰状态轮询，也不在启动时请求该权限。
+- 详细复盘见 [macOS Focus Status Runtime Behavior](engineering-notes/macos-focus-status-runtime-behavior.md)。
+
 ## 边界
 
 - 这个入口不读取系统当前专注模式名称，也不依赖“睡眠”等模式名称判断。

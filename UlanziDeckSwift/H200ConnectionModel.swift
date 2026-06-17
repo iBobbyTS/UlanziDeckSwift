@@ -193,15 +193,31 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    func previewBrightnessPercent(_ percent: Int) {
+        updateBrightnessPercent(percent, persist: false)
+    }
+
+    func commitBrightnessPercent(_ percent: Int) {
+        updateBrightnessPercent(percent, persist: true, forceSend: true)
+    }
+
     func setBrightnessPercent(_ percent: Int, forceSend: Bool = false) {
+        updateBrightnessPercent(percent, persist: true, forceSend: forceSend)
+    }
+
+    private func updateBrightnessPercent(_ percent: Int, persist: Bool, forceSend: Bool = false) {
         let clampedPercent = DeckBrightnessConfiguration.clamped(percent)
-        guard brightnessPercent != clampedPercent || forceSend else {
+        let didChange = brightnessPercent != clampedPercent
+
+        brightnessPercent = clampedPercent
+        if persist {
+            hasPersistedBrightnessPercent = true
+            configurationStore.saveBrightnessPercent(clampedPercent)
+        }
+        guard didChange || forceSend else {
             return
         }
 
-        brightnessPercent = clampedPercent
-        hasPersistedBrightnessPercent = true
-        configurationStore.saveBrightnessPercent(clampedPercent)
         requestBrightnessUpdate(percent: clampedPercent)
     }
 

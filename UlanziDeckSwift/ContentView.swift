@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
+    @State private var brightnessDraftPercent: Int?
+
     let connectedDevice: H200DeviceIdentity?
     let syncSummary: H200DeckSyncSummary?
     let brightnessPercent: Int
@@ -11,7 +13,8 @@ struct ContentView: View {
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
     let onFolderPathSelection: (String) -> Void
-    let onBrightnessPercentChange: (Int) -> Void
+    let onBrightnessPercentPreview: (Int) -> Void
+    let onBrightnessPercentCommit: (Int) -> Void
 
     private let layout = DeckGridLayout.h200Prototype
     private let previewMetrics = DeckPreviewGridMetrics.h200
@@ -56,18 +59,29 @@ struct ContentView: View {
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            Slider(value: brightnessPercentSliderBinding, in: 0...100, step: 1)
+            Slider(
+                value: brightnessPercentSliderBinding,
+                in: 0...100,
+                step: 1
+            ) { isEditing in
+                guard !isEditing else {
+                    return
+                }
+
+                onBrightnessPercentCommit(displayedBrightnessPercent)
+                brightnessDraftPercent = nil
+            }
                 .frame(width: 150)
                 .disabled(connectedDevice == nil)
 
-            Text("\(brightnessPercent)%")
+            Text("\(displayedBrightnessPercent)%")
                 .font(.caption.monospacedDigit().weight(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 38, alignment: .trailing)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("亮度")
-        .accessibilityValue("\(brightnessPercent)%")
+        .accessibilityValue("\(displayedBrightnessPercent)%")
     }
 
     private var workbench: some View {
@@ -339,12 +353,18 @@ private extension ContentView {
     var brightnessPercentSliderBinding: Binding<Double> {
         Binding(
             get: {
-                Double(brightnessPercent)
+                Double(displayedBrightnessPercent)
             },
             set: { value in
-                onBrightnessPercentChange(Int(value.rounded()))
+                let percent = Int(value.rounded())
+                brightnessDraftPercent = percent
+                onBrightnessPercentPreview(percent)
             }
         )
+    }
+
+    var displayedBrightnessPercent: Int {
+        brightnessDraftPercent ?? brightnessPercent
     }
 
     func chooseFolder() {
@@ -513,6 +533,7 @@ private struct DeckKeyRenderedImage: View, Equatable {
         onFunctionSelection: { _ in },
         onTallyDefaultValueChange: { _ in },
         onFolderPathSelection: { _ in },
-        onBrightnessPercentChange: { _ in }
+        onBrightnessPercentPreview: { _ in },
+        onBrightnessPercentCommit: { _ in }
     )
 }
