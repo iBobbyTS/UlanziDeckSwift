@@ -48,6 +48,12 @@ struct RootView: View {
             .task {
                 connectionModel.checkOnLaunch()
             }
+            .onAppear {
+                BrightnessAdjustmentRuntime.shared.register(connectionModel)
+            }
+            .onDisappear {
+                BrightnessAdjustmentRuntime.shared.unregister(connectionModel)
+            }
             .alert(item: $connectionModel.alert) { alert in
                 Alert(
                     title: Text(alert.title),

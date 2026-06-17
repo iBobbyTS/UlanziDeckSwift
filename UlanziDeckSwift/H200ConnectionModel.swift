@@ -18,7 +18,6 @@ final class H200ConnectionModel: ObservableObject {
     private var hasPersistedBrightnessPercent: Bool
     private let longPressDurationNanoseconds: UInt64
     private let brightnessUpdateQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200BrightnessUpdate")
-    private var focusFilterBrightnessCancellable: AnyCancellable?
     private var longPressTasks: [Int: Task<Void, Never>] = [:]
     private var longPressResetKeyIDs: Set<Int> = []
     private var brightnessUpdateRevision = 0
@@ -34,7 +33,6 @@ final class H200ConnectionModel: ObservableObject {
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         folderOpener: FinderFolderOpening? = nil,
-        focusFilterNotificationCenter: NotificationCenter = .default,
         longPressDurationNanoseconds: UInt64 = 1_000_000_000
     ) {
         self.discovery = discovery
@@ -51,15 +49,6 @@ final class H200ConnectionModel: ObservableObject {
                 self?.handleInputEvent(event)
             }
         }
-        focusFilterBrightnessCancellable = focusFilterNotificationCenter
-            .publisher(for: UlanziDeckFocusFilterSettings.brightnessDidChangeNotification)
-            .compactMap {
-                $0.userInfo?[UlanziDeckFocusFilterSettings.brightnessPercentUserInfoKey] as? Int
-            }
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] percent in
-                self?.setBrightnessPercent(percent, forceSend: true)
-            }
     }
 
     deinit {
@@ -433,5 +422,19 @@ extension H200DeviceIdentity {
         }
 
         return "\(vid):\(pid), serial \(serialNumber), location \(location)"
+    }
+}
+
+extension H200ConnectionModel: BrightnessAdjusting {
+    var canAdjustBrightness: Bool {
+        if case .connected = status, syncSummary != nil {
+            return true
+        }
+
+        return false
+    }
+
+    func adjustBrightness(to percent: Int) {
+        updateBrightnessPercent(percent, persist: false, forceSend: true)
     }
 }

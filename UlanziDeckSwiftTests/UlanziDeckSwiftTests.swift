@@ -187,86 +187,6 @@ struct UlanziDeckSwiftTests {
         #expect(store.loadInteractionState(for: .h200Prototype) == nil)
     }
 
-    @Test func focusFilterSettingsPersistAndPostClampedBrightness() {
-        let store = FakeDeckConfigurationStore()
-        let notificationCenter = NotificationCenter()
-        final class NotificationBox {
-            var brightnessPercent: Int?
-        }
-        let box = NotificationBox()
-        let token = notificationCenter.addObserver(
-            forName: UlanziDeckFocusFilterSettings.brightnessDidChangeNotification,
-            object: nil,
-            queue: nil
-        ) { notification in
-            box.brightnessPercent = notification.userInfo?[UlanziDeckFocusFilterSettings.brightnessPercentUserInfoKey] as? Int
-        }
-        defer {
-            notificationCenter.removeObserver(token)
-        }
-
-        UlanziDeckFocusFilterSettings.apply(
-            brightnessPercent: 140,
-            configurationStore: store,
-            notificationCenter: notificationCenter
-        )
-
-        #expect(store.savedBrightnessPercents == [100])
-        #expect(box.brightnessPercent == 100)
-    }
-
-    @MainActor
-    @Test func focusFilterNotificationUpdatesRunningModelBrightness() async throws {
-        let notificationCenter = NotificationCenter()
-        let store = FakeDeckConfigurationStore()
-        let syncer = FakeH200DeckSyncer()
-        let model = H200ConnectionModel(
-            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
-            syncer: syncer,
-            configurationStore: store,
-            folderOpener: FakeFinderFolderOpener(),
-            focusFilterNotificationCenter: notificationCenter
-        )
-
-        model.checkOnLaunch()
-        UlanziDeckFocusFilterSettings.apply(
-            brightnessPercent: 75,
-            configurationStore: store,
-            notificationCenter: notificationCenter
-        )
-
-        try await Self.waitUntil {
-            model.brightnessPercent == 75 && syncer.brightnessPercents == [75]
-        }
-        #expect(store.savedBrightnessPercents == [75, 75])
-    }
-
-    @MainActor
-    @Test func focusFilterNotificationSendsEvenWhenBrightnessAlreadyMatches() async throws {
-        let notificationCenter = NotificationCenter()
-        let store = FakeDeckConfigurationStore()
-        let syncer = FakeH200DeckSyncer()
-        let model = H200ConnectionModel(
-            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
-            syncer: syncer,
-            configurationStore: store,
-            folderOpener: FakeFinderFolderOpener(),
-            focusFilterNotificationCenter: notificationCenter
-        )
-
-        model.checkOnLaunch()
-        UlanziDeckFocusFilterSettings.apply(
-            brightnessPercent: DeckBrightnessConfiguration.defaultPercent,
-            configurationStore: store,
-            notificationCenter: notificationCenter
-        )
-
-        try await Self.waitUntil {
-            syncer.brightnessPercents == [DeckBrightnessConfiguration.defaultPercent]
-        }
-        #expect(model.brightnessPercent == DeckBrightnessConfiguration.defaultPercent)
-    }
-
     @Test func h200ProtocolInterfaceMatchesObservedReportShape() {
         let identity = Self.protocolInterfaceIdentity()
 
@@ -611,6 +531,62 @@ struct UlanziDeckSwiftTests {
 
         #expect(syncer.brightnessPercents == [25])
         #expect(model.alert?.message.contains("有其他应用正在占用 H200 通信端口") == true)
+    }
+
+    @MainActor
+    @Test func brightnessAdjustmentRequiresRunningAdjuster() {
+        let adjuster = FakeBrightnessAdjuster()
+
+        BrightnessAdjustmentRuntime.shared.register(adjuster)
+        BrightnessAdjustmentRuntime.shared.unregister(adjuster)
+
+        #expect(BrightnessAdjustmentRuntime.shared.adjustBrightness(to: 25) == .appNotRunning)
+        #expect(adjuster.appliedPercents.isEmpty)
+    }
+
+    @MainActor
+    @Test func brightnessAdjustmentRequiresConnectedAndSyncedModel() {
+        let store = FakeDeckConfigurationStore()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.notConnected]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: store,
+            folderOpener: FakeFinderFolderOpener()
+        )
+        BrightnessAdjustmentRuntime.shared.register(model)
+        defer {
+            BrightnessAdjustmentRuntime.shared.unregister(model)
+        }
+
+        #expect(BrightnessAdjustmentRuntime.shared.adjustBrightness(to: 25) == .deviceNotReady)
+        #expect(model.brightnessPercent == DeckBrightnessConfiguration.defaultPercent)
+        #expect(store.savedBrightnessPercents.isEmpty)
+    }
+
+    @MainActor
+    @Test func brightnessAdjustmentSendsWithoutPersisting() async throws {
+        let store = FakeDeckConfigurationStore()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            folderOpener: FakeFinderFolderOpener()
+        )
+        BrightnessAdjustmentRuntime.shared.register(model)
+        defer {
+            BrightnessAdjustmentRuntime.shared.unregister(model)
+        }
+
+        model.checkOnLaunch()
+        let result = BrightnessAdjustmentRuntime.shared.adjustBrightness(to: 35)
+
+        #expect(result == .sent(35))
+        #expect(model.brightnessPercent == 35)
+        #expect(store.savedBrightnessPercents.isEmpty)
+        try await Self.waitUntil {
+            syncer.brightnessPercents == [35]
+        }
     }
 
     @MainActor
@@ -1074,6 +1050,16 @@ private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
 
     func saveBrightnessPercent(_ percent: Int) {
         savedBrightnessPercents.append(percent)
+    }
+}
+
+@MainActor
+private final class FakeBrightnessAdjuster: BrightnessAdjusting {
+    var canAdjustBrightness = true
+    private(set) var appliedPercents: [Int] = []
+
+    func adjustBrightness(to percent: Int) {
+        appliedPercents.append(percent)
     }
 }
 
