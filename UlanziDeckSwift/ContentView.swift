@@ -5,7 +5,6 @@ struct ContentView: View {
     @State private var brightnessDraftPercent: Int?
 
     let connectedDevice: H200DeviceIdentity?
-    let syncSummary: H200DeckSyncSummary?
     let brightnessPercent: Int
     let interactionState: DeckGridInteractionState
     let onKeySelection: (Int) -> Void
@@ -43,10 +42,6 @@ struct ContentView: View {
 
             HStack(spacing: 16) {
                 brightnessControl
-
-                Text(connectionLabel)
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(connectedDevice == nil ? Color.secondary : Color.green)
             }
         }
         .padding(.horizontal, 28)
@@ -61,8 +56,7 @@ struct ContentView: View {
 
             Slider(
                 value: brightnessPercentSliderBinding,
-                in: 0...100,
-                step: 1
+                in: 0...100
             ) { isEditing in
                 guard !isEditing else {
                     return
@@ -217,7 +211,7 @@ struct ContentView: View {
     private func parameterContent(for configuration: DeckKeyConfiguration) -> some View {
         switch configuration.function {
         case .none, .brightness:
-            HStack(spacing: 28) {
+            HStack(alignment: .top, spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("功能")
                         .font(.caption.weight(.semibold))
@@ -242,7 +236,7 @@ struct ContentView: View {
             }
 
         case .tally:
-            HStack(spacing: 28) {
+            HStack(alignment: .top, spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("功能")
                         .font(.caption.weight(.semibold))
@@ -282,7 +276,7 @@ struct ContentView: View {
             }
 
         case .openFolder:
-            HStack(spacing: 28) {
+            HStack(alignment: .top, spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("功能")
                         .font(.caption.weight(.semibold))
@@ -390,29 +384,6 @@ private extension ContentView {
         onFolderPathSelection(url.path)
     }
 
-    var connectionLabel: String {
-        guard let connectedDevice else {
-            return "正在检测 H200"
-        }
-
-        if connectedDevice.serialNumber.isEmpty {
-            return syncSummaryLabel ?? "H200 已连接"
-        }
-
-        if let syncSummaryLabel {
-            return "H200 \(connectedDevice.serialNumber)，\(syncSummaryLabel)"
-        }
-
-        return "H200 \(connectedDevice.serialNumber)"
-    }
-
-    var syncSummaryLabel: String? {
-        guard let syncSummary else {
-            return nil
-        }
-
-        return "已同步 \(syncSummary.displayCount) 个格子"
-    }
 }
 
 private struct FunctionSection: Identifiable {
@@ -584,7 +555,6 @@ private struct DeckKeyRenderedImage: View, Equatable {
             manufacturer: "rockchip",
             product: ""
         ),
-        syncSummary: H200DeckSyncSummary(payloadByteCount: 4096, packetCount: 4, displayCount: 14),
         brightnessPercent: DeckBrightnessConfiguration.defaultPercent,
         interactionState: DeckGridInteractionState(layout: .h200Prototype),
         onKeySelection: { _ in },

@@ -20,7 +20,6 @@ struct RootView: View {
     var body: some View {
         ContentView(
             connectedDevice: connectionModel.connectedDevice,
-            syncSummary: connectionModel.syncSummary,
             brightnessPercent: connectionModel.brightnessPercent,
             interactionState: connectionModel.interactionState,
             onKeySelection: { keyID in
