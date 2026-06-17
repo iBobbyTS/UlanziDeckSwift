@@ -166,30 +166,20 @@ struct ContentView: View {
     }
 
     private var functionSidebar: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("按键功能")
-                .font(.headline)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("基础")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                ForEach(DeckKeyFunction.assignableCases, id: \.self) { function in
-                    FunctionRow(
-                        function: function,
-                        isSelected: selectedConfiguration?.function == function
-                    ) {
-                        onFunctionSelection(function)
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(functionSections) { section in
+                    FunctionSectionCard(
+                        section: section,
+                        selectedFunction: selectedConfiguration?.function,
+                        onFunctionSelection: onFunctionSelection
+                    )
                 }
             }
-
-            Spacer()
+            .padding(18)
         }
-        .padding(18)
         .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var parameterPanel: some View {
@@ -331,6 +321,21 @@ struct ContentView: View {
 }
 
 private extension ContentView {
+    var functionSections: [FunctionSection] {
+        [
+            FunctionSection(
+                title: "数字",
+                systemImageName: "number.square",
+                functions: [.tally]
+            ),
+            FunctionSection(
+                title: "访达",
+                systemImageName: "folder",
+                functions: [.openFolder]
+            ),
+        ]
+    }
+
     var selectedConfiguration: DeckKeyConfiguration? {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return nil
@@ -410,6 +415,63 @@ private extension ContentView {
     }
 }
 
+private struct FunctionSection: Identifiable {
+    let title: String
+    let systemImageName: String
+    let functions: [DeckKeyFunction]
+
+    var id: String {
+        title
+    }
+}
+
+private struct FunctionSectionCard: View {
+    let section: FunctionSection
+    let selectedFunction: DeckKeyFunction?
+    let onFunctionSelection: (DeckKeyFunction) -> Void
+
+    private var isSelected: Bool {
+        guard let selectedFunction else {
+            return false
+        }
+
+        return section.functions.contains(selectedFunction)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Image(systemName: section.systemImageName)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 22)
+
+                Text(section.title)
+                    .font(.headline.weight(.semibold))
+
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(section.functions, id: \.self) { function in
+                    FunctionRow(
+                        function: function,
+                        isSelected: selectedFunction == function
+                    ) {
+                        onFunctionSelection(function)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(isSelected ? Color.accentColor.opacity(0.55) : Color(nsColor: .separatorColor), lineWidth: 1)
+        }
+    }
+}
+
 private struct FunctionRow: View {
     let function: DeckKeyFunction
     let isSelected: Bool
@@ -434,15 +496,12 @@ private struct FunctionRow: View {
             }
             .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .background(isSelected ? Color.accentColor.opacity(0.12) : Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(isSelected ? Color.accentColor.opacity(0.5) : Color(nsColor: .separatorColor), lineWidth: 1)
-            }
+            .padding(.vertical, 11)
+            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(function.title)
+        .accessibilityValue(isSelected ? "已选中" : "未选中")
     }
 }
 
