@@ -6,43 +6,58 @@ nonisolated protocol SingleInstanceLocking {
     func tryAcquire(identifier: String) -> Bool
 }
 
-nonisolated protocol ExistingApplicationActivating {
-    func activateExistingApplication(bundleIdentifier: String, launchedBefore latestLaunchDate: Date?) -> Bool
+nonisolated protocol ExistingApplicationLocating {
+    func existingApplication(bundleIdentifier: String, launchedBefore latestLaunchDate: Date?) -> ExistingApplication?
 }
 
 nonisolated struct SingleInstanceGuard {
+    enum AcquisitionResult: Equatable {
+        case acquired
+        case blockedByExistingApplication(ExistingApplication)
+        case blockedByUnknownApplication
+    }
+
     private let bundleIdentifier: String
     private let locker: SingleInstanceLocking
-    private let activator: ExistingApplicationActivating
+    private let locator: ExistingApplicationLocating
     private let currentLaunchDate: Date
     private let existingApplicationGraceInterval: TimeInterval
 
     init(
         bundleIdentifier: String = Bundle.main.bundleIdentifier ?? "com.iBobby.UlanziDeckSwift",
         locker: SingleInstanceLocking = FileSingleInstanceLocker.shared,
-        activator: ExistingApplicationActivating = WorkspaceExistingApplicationActivator(),
+        locator: ExistingApplicationLocating = WorkspaceExistingApplicationLocator(),
         currentLaunchDate: Date = NSRunningApplication.current.launchDate ?? Date(),
         existingApplicationGraceInterval: TimeInterval = 2
     ) {
         self.bundleIdentifier = bundleIdentifier
         self.locker = locker
-        self.activator = activator
+        self.locator = locator
         self.currentLaunchDate = currentLaunchDate
         self.existingApplicationGraceInterval = existingApplicationGraceInterval
     }
 
-    func acquireOrActivateExisting() -> Bool {
+    func acquire() -> AcquisitionResult {
         guard locker.tryAcquire(identifier: bundleIdentifier) else {
-            _ = activator.activateExistingApplication(bundleIdentifier: bundleIdentifier, launchedBefore: nil)
-            return false
+            guard let existingApplication = locator.existingApplication(
+                bundleIdentifier: bundleIdentifier,
+                launchedBefore: nil
+            ) else {
+                return .blockedByUnknownApplication
+            }
+
+            return .blockedByExistingApplication(existingApplication)
         }
 
         let olderLaunchDate = currentLaunchDate.addingTimeInterval(-existingApplicationGraceInterval)
-        if activator.activateExistingApplication(bundleIdentifier: bundleIdentifier, launchedBefore: olderLaunchDate) {
-            return false
+        if let existingApplication = locator.existingApplication(
+            bundleIdentifier: bundleIdentifier,
+            launchedBefore: olderLaunchDate
+        ) {
+            return .blockedByExistingApplication(existingApplication)
         }
 
-        return true
+        return .acquired
     }
 }
 
@@ -97,20 +112,25 @@ nonisolated final class FileSingleInstanceLocker: SingleInstanceLocking, @unchec
     }
 }
 
-nonisolated struct WorkspaceExistingApplicationActivator: ExistingApplicationActivating {
-    func activateExistingApplication(bundleIdentifier: String, launchedBefore latestLaunchDate: Date?) -> Bool {
-        guard let application = existingApplication(
-            bundleIdentifier: bundleIdentifier,
-            launchedBefore: latestLaunchDate
-        ) else {
-            return false
-        }
+nonisolated struct ExistingApplication: Equatable {
+    let processIdentifier: pid_t
+    let bundleURL: URL?
 
-        application.activate(options: [.activateAllWindows])
-        return true
+    init(
+        processIdentifier: pid_t,
+        bundleURL: URL?
+    ) {
+        self.processIdentifier = processIdentifier
+        self.bundleURL = bundleURL
     }
 
-    private func existingApplication(bundleIdentifier: String, launchedBefore latestLaunchDate: Date?) -> NSRunningApplication? {
+    static func == (lhs: ExistingApplication, rhs: ExistingApplication) -> Bool {
+        lhs.processIdentifier == rhs.processIdentifier && lhs.bundleURL == rhs.bundleURL
+    }
+}
+
+nonisolated struct WorkspaceExistingApplicationLocator: ExistingApplicationLocating {
+    func existingApplication(bundleIdentifier: String, launchedBefore latestLaunchDate: Date?) -> ExistingApplication? {
         let currentProcessID = ProcessInfo.processInfo.processIdentifier
         return NSRunningApplication
             .runningApplications(withBundleIdentifier: bundleIdentifier)
@@ -133,5 +153,11 @@ nonisolated struct WorkspaceExistingApplicationActivator: ExistingApplicationAct
                 (left.launchDate ?? .distantFuture) < (right.launchDate ?? .distantFuture)
             }
             .first
+            .map { application in
+                ExistingApplication(
+                    processIdentifier: application.processIdentifier,
+                    bundleURL: application.bundleURL
+                )
+            }
     }
 }

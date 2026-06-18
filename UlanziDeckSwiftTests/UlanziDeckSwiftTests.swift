@@ -36,19 +36,23 @@ struct UlanziDeckSwiftTests {
         #expect(secondLocker.tryAcquire(identifier: "com.iBobby.UlanziDeckSwift"))
     }
 
-    @Test func singleInstanceGuardActivatesExistingApplicationWhenLockIsBusy() {
+    @Test func singleInstanceGuardReportsExistingApplicationWhenLockIsBusy() {
+        let existingApplication = ExistingApplication(
+            processIdentifier: 1234,
+            bundleURL: URL(filePath: "/Applications/Ulanzi Deck.app")
+        )
         let locker = FakeSingleInstanceLocker(results: [false])
-        let activator = FakeExistingApplicationActivator()
+        let locator = FakeExistingApplicationLocator(results: [existingApplication])
         let guardInstance = SingleInstanceGuard(
             bundleIdentifier: "com.iBobby.UlanziDeckSwift",
             locker: locker,
-            activator: activator
+            locator: locator
         )
 
-        #expect(!guardInstance.acquireOrActivateExisting())
+        #expect(guardInstance.acquire() == .blockedByExistingApplication(existingApplication))
         #expect(locker.requestedIdentifiers == ["com.iBobby.UlanziDeckSwift"])
-        #expect(activator.activationRequests == [
-            FakeExistingApplicationActivator.ActivationRequest(
+        #expect(locator.lookupRequests == [
+            FakeExistingApplicationLocator.LookupRequest(
                 bundleIdentifier: "com.iBobby.UlanziDeckSwift",
                 latestLaunchDate: nil
             )
@@ -56,21 +60,25 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func singleInstanceGuardRejectsWhenOlderApplicationAlreadyExists() {
+        let existingApplication = ExistingApplication(
+            processIdentifier: 5678,
+            bundleURL: URL(filePath: "/Users/ibobby/Desktop/Ulanzi Deck.app")
+        )
         let locker = FakeSingleInstanceLocker(results: [true])
-        let activator = FakeExistingApplicationActivator(results: [true])
+        let locator = FakeExistingApplicationLocator(results: [existingApplication])
         let launchDate = Date(timeIntervalSince1970: 100)
         let guardInstance = SingleInstanceGuard(
             bundleIdentifier: "com.iBobby.UlanziDeckSwift",
             locker: locker,
-            activator: activator,
+            locator: locator,
             currentLaunchDate: launchDate,
             existingApplicationGraceInterval: 2
         )
 
-        #expect(!guardInstance.acquireOrActivateExisting())
+        #expect(guardInstance.acquire() == .blockedByExistingApplication(existingApplication))
         #expect(locker.requestedIdentifiers == ["com.iBobby.UlanziDeckSwift"])
-        #expect(activator.activationRequests == [
-            FakeExistingApplicationActivator.ActivationRequest(
+        #expect(locator.lookupRequests == [
+            FakeExistingApplicationLocator.LookupRequest(
                 bundleIdentifier: "com.iBobby.UlanziDeckSwift",
                 latestLaunchDate: launchDate.addingTimeInterval(-2)
             )
@@ -79,17 +87,36 @@ struct UlanziDeckSwiftTests {
 
     @Test func singleInstanceGuardAllowsLaunchWhenNoExistingApplicationIsFound() {
         let locker = FakeSingleInstanceLocker(results: [true])
-        let activator = FakeExistingApplicationActivator(results: [false])
+        let locator = FakeExistingApplicationLocator(results: [nil])
         let guardInstance = SingleInstanceGuard(
             bundleIdentifier: "com.iBobby.UlanziDeckSwift",
             locker: locker,
-            activator: activator,
+            locator: locator,
             currentLaunchDate: Date(timeIntervalSince1970: 100),
             existingApplicationGraceInterval: 2
         )
 
-        #expect(guardInstance.acquireOrActivateExisting())
+        #expect(guardInstance.acquire() == .acquired)
         #expect(locker.requestedIdentifiers == ["com.iBobby.UlanziDeckSwift"])
+    }
+
+    @Test func singleInstanceGuardReportsUnknownBlockerWhenLockIsBusyWithoutVisibleApplication() {
+        let locker = FakeSingleInstanceLocker(results: [false])
+        let locator = FakeExistingApplicationLocator(results: [nil])
+        let guardInstance = SingleInstanceGuard(
+            bundleIdentifier: "com.iBobby.UlanziDeckSwift",
+            locker: locker,
+            locator: locator
+        )
+
+        #expect(guardInstance.acquire() == .blockedByUnknownApplication)
+        #expect(locker.requestedIdentifiers == ["com.iBobby.UlanziDeckSwift"])
+        #expect(locator.lookupRequests == [
+            FakeExistingApplicationLocator.LookupRequest(
+                bundleIdentifier: "com.iBobby.UlanziDeckSwift",
+                latestLaunchDate: nil
+            )
+        ])
     }
 
     @Test func appSkipsSingleInstanceGuardDuringTests() {
@@ -1347,26 +1374,26 @@ private final class FakeSingleInstanceLocker: SingleInstanceLocking {
     }
 }
 
-private final class FakeExistingApplicationActivator: ExistingApplicationActivating {
-    struct ActivationRequest: Equatable {
+private final class FakeExistingApplicationLocator: ExistingApplicationLocating {
+    struct LookupRequest: Equatable {
         let bundleIdentifier: String
         let latestLaunchDate: Date?
     }
 
-    private var results: [Bool]
-    private(set) var activationRequests: [ActivationRequest] = []
+    private var results: [ExistingApplication?]
+    private(set) var lookupRequests: [LookupRequest] = []
 
-    init(results: [Bool] = []) {
+    init(results: [ExistingApplication?] = []) {
         self.results = results
     }
 
-    func activateExistingApplication(bundleIdentifier: String, launchedBefore latestLaunchDate: Date?) -> Bool {
-        activationRequests.append(ActivationRequest(
+    func existingApplication(bundleIdentifier: String, launchedBefore latestLaunchDate: Date?) -> ExistingApplication? {
+        lookupRequests.append(LookupRequest(
             bundleIdentifier: bundleIdentifier,
             latestLaunchDate: latestLaunchDate
         ))
         guard !results.isEmpty else {
-            return false
+            return nil
         }
 
         return results.removeFirst()
