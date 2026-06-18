@@ -1105,6 +1105,7 @@ private struct DeckKeyButton: View {
             Button(action: action) {
                 DeckKeyRenderedImage(display: display, metrics: metrics)
                     .equatable()
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .strokeBorder(display.isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
