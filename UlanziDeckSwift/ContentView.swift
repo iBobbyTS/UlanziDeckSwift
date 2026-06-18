@@ -536,6 +536,8 @@ private struct FunctionRow: View {
             .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
             .padding(.horizontal, 12)
             .padding(.vertical, 11)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
