@@ -9,7 +9,7 @@ struct UlanziDeckBrightnessAdjustmentIntent: AppIntent {
     @Parameter(
         title: "亮度",
         description: "Ulanzi Deck 亮度百分比。",
-        default: 100.0,
+        default: 0.0,
         controlStyle: .slider,
         inclusiveRange: (0.0, 100.0)
     )
@@ -20,11 +20,11 @@ struct UlanziDeckBrightnessAdjustmentIntent: AppIntent {
     }
 
     @MainActor
-    func perform() async throws -> some IntentResult & ProvidesDialog {
+    func perform() async throws -> some IntentResult {
         let percent = DeckBrightnessConfiguration.clamped(Int(brightnessPercent.rounded()))
         switch BrightnessAdjustmentRuntime.shared.adjustBrightness(to: percent) {
-        case let .sent(appliedPercent):
-            return .result(dialog: "已将亮度调节到 \(appliedPercent)%")
+        case .sent:
+            return .result()
         case .appNotRunning:
             throw BrightnessAdjustmentIntentError.appNotRunning
         case .deviceNotReady:
