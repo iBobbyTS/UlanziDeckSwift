@@ -167,6 +167,32 @@ struct UlanziDeckSwiftTests {
         #expect(displays.last?.devicePixelSize == H200DeviceTarget.smallWindowIconSize)
     }
 
+    @Test func squareKeySwapExchangesConfigurationsWithoutReorderingLayout() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        let rowsBefore = layout.rows
+
+        state.assign(.openFolder, to: 1)
+        state.setFolderPath("/Users/ibobby/Documents", for: 1)
+        state.assign(.connectSMBServer, to: 2)
+        state.setSMBServerAddress("nas.local/media", for: 2)
+        state.select(keyID: 1)
+
+        let didSwap = state.swapSquareConfigurations(sourceKeyID: 1, targetKeyID: 2)
+        let didRejectWideKey = state.swapSquareConfigurations(sourceKeyID: 1, targetKeyID: 14)
+        let didRejectSameKey = state.swapSquareConfigurations(sourceKeyID: 1, targetKeyID: 1)
+
+        #expect(didSwap)
+        #expect(layout.rows == rowsBefore)
+        #expect(state.selectedKeyID == 2)
+        #expect(state.configuration(for: 1)?.function == .connectSMBServer)
+        #expect(state.configuration(for: 1)?.smbServer.address == "nas.local/media")
+        #expect(state.configuration(for: 2)?.function == .openFolder)
+        #expect(state.configuration(for: 2)?.openFolder.path == "/Users/ibobby/Documents")
+        #expect(!didRejectWideKey)
+        #expect(!didRejectSameKey)
+    }
+
     @Test func wideKeyDisplayModeChangesPreviewAndDisablesFunctionPresses() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
@@ -881,6 +907,45 @@ struct UlanziDeckSwiftTests {
         #expect(store.savedStates[0].tallyDefaultValue(for: 2) == 3)
         #expect(store.savedStates[1].tallyValue(for: 2) == 4)
         #expect(store.savedStates[2].configuration(for: 2)?.function == DeckKeyFunction.none)
+    }
+
+    @MainActor
+    @Test func swappingSquareKeysPersistsAndSendsOnlyChangedDisplays() async throws {
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.openFolder, to: 1)
+        loadedState.setFolderPath("/Users/ibobby/Documents", for: 1)
+        loadedState.assign(.connectSMBServer, to: 2)
+        loadedState.setSMBServerAddress("nas.local/media", for: 2)
+        loadedState.select(keyID: 1)
+        let store = FakeDeckConfigurationStore(loadedState: loadedState)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+
+        model.swapSquareKeyConfigurations(sourceKeyID: 1, targetKeyID: 2)
+
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 1
+        }
+        let displays = try #require(syncer.partialDisplays.last)
+        #expect(displays.map(\.id) == [1, 2])
+        #expect(displays[0].title == "连接")
+        #expect(displays[0].subtitle == "nas.local/media")
+        #expect(displays[1].title == "打开")
+        #expect(displays[1].subtitle == "Documents")
+        #expect(model.interactionState.selectedKeyID == 2)
+        #expect(store.savedStates.count == 1)
+        #expect(store.savedStates.last?.configuration(for: 1)?.function == .connectSMBServer)
+        #expect(store.savedStates.last?.configuration(for: 2)?.function == .openFolder)
     }
 
     @MainActor

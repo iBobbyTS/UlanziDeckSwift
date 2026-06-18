@@ -832,6 +832,35 @@ nonisolated struct DeckGridInteractionState: Equatable {
         selectedKeyID = keyID
     }
 
+    func canSwapSquareConfigurations(sourceKeyID: Int, targetKeyID: Int) -> Bool {
+        sourceKeyID != targetKeyID
+            && validKeyIDs.contains(sourceKeyID)
+            && validKeyIDs.contains(targetKeyID)
+            && !wideKeyIDs.contains(sourceKeyID)
+            && !wideKeyIDs.contains(targetKeyID)
+    }
+
+    @discardableResult
+    mutating func swapSquareConfigurations(sourceKeyID: Int, targetKeyID: Int) -> Bool {
+        guard canSwapSquareConfigurations(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID) else {
+            return false
+        }
+
+        let sourceConfiguration = configurations[sourceKeyID, default: .tallyDefault]
+        configurations[sourceKeyID] = configurations[targetKeyID, default: .tallyDefault]
+        configurations[targetKeyID] = sourceConfiguration
+        pressedKeyIDs.remove(sourceKeyID)
+        pressedKeyIDs.remove(targetKeyID)
+
+        if selectedKeyID == sourceKeyID {
+            selectedKeyID = targetKeyID
+        } else if selectedKeyID == targetKeyID {
+            selectedKeyID = sourceKeyID
+        }
+
+        return true
+    }
+
     mutating func beginPress(keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].displayMode == .function,

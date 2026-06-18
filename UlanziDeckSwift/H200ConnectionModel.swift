@@ -163,6 +163,23 @@ final class H200ConnectionModel: ObservableObject {
         syncKeyDisplay(keyID: keyID)
     }
 
+    func swapSquareKeyConfigurations(sourceKeyID: Int, targetKeyID: Int) {
+        guard interactionState.canSwapSquareConfigurations(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID) else {
+            return
+        }
+
+        cancelRuntime(for: sourceKeyID)
+        cancelRuntime(for: targetKeyID)
+        guard interactionState.swapSquareConfigurations(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID) else {
+            return
+        }
+
+        persistCurrentConfiguration()
+        restartRuntime(for: sourceKeyID)
+        restartRuntime(for: targetKeyID)
+        syncKeyDisplays(keyIDs: [sourceKeyID, targetKeyID])
+    }
+
     func setKeyDisplayMode(_ displayMode: DeckKeyDisplayMode, for keyID: Int) {
         guard interactionState.setDisplayMode(displayMode, for: keyID) else {
             return
@@ -868,6 +885,17 @@ final class H200ConnectionModel: ObservableObject {
         startMihoyoGameTimer(for: keyID)
     }
 
+    private func restartRuntime(for keyID: Int) {
+        switch interactionState.configuration(for: keyID)?.function {
+        case .some(.sub2API):
+            restartSub2APITimer(for: keyID)
+        case .some(.genshinStatus), .some(.starRailStatus), .some(.zenlessZoneStatus):
+            restartMihoyoGameTimer(for: keyID)
+        case .some(.tally), .some(.openFolder), .some(.connectSMBServer), .some(.brightness), .some(.none), nil:
+            return
+        }
+    }
+
     private func requestBrightnessUpdate(percent: Int) {
         guard case .connected = status else {
             return
@@ -930,6 +958,36 @@ final class H200ConnectionModel: ObservableObject {
             let result = syncer.sendStartupPackage(displays: displays)
             DispatchQueue.main.async { [weak self] in
                 self?.finishDisplaySync(result, generation: generation)
+            }
+        }
+    }
+
+    private func syncKeyDisplays(keyIDs: Set<Int>) {
+        displayRevision += 1
+        if syncSummary == nil {
+            needsFullDisplaySyncAfterStartup = true
+        }
+        guard case .connected = status, syncSummary != nil else {
+            return
+        }
+
+        let displays = layout.keys
+            .filter { keyIDs.contains($0.id) }
+            .map { interactionState.display(for: $0) }
+        guard !displays.isEmpty else {
+            return
+        }
+
+        let generation = deviceCommandGeneration
+        let syncer = syncer
+        deviceCommandQueue.async { [weak self] in
+            let result = syncer.sendPartialPackage(displays: displays)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, generation == self.deviceCommandGeneration else {
+                    return
+                }
+
+                self.finishDisplaySync(result, generation: generation)
             }
         }
     }

@@ -1,6 +1,7 @@
 import AppKit
 import CoreImage.CIFilterBuiltins
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var brightnessDraftPercent: Int?
@@ -12,6 +13,7 @@ struct ContentView: View {
     let onKeySelection: (Int) -> Void
     let onKeyFunctionDeletion: (Int) -> Void
     let onKeyDisplayModeSelection: (Int, DeckKeyDisplayMode) -> Void
+    let onKeySwap: (Int, Int) -> Void
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
     let onFolderPathSelection: (String) -> Void
@@ -213,6 +215,8 @@ struct ContentView: View {
                             onKeyFunctionDeletion(key.id)
                         } displayModeSelectionAction: { displayMode in
                             onKeyDisplayModeSelection(key.id, displayMode)
+                        } swapAction: { sourceKeyID, targetKeyID in
+                            onKeySwap(sourceKeyID, targetKeyID)
                         }
                     }
                 }
@@ -1092,6 +1096,7 @@ private struct DeckKeyButton: View {
     let action: () -> Void
     let deleteAction: () -> Void
     let displayModeSelectionAction: (DeckKeyDisplayMode) -> Void
+    let swapAction: (Int, Int) -> Void
 
     @State private var isHovered = false
 
@@ -1132,6 +1137,11 @@ private struct DeckKeyButton: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel("设备按键 \(display.id)")
         .accessibilityValue(accessibilityValue)
+        .modifier(SquareKeyDragSwapModifier(
+            isEnabled: !display.isWide,
+            keyID: display.id,
+            swapAction: swapAction
+        ))
     }
 
     private var accessibilityValue: String {
@@ -1178,6 +1188,53 @@ private struct DeckKeyButton: View {
         .menuStyle(.borderlessButton)
         .buttonStyle(.plain)
         .help("选择小窗显示")
+    }
+}
+
+private struct SquareKeyDragSwapModifier: ViewModifier {
+    let isEnabled: Bool
+    let keyID: Int
+    let swapAction: (Int, Int) -> Void
+
+    @State private var isDropTargeted = false
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(
+                            isDropTargeted ? Color.accentColor.opacity(0.88) : Color.clear,
+                            lineWidth: 2
+                        )
+                        .allowsHitTesting(false)
+                }
+                .onDrag {
+                    NSItemProvider(object: "\(keyID)" as NSString)
+                }
+                .onDrop(of: [UTType.text], isTargeted: $isDropTargeted) { providers in
+                    guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else {
+                        return false
+                    }
+
+                    provider.loadObject(ofClass: NSString.self) { object, _ in
+                        guard let value = object as? NSString,
+                              let sourceKeyID = Int(value as String),
+                              sourceKeyID != keyID
+                        else {
+                            return
+                        }
+
+                        DispatchQueue.main.async {
+                            swapAction(sourceKeyID, keyID)
+                        }
+                    }
+                    return true
+                }
+        } else {
+            content
+        }
     }
 }
 
@@ -1275,6 +1332,7 @@ private struct MihoyoQRCodeView: View {
         onKeySelection: { _ in },
         onKeyFunctionDeletion: { _ in },
         onKeyDisplayModeSelection: { _, _ in },
+        onKeySwap: { _, _ in },
         onFunctionSelection: { _ in },
         onTallyDefaultValueChange: { _ in },
         onFolderPathSelection: { _ in },

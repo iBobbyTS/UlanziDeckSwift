@@ -42,6 +42,9 @@ struct RootView: View {
             onKeyDisplayModeSelection: { keyID, displayMode in
                 connectionModel.setKeyDisplayMode(displayMode, for: keyID)
             },
+            onKeySwap: { sourceKeyID, targetKeyID in
+                connectionModel.swapSquareKeyConfigurations(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID)
+            },
             onFunctionSelection: { function in
                 connectionModel.assignSelectedFunction(function)
             },
