@@ -16,6 +16,7 @@ final class H200ConnectionModel: ObservableObject {
     private let configurationStore: DeckConfigurationStoring
     private let folderOpener: FinderFolderOpening
     private let smbServerConnector: SMBServerConnecting
+    private let sub2APIFetcher: Sub2APIFetching
     private var hasPersistedBrightnessPercent: Bool
     private let longPressDurationNanoseconds: UInt64
     private let brightnessUpdateQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200BrightnessUpdate")
@@ -24,6 +25,8 @@ final class H200ConnectionModel: ObservableObject {
     private var brightnessUpdateRevision = 0
     private var brightnessUpdateInProgress = false
     private var latestBrightnessUpdate: BrightnessUpdateRequest?
+    private var sub2APITimers: [Int: Timer] = [:]
+    private var sub2APIFetchTasks: [Int: Task<Void, Never>] = [:]
 
     private struct BrightnessUpdateRequest {
         let percent: Int
@@ -35,6 +38,7 @@ final class H200ConnectionModel: ObservableObject {
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         folderOpener: FinderFolderOpening? = nil,
         smbServerConnector: SMBServerConnecting? = nil,
+        sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher(),
         longPressDurationNanoseconds: UInt64 = 1_000_000_000
     ) {
         self.discovery = discovery
@@ -42,6 +46,7 @@ final class H200ConnectionModel: ObservableObject {
         self.configurationStore = configurationStore
         self.folderOpener = folderOpener ?? FinderFolderOpener()
         self.smbServerConnector = smbServerConnector ?? SMBServerConnector()
+        self.sub2APIFetcher = sub2APIFetcher
         self.longPressDurationNanoseconds = longPressDurationNanoseconds
         interactionState = configurationStore.loadInteractionState(for: layout) ?? DeckGridInteractionState(layout: layout)
         let loadedBrightnessPercent = configurationStore.loadBrightnessPercent()
@@ -98,6 +103,9 @@ final class H200ConnectionModel: ObservableObject {
         longPressTasks[keyID]?.cancel()
         longPressTasks[keyID] = nil
         longPressResetKeyIDs.remove(keyID)
+        stopSub2APITimer(for: keyID)
+        sub2APIFetchTasks[keyID]?.cancel()
+        sub2APIFetchTasks[keyID] = nil
         persistCurrentConfiguration()
         syncKeyDisplay(keyID: keyID)
     }
@@ -144,6 +152,8 @@ final class H200ConnectionModel: ObservableObject {
             openFolder(for: keyID)
         case .some(.connectSMBServer):
             connectSMBServer(for: keyID)
+        case .some(.sub2API):
+            fetchSub2API(for: keyID)
         case .some(.brightness), .some(.none), nil:
             return
         }
@@ -162,6 +172,11 @@ final class H200ConnectionModel: ObservableObject {
         if interactionState.assign(function, to: selectedKeyID) {
             persistCurrentConfiguration()
             syncKeyDisplay(keyID: selectedKeyID)
+            if function == .sub2API {
+                startSub2APITimer(for: selectedKeyID)
+            } else {
+                stopSub2APITimer(for: selectedKeyID)
+            }
         }
     }
 
@@ -198,6 +213,49 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    func setSelectedSub2APIBaseURL(_ baseURL: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        if interactionState.setSub2APIBaseURL(baseURL, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: selectedKeyID)
+        }
+    }
+
+    func setSelectedSub2APITargetGroupID(_ groupID: Int) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        if interactionState.setSub2APITargetGroupID(groupID, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: selectedKeyID)
+        }
+    }
+
+    func setSelectedSub2APIRefreshInterval(_ interval: Int) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        if interactionState.setSub2APIRefreshInterval(interval, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            restartSub2APITimer(for: selectedKeyID)
+        }
+    }
+
+    func setSelectedSub2APIBearerKey(_ bearerKey: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        if interactionState.setSub2APIBearerKey(bearerKey, for: selectedKeyID) {
+            persistCurrentConfiguration()
+        }
+    }
+
     func previewBrightnessPercent(_ percent: Int) {
         updateBrightnessPercent(percent, persist: false)
     }
@@ -228,6 +286,8 @@ final class H200ConnectionModel: ObservableObject {
 
     private func refresh() {
         cancelAllLongPressTasks()
+        cancelAllSub2APITimers()
+        cancelAllSub2APIFetchTasks()
         syncer.close()
         status = .checking
         syncSummary = nil
@@ -295,6 +355,54 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         _ = smbServerConnector.connect(to: address)
+    }
+
+    private func fetchSub2API(for keyID: Int) {
+        let config = interactionState.sub2APIConfiguration(for: keyID)
+        guard !config.baseURL.isEmpty, config.targetGroupID > 0, !config.bearerKey.isEmpty else {
+            return
+        }
+
+        sub2APIFetchTasks[keyID]?.cancel()
+        let fetcher = sub2APIFetcher
+        let baseURL = config.baseURL
+        let targetGroupID = config.targetGroupID
+        let bearerKey = config.bearerKey
+        sub2APIFetchTasks[keyID] = Task { @MainActor [weak self] in
+            let result = await fetcher.fetchCapacitySummary(baseURL: baseURL, targetGroupID: targetGroupID, bearerKey: bearerKey)
+            guard !Task.isCancelled else { return }
+
+            guard let self else { return }
+            self.interactionState.setSub2APILastResult(result, for: keyID)
+            self.persistCurrentConfiguration()
+            self.syncKeyDisplay(keyID: keyID)
+        }
+    }
+
+    private func startSub2APITimer(for keyID: Int) {
+        stopSub2APITimer(for: keyID)
+        let config = interactionState.sub2APIConfiguration(for: keyID)
+        guard interactionState.configuration(for: keyID)?.function == .sub2API,
+              config.refreshInterval >= 5
+        else {
+            return
+        }
+
+        let interval = TimeInterval(config.refreshInterval)
+        sub2APITimers[keyID] = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.fetchSub2API(for: keyID)
+            }
+        }
+    }
+
+    private func stopSub2APITimer(for keyID: Int) {
+        sub2APITimers[keyID]?.invalidate()
+        sub2APITimers[keyID] = nil
+    }
+
+    private func restartSub2APITimer(for keyID: Int) {
+        startSub2APITimer(for: keyID)
     }
 
     private func requestBrightnessUpdate(percent: Int) {
@@ -383,6 +491,22 @@ final class H200ConnectionModel: ObservableObject {
 
         longPressTasks.removeAll()
         longPressResetKeyIDs.removeAll()
+    }
+
+    private func cancelAllSub2APITimers() {
+        for timer in sub2APITimers.values {
+            timer.invalidate()
+        }
+
+        sub2APITimers.removeAll()
+    }
+
+    private func cancelAllSub2APIFetchTasks() {
+        for task in sub2APIFetchTasks.values {
+            task.cancel()
+        }
+
+        sub2APIFetchTasks.removeAll()
     }
 }
 

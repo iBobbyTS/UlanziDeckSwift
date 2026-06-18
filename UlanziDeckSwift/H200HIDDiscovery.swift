@@ -61,7 +61,7 @@ struct H200HIDDiscovery: H200Discovering {
     }
 }
 
-private struct H200DeviceCandidate {
+nonisolated private struct H200DeviceCandidate {
     let device: IOHIDDevice
     let identity: H200DeviceIdentity
 

@@ -10,14 +10,16 @@ struct RootView: View {
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         folderOpener: FinderFolderOpening? = nil,
-        smbServerConnector: SMBServerConnecting? = nil
+        smbServerConnector: SMBServerConnecting? = nil,
+        sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher()
     ) {
         _connectionModel = StateObject(wrappedValue: H200ConnectionModel(
             discovery: discovery,
             syncer: syncer,
             configurationStore: configurationStore,
             folderOpener: folderOpener,
-            smbServerConnector: smbServerConnector
+            smbServerConnector: smbServerConnector,
+            sub2APIFetcher: sub2APIFetcher
         ))
     }
 
@@ -49,6 +51,18 @@ struct RootView: View {
             },
             onBrightnessPercentCommit: { percent in
                 connectionModel.commitBrightnessPercent(percent)
+            },
+            onSub2APIBaseURLChange: { baseURL in
+                connectionModel.setSelectedSub2APIBaseURL(baseURL)
+            },
+            onSub2APITargetGroupIDChange: { groupID in
+                connectionModel.setSelectedSub2APITargetGroupID(groupID)
+            },
+            onSub2APIRefreshIntervalChange: { interval in
+                connectionModel.setSelectedSub2APIRefreshInterval(interval)
+            },
+            onSub2APIBearerKeyChange: { bearerKey in
+                connectionModel.setSelectedSub2APIBearerKey(bearerKey)
             }
         )
             .background {

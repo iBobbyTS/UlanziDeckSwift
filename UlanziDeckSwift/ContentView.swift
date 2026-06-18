@@ -15,6 +15,10 @@ struct ContentView: View {
     let onSMBServerAddressChange: (String) -> Void
     let onBrightnessPercentPreview: (Int) -> Void
     let onBrightnessPercentCommit: (Int) -> Void
+    let onSub2APIBaseURLChange: (String) -> Void
+    let onSub2APITargetGroupIDChange: (Int) -> Void
+    let onSub2APIRefreshIntervalChange: (Int) -> Void
+    let onSub2APIBearerKeyChange: (String) -> Void
 
     private let layout = DeckGridLayout.h200Prototype
     private let previewLayoutMetrics = DeckPreviewLayoutMetrics.h200
@@ -418,6 +422,67 @@ struct ContentView: View {
                 Spacer()
             }
 
+        case .sub2API:
+            HStack(alignment: .top, spacing: 28) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("功能")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
+                        .font(.callout.weight(.medium))
+                }
+                .frame(width: 150, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Base URL")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        TextField("your-api.example.com", text: selectedSub2APIBaseURLBinding)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("目标分组 ID")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        TextField("目标分组 ID", value: selectedSub2APITargetGroupIDBinding, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 140)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("刷新间隔（秒）")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 10) {
+                            TextField("刷新间隔", value: selectedSub2APIRefreshIntervalBinding, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 96)
+
+                            Stepper("刷新间隔", value: selectedSub2APIRefreshIntervalBinding, in: 5...3600)
+                                .labelsHidden()
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Bearer Key")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        TextField("Bearer Key", text: selectedSub2APIBearerKeyBinding)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+                .frame(maxWidth: 360, alignment: .leading)
+
+                Spacer()
+            }
+
         }
     }
 }
@@ -434,6 +499,11 @@ private extension ContentView {
                 title: "访达",
                 systemImageName: "folder",
                 functions: [.openFolder, .connectSMBServer]
+            ),
+            FunctionSection(
+                title: "网站",
+                systemImageName: "globe",
+                functions: [.sub2API]
             ),
         ]
     }
@@ -464,6 +534,50 @@ private extension ContentView {
             },
             set: { address in
                 onSMBServerAddressChange(address)
+            }
+        )
+    }
+
+    var selectedSub2APIBaseURLBinding: Binding<String> {
+        Binding(
+            get: {
+                selectedConfiguration?.sub2API.baseURL ?? ""
+            },
+            set: { baseURL in
+                onSub2APIBaseURLChange(baseURL)
+            }
+        )
+    }
+
+    var selectedSub2APITargetGroupIDBinding: Binding<Int> {
+        Binding(
+            get: {
+                selectedConfiguration?.sub2API.targetGroupID ?? 0
+            },
+            set: { groupID in
+                onSub2APITargetGroupIDChange(groupID)
+            }
+        )
+    }
+
+    var selectedSub2APIRefreshIntervalBinding: Binding<Int> {
+        Binding(
+            get: {
+                selectedConfiguration?.sub2API.refreshInterval ?? 30
+            },
+            set: { interval in
+                onSub2APIRefreshIntervalChange(interval)
+            }
+        )
+    }
+
+    var selectedSub2APIBearerKeyBinding: Binding<String> {
+        Binding(
+            get: {
+                selectedConfiguration?.sub2API.bearerKey ?? ""
+            },
+            set: { bearerKey in
+                onSub2APIBearerKeyChange(bearerKey)
             }
         )
     }
@@ -686,6 +800,10 @@ private struct DeckKeyRenderedImage: View, Equatable {
         onFolderPathSelection: { _ in },
         onSMBServerAddressChange: { _ in },
         onBrightnessPercentPreview: { _ in },
-        onBrightnessPercentCommit: { _ in }
+        onBrightnessPercentCommit: { _ in },
+        onSub2APIBaseURLChange: { _ in },
+        onSub2APITargetGroupIDChange: { _ in },
+        onSub2APIRefreshIntervalChange: { _ in },
+        onSub2APIBearerKeyChange: { _ in }
     )
 }

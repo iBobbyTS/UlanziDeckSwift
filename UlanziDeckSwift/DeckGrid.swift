@@ -83,6 +83,23 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         case .brightness:
             title = ""
             subtitle = ""
+        case .sub2API:
+            if case let .success(item) = configuration.sub2API.lastResult {
+                title = item.groupName
+                subtitle = "可用 \(item.availableConcurrency)"
+            } else if case .tokenExpired = configuration.sub2API.lastResult {
+                title = "令牌"
+                subtitle = "已过期"
+            } else if case .notFound = configuration.sub2API.lastResult {
+                title = "未找到"
+                subtitle = "分组 \(configuration.sub2API.targetGroupID)"
+            } else if case .networkError = configuration.sub2API.lastResult {
+                title = "网络"
+                subtitle = "错误"
+            } else {
+                title = "号池"
+                subtitle = configuration.sub2API.displayName
+            }
         }
         self.isSelected = isSelected
         self.isPressed = isPressed
@@ -201,8 +218,9 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case openFolder
     case connectSMBServer
     case brightness
+    case sub2API
 
-    static let assignableCases: [DeckKeyFunction] = [.tally, .openFolder, .connectSMBServer]
+    static let assignableCases: [DeckKeyFunction] = [.tally, .openFolder, .connectSMBServer, .sub2API]
 
     var title: String {
         switch self {
@@ -216,6 +234,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "连接 SMB"
         case .brightness:
             return "亮度调节"
+        case .sub2API:
+            return "Sub2API 号池查询"
         }
     }
 
@@ -231,6 +251,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "network"
         case .brightness:
             return "sun.max"
+        case .sub2API:
+            return "globe"
         }
     }
 }
@@ -297,6 +319,41 @@ nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
     }
 }
 
+nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
+    var baseURL: String
+    var targetGroupID: Int
+    var refreshInterval: Int
+    var bearerKey: String
+
+    /// 最近一次成功查询的结果。不参与持久化，反序列化时使用空值。
+    var lastResult: Sub2APICapacityResult?
+
+    init(
+        baseURL: String = "",
+        targetGroupID: Int = 0,
+        refreshInterval: Int = 30,
+        bearerKey: String = "",
+        lastResult: Sub2APICapacityResult? = nil
+    ) {
+        self.baseURL = baseURL
+        self.targetGroupID = targetGroupID
+        self.refreshInterval = refreshInterval
+        self.bearerKey = bearerKey
+        self.lastResult = lastResult
+    }
+
+    var displayName: String {
+        targetGroupID == 0 ? "未配置" : "分组 \(targetGroupID)"
+    }
+
+    enum CodingKeys: CodingKey {
+        case baseURL
+        case targetGroupID
+        case refreshInterval
+        case bearerKey
+    }
+}
+
 nonisolated enum DeckBrightnessConfiguration {
     static let defaultPercent = 100
 
@@ -310,31 +367,36 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var tally: DeckKeyTallyConfiguration
     var openFolder: DeckKeyOpenFolderConfiguration
     var smbServer: DeckKeySMBServerConfiguration
+    var sub2API: DeckKeySub2APIConfiguration
 
     static let empty = DeckKeyConfiguration(
         function: .none,
         tally: DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration(),
-        smbServer: DeckKeySMBServerConfiguration()
+        smbServer: DeckKeySMBServerConfiguration(),
+        sub2API: DeckKeySub2APIConfiguration()
     )
 
     static let tallyDefault = DeckKeyConfiguration(
         function: .tally,
         tally: DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration(),
-        smbServer: DeckKeySMBServerConfiguration()
+        smbServer: DeckKeySMBServerConfiguration(),
+        sub2API: DeckKeySub2APIConfiguration()
     )
 
     init(
         function: DeckKeyFunction,
         tally: DeckKeyTallyConfiguration = DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration = DeckKeyOpenFolderConfiguration(),
-        smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration()
+        smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration(),
+        sub2API: DeckKeySub2APIConfiguration = DeckKeySub2APIConfiguration()
     ) {
         self.function = function
         self.tally = tally
         self.openFolder = openFolder
         self.smbServer = smbServer
+        self.sub2API = sub2API
     }
 
     enum CodingKeys: CodingKey {
@@ -342,6 +404,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case tally
         case openFolder
         case smbServer
+        case sub2API
     }
 
     init(from decoder: Decoder) throws {
@@ -350,6 +413,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         tally = try container.decodeIfPresent(DeckKeyTallyConfiguration.self, forKey: .tally) ?? DeckKeyTallyConfiguration()
         openFolder = try container.decodeIfPresent(DeckKeyOpenFolderConfiguration.self, forKey: .openFolder) ?? DeckKeyOpenFolderConfiguration()
         smbServer = try container.decodeIfPresent(DeckKeySMBServerConfiguration.self, forKey: .smbServer) ?? DeckKeySMBServerConfiguration()
+        sub2API = try container.decodeIfPresent(DeckKeySub2APIConfiguration.self, forKey: .sub2API) ?? DeckKeySub2APIConfiguration()
     }
 
     func encode(to encoder: Encoder) throws {
@@ -358,6 +422,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         try container.encode(tally, forKey: .tally)
         try container.encode(openFolder, forKey: .openFolder)
         try container.encode(smbServer, forKey: .smbServer)
+        try container.encode(sub2API, forKey: .sub2API)
     }
 }
 
@@ -439,6 +504,74 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     func smbServerAddress(for keyID: Int) -> String {
         configurations[keyID, default: .tallyDefault].smbServer.address
+    }
+
+    func sub2APIConfiguration(for keyID: Int) -> DeckKeySub2APIConfiguration {
+        configurations[keyID, default: .tallyDefault].sub2API
+    }
+
+    @discardableResult
+    mutating func setSub2APIBaseURL(_ baseURL: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2API
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].sub2API.baseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        return true
+    }
+
+    @discardableResult
+    mutating func setSub2APITargetGroupID(_ groupID: Int, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2API
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].sub2API.targetGroupID = groupID
+        return true
+    }
+
+    @discardableResult
+    mutating func setSub2APIRefreshInterval(_ interval: Int, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2API
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].sub2API.refreshInterval = max(5, interval)
+        return true
+    }
+
+    @discardableResult
+    mutating func setSub2APIBearerKey(_ bearerKey: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2API
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].sub2API.bearerKey = bearerKey
+        return true
+    }
+
+    @discardableResult
+    mutating func setSub2APILastResult(_ result: Sub2APICapacityResult, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2API
+        else {
+            return false
+        }
+
+        configurations[keyID, default: .tallyDefault].sub2API.lastResult = result
+        return true
     }
 
     @discardableResult
