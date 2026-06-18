@@ -469,14 +469,6 @@ private struct FunctionSectionCard: View {
     let selectedFunction: DeckKeyFunction?
     let onFunctionSelection: (DeckKeyFunction) -> Void
 
-    private var isSelected: Bool {
-        guard let selectedFunction else {
-            return false
-        }
-
-        return section.functions.contains(selectedFunction)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
@@ -506,7 +498,7 @@ private struct FunctionSectionCard: View {
         .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(isSelected ? Color.accentColor.opacity(0.55) : Color(nsColor: .separatorColor), lineWidth: 1)
+                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
         }
     }
 }
