@@ -55,6 +55,7 @@
 - 保活只发送当前小窗模式的小包，不周期性重发完整按键 ZIP。
 - tally、文件夹和 SMB 配置状态变化后使用 `0x000d` 局部更新；payload 仍然是 ZIP，`manifest.json` 只包含本次变化的单个格子，图片也只包含该格子的 PNG。
 - 宽槽位切到 `时钟` 或 `系统状态` 时会先清空该槽位功能，并用 `0x000d` 发送一张透明宽图清掉设备上的旧自定义背景；同一批局部更新会附带 `0x0006` 小窗模式包切到 `DIAL(1)` 或 `STATS(0)`。切回 `功能` 时继续发送宽槽位局部 PNG，并附带 `BACKGROUND(2)` 小窗模式包恢复自定义显示。
+- `STATS(0)` 小窗 payload 使用 `${mode}|${cpu}|${mem}|${time}|${gpu}|${format}|${suffix}`。CPU 和内存来自 Mach host statistics，GPU 优先读取 `IOAccelerator` 的 `PerformanceStatistics["Device Utilization %"]`，读不到时退回 `Renderer/Tiler Utilization %` 的较大值，仍读不到则发 `0`。
 - app 内修改顶部亮度百分比或 Shortcuts 亮度调节器动作时，只发送 `0x000a` 简单包；payload 是 UTF-8 百分比数字，例如 `"50"`。
 - 亮度不再是按键功能，物理按键不会触发亮度调节。
 - 如果发送阶段发现端口被 Ulanzi Studio 或其他软件占用，会显示“按键包尚未发送”的错误提示。

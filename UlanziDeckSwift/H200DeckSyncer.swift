@@ -1,5 +1,6 @@
 import Foundation
 import Dispatch
+import IOKit
 import IOKit.hid
 
 typealias H200InputHandler = @Sendable (H200InputEvent) -> Void
@@ -120,16 +121,178 @@ extension H200DeckSyncing {
     nonisolated func close() {}
 }
 
+nonisolated protocol H200SystemStatsSampling: Sendable {
+    func sample() -> H200SystemStats
+}
+
+nonisolated final class H200SystemStatsSampler: H200SystemStatsSampling, @unchecked Sendable {
+    private let lock = NSLock()
+    private var previousCPUTicks: [UInt64]?
+
+    func sample() -> H200SystemStats {
+        H200SystemStats(
+            cpuPercent: sampleCPUPercent() ?? 0,
+            memoryPercent: sampleMemoryPercent() ?? 0,
+            gpuPercent: sampleGPUPercent() ?? 0
+        )
+    }
+
+    private func sampleCPUPercent() -> Int? {
+        var info = host_cpu_load_info_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<host_cpu_load_info_data_t>.stride / MemoryLayout<integer_t>.stride
+        )
+
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics(mach_host_self(), HOST_CPU_LOAD_INFO, $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else {
+            return nil
+        }
+
+        let ticks = [
+            UInt64(info.cpu_ticks.0),
+            UInt64(info.cpu_ticks.1),
+            UInt64(info.cpu_ticks.2),
+            UInt64(info.cpu_ticks.3),
+        ]
+
+        return lock.withLock {
+            defer {
+                previousCPUTicks = ticks
+            }
+
+            guard let previousCPUTicks else {
+                return nil
+            }
+
+            let deltas = zip(ticks, previousCPUTicks).map { current, previous in
+                current >= previous ? current - previous : 0
+            }
+            let busyTicks = deltas[0] + deltas[1] + deltas[3]
+            let totalTicks = busyTicks + deltas[2]
+            guard totalTicks > 0 else {
+                return nil
+            }
+
+            return Self.clampedPercent(Double(busyTicks) / Double(totalTicks) * 100)
+        }
+    }
+
+    private func sampleMemoryPercent() -> Int? {
+        var stats = vm_statistics64_data_t()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<vm_statistics64_data_t>.stride / MemoryLayout<integer_t>.stride
+        )
+
+        let result = withUnsafeMutablePointer(to: &stats) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+            }
+        }
+        guard result == KERN_SUCCESS else {
+            return nil
+        }
+
+        let usedPages = UInt64(stats.active_count)
+            + UInt64(stats.wire_count)
+            + UInt64(stats.compressor_page_count)
+        let usedBytes = usedPages * UInt64(vm_kernel_page_size)
+        let totalBytes = ProcessInfo.processInfo.physicalMemory
+        guard totalBytes > 0 else {
+            return nil
+        }
+
+        return Self.clampedPercent(Double(usedBytes) / Double(totalBytes) * 100)
+    }
+
+    private func sampleGPUPercent() -> Int? {
+        var iterator: io_iterator_t = 0
+        guard IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOAccelerator"), &iterator) == KERN_SUCCESS else {
+            return nil
+        }
+        defer {
+            IOObjectRelease(iterator)
+        }
+
+        while true {
+            let service = IOIteratorNext(iterator)
+            guard service != 0 else {
+                break
+            }
+            defer {
+                IOObjectRelease(service)
+            }
+
+            guard let statistics = IORegistryEntryCreateCFProperty(
+                service,
+                "PerformanceStatistics" as CFString,
+                kCFAllocatorDefault,
+                0
+            )?.takeRetainedValue() as? [String: Any] else {
+                continue
+            }
+
+            if let deviceUtilization = numericValue(statistics["Device Utilization %"]) {
+                return Self.clampedPercent(deviceUtilization)
+            }
+
+            let rendererUtilization = numericValue(statistics["Renderer Utilization %"])
+            let tilerUtilization = numericValue(statistics["Tiler Utilization %"])
+            if let fallback = [rendererUtilization, tilerUtilization].compactMap({ $0 }).max() {
+                return Self.clampedPercent(fallback)
+            }
+        }
+
+        return nil
+    }
+
+    private func numericValue(_ value: Any?) -> Double? {
+        switch value {
+        case let number as NSNumber:
+            return number.doubleValue
+        case let value as Double:
+            return value
+        case let value as Int:
+            return Double(value)
+        default:
+            return nil
+        }
+    }
+
+    private static func clampedPercent(_ value: Double) -> Int {
+        max(0, min(100, Int(value.rounded())))
+    }
+}
+
+private extension NSLock {
+    func withLock<Value>(_ body: () -> Value) -> Value {
+        lock()
+        defer {
+            unlock()
+        }
+
+        return body()
+    }
+}
+
 // 同步器内部用串行队列保护连接状态；亮度后台队列会跨线程持有该对象。
 nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable {
     private let packageBuilder: H200ButtonPackageBuilder
+    private let systemStatsSampler: H200SystemStatsSampling
     private let operationQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200HIDDeckSyncer")
     private var connection: H200HIDConnection?
     private var inputHandler: H200InputHandler?
     private var currentSmallWindowMode: H200SmallWindowMode = .background
 
-    nonisolated init(packageBuilder: H200ButtonPackageBuilder = H200ButtonPackageBuilder()) {
+    nonisolated init(
+        packageBuilder: H200ButtonPackageBuilder = H200ButtonPackageBuilder(),
+        systemStatsSampler: H200SystemStatsSampling = H200SystemStatsSampler()
+    ) {
         self.packageBuilder = packageBuilder
+        self.systemStatsSampler = systemStatsSampler
     }
 
     deinit {
@@ -221,7 +384,11 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
 
         let smallWindowMode = H200SmallWindowMode.mode(for: displays)
         currentSmallWindowMode = smallWindowMode
-        let packets = H200StartupPacketBuilder.buildStartupPackets(package: package, smallWindowMode: smallWindowMode)
+        let packets = H200StartupPacketBuilder.buildStartupPackets(
+            package: package,
+            smallWindowMode: smallWindowMode,
+            systemStats: systemStats(for: smallWindowMode)
+        )
         return sendPackets(packets, package: package)
     }
 
@@ -237,7 +404,11 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
         if let smallWindowMode {
             currentSmallWindowMode = smallWindowMode
         }
-        let packets = H200PartialUpdatePacketBuilder.buildPartialUpdatePackets(package: package, smallWindowMode: smallWindowMode)
+        let packets = H200PartialUpdatePacketBuilder.buildPartialUpdatePackets(
+            package: package,
+            smallWindowMode: smallWindowMode,
+            systemStats: smallWindowMode.flatMap(systemStats(for:))
+        )
         return sendPackets(packets, package: package)
     }
 
@@ -260,7 +431,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
             return .failure(error, elapsedNanoseconds: 0)
         }
 
-        connection.startKeepAlive(mode: currentSmallWindowMode)
+        connection.startKeepAlive(mode: currentSmallWindowMode, systemStatsSampler: systemStatsSampler)
         return .success(elapsedNanoseconds: 0)
     }
 
@@ -277,7 +448,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
             closeOnQueue()
             return .failure(error, elapsedNanoseconds: 0)
         }
-        connection.startKeepAlive(mode: currentSmallWindowMode)
+        connection.startKeepAlive(mode: currentSmallWindowMode, systemStatsSampler: systemStatsSampler)
 
         return .success(H200DeckSyncSummary(
             payloadByteCount: package.payload.count,
@@ -285,6 +456,10 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
             displayCount: package.displayCount,
             elapsedNanoseconds: 0
         ))
+    }
+
+    private func systemStats(for mode: H200SmallWindowMode) -> H200SystemStats? {
+        mode == .stats ? systemStatsSampler.sample() : nil
     }
 
     private func openConnectionIfNeeded() -> Result<H200HIDConnection, H200DeckSyncFailure> {
@@ -403,7 +578,7 @@ nonisolated private final class H200HIDConnection: @unchecked Sendable {
         }
     }
 
-    func startKeepAlive(mode: H200SmallWindowMode) {
+    func startKeepAlive(mode: H200SmallWindowMode, systemStatsSampler: H200SystemStatsSampling) {
         queue.async { [weak self] in
             guard let self, self.isOpen else {
                 return
@@ -417,7 +592,8 @@ nonisolated private final class H200HIDConnection: @unchecked Sendable {
                     return
                 }
 
-                _ = self.writePacketsOnQueue([H200SmallWindowDataPacketBuilder.packet(mode: mode)])
+                let systemStats = mode == .stats ? systemStatsSampler.sample() : nil
+                _ = self.writePacketsOnQueue([H200SmallWindowDataPacketBuilder.packet(mode: mode, systemStats: systemStats)])
             }
             self.keepAliveTimer = timer
             timer.resume()

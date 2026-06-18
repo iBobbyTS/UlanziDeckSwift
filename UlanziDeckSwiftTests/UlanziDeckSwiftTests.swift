@@ -1328,10 +1328,35 @@ struct UlanziDeckSwiftTests {
         )))
 
         let clockPayload = H200SmallWindowDataPacketBuilder.payload(mode: .dial, date: date)
-        let statsPayload = H200SmallWindowDataPacketBuilder.payload(mode: .stats, date: date)
+        let statsPayload = H200SmallWindowDataPacketBuilder.payload(
+            mode: .stats,
+            date: date,
+            systemStats: H200SystemStats(cpuPercent: 37, memoryPercent: 62, gpuPercent: 18)
+        )
 
         #expect(String(data: clockPayload, encoding: .utf8) == "1|0|0|12:34:56|0|24H|")
-        #expect(String(data: statsPayload, encoding: .utf8) == "0|0|0|12:34:56|0|24H|")
+        #expect(String(data: statsPayload, encoding: .utf8) == "0|37|62|12:34:56|18|24H|")
+    }
+
+    @Test func systemStatsPayloadClampsPercentValues() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let date = try #require(calendar.date(from: DateComponents(
+            timeZone: .current,
+            year: 2026,
+            month: 6,
+            day: 18,
+            hour: 12,
+            minute: 34,
+            second: 56
+        )))
+
+        let payload = H200SmallWindowDataPacketBuilder.payload(
+            mode: .stats,
+            date: date,
+            systemStats: H200SystemStats(cpuPercent: -1, memoryPercent: 101, gpuPercent: 42)
+        )
+
+        #expect(String(data: payload, encoding: .utf8) == "0|0|100|12:34:56|42|24H|")
     }
 
     @Test func partialUpdatePacketsUsePartialUpdateCommand() {
@@ -1354,15 +1379,21 @@ struct UlanziDeckSwiftTests {
             displayCount: 1
         )
 
-        let packets = H200PartialUpdatePacketBuilder.buildPartialUpdatePackets(package: package, smallWindowMode: .stats)
+        let packets = H200PartialUpdatePacketBuilder.buildPartialUpdatePackets(
+            package: package,
+            smallWindowMode: .stats,
+            systemStats: H200SystemStats(cpuPercent: 37, memoryPercent: 62, gpuPercent: 18)
+        )
         let smallWindowPacket = packets.last!
         let smallWindowLength = Self.payloadLength(in: smallWindowPacket)
         let smallWindowPayload = smallWindowPacket.subdata(in: H200PacketBuilder.headerSize..<(H200PacketBuilder.headerSize + smallWindowLength))
+        let smallWindowPayloadText = String(data: smallWindowPayload, encoding: .utf8)
 
         #expect(packets.count == 3)
         #expect(Array(packets[0].prefix(4)) == [0x7c, 0x7c, 0x00, 0x0d])
         #expect(Array(smallWindowPacket.prefix(4)) == [0x7c, 0x7c, 0x00, 0x06])
-        #expect(String(data: smallWindowPayload, encoding: .utf8)?.hasPrefix("0|0|0|") == true)
+        #expect(smallWindowPayloadText?.hasPrefix("0|37|62|") == true)
+        #expect(smallWindowPayloadText?.hasSuffix("|18|24H|") == true)
     }
 
     @MainActor

@@ -37,6 +37,24 @@ nonisolated enum H200SmallWindowMode: Int, Encodable, Equatable {
     }
 }
 
+nonisolated struct H200SystemStats: Equatable, Sendable {
+    let cpuPercent: Int
+    let memoryPercent: Int
+    let gpuPercent: Int
+
+    static let zero = H200SystemStats(cpuPercent: 0, memoryPercent: 0, gpuPercent: 0)
+
+    init(cpuPercent: Int, memoryPercent: Int, gpuPercent: Int) {
+        self.cpuPercent = Self.clamped(cpuPercent)
+        self.memoryPercent = Self.clamped(memoryPercent)
+        self.gpuPercent = Self.clamped(gpuPercent)
+    }
+
+    private static func clamped(_ percent: Int) -> Int {
+        max(0, min(100, percent))
+    }
+}
+
 nonisolated enum H200PacketBuilder {
     static let packetSize = H200DeviceTarget.reportSize
     static let headerSize = 8
@@ -103,24 +121,32 @@ nonisolated enum H200PacketBuilder {
 }
 
 nonisolated enum H200StartupPacketBuilder {
-    static func buildStartupPackets(package: H200ButtonPackage, smallWindowMode: H200SmallWindowMode = .background) -> [Data] {
+    static func buildStartupPackets(
+        package: H200ButtonPackage,
+        smallWindowMode: H200SmallWindowMode = .background,
+        systemStats: H200SystemStats? = nil
+    ) -> [Data] {
         var packets = H200PacketBuilder.buildChunkedPackets(
             command: H200Command.outSetButtons,
             payload: package.payload
         )
-        packets.append(H200SmallWindowDataPacketBuilder.packet(mode: smallWindowMode))
+        packets.append(H200SmallWindowDataPacketBuilder.packet(mode: smallWindowMode, systemStats: systemStats))
         return packets
     }
 }
 
 nonisolated enum H200PartialUpdatePacketBuilder {
-    static func buildPartialUpdatePackets(package: H200ButtonPackage, smallWindowMode: H200SmallWindowMode? = nil) -> [Data] {
+    static func buildPartialUpdatePackets(
+        package: H200ButtonPackage,
+        smallWindowMode: H200SmallWindowMode? = nil,
+        systemStats: H200SystemStats? = nil
+    ) -> [Data] {
         var packets = H200PacketBuilder.buildChunkedPackets(
             command: H200Command.outPartiallyUpdateButtons,
             payload: package.payload
         )
         if let smallWindowMode {
-            packets.append(H200SmallWindowDataPacketBuilder.packet(mode: smallWindowMode))
+            packets.append(H200SmallWindowDataPacketBuilder.packet(mode: smallWindowMode, systemStats: systemStats))
         }
 
         return packets
@@ -130,15 +156,24 @@ nonisolated enum H200PartialUpdatePacketBuilder {
 nonisolated enum H200SmallWindowDataPacketBuilder {
     static let backgroundModePayload = Data("2|0|0|00:00:00|0|24H|".utf8)
 
-    static func payload(mode: H200SmallWindowMode, date: Date = Date()) -> Data {
+    static func payload(
+        mode: H200SmallWindowMode,
+        date: Date = Date(),
+        systemStats: H200SystemStats? = nil
+    ) -> Data {
         let time = mode == .background ? "00:00:00" : timeString(from: date)
-        return Data("\(mode.rawValue)|0|0|\(time)|0|24H|".utf8)
+        let stats = mode == .stats ? systemStats ?? .zero : .zero
+        return Data("\(mode.rawValue)|\(stats.cpuPercent)|\(stats.memoryPercent)|\(time)|\(stats.gpuPercent)|24H|".utf8)
     }
 
-    static func packet(mode: H200SmallWindowMode, date: Date = Date()) -> Data {
+    static func packet(
+        mode: H200SmallWindowMode,
+        date: Date = Date(),
+        systemStats: H200SystemStats? = nil
+    ) -> Data {
         H200PacketBuilder.buildSimplePacket(
             command: H200Command.outSetSmallWindowData,
-            payload: payload(mode: mode, date: date)
+            payload: payload(mode: mode, date: date, systemStats: systemStats)
         )
     }
 
