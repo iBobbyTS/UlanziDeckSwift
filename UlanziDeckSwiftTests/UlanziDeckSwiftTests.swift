@@ -3,6 +3,7 @@ import Darwin
 import Testing
 @testable import UlanziDeckSwift
 
+@Suite(.serialized)
 struct UlanziDeckSwiftTests {
     @Test func h200PrototypeLayoutContainsFourteenNumberedKeys() {
         let layout = DeckGridLayout.h200Prototype
@@ -345,7 +346,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func launchCheckShowsRetryAlertWhenH200IsMissing() {
+    @Test func launchCheckShowsRetryAlertWhenH200IsMissing() async throws {
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.notConnected]),
@@ -354,6 +355,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            model.status == .notConnected
+        }
 
         #expect(model.status == .notConnected)
         #expect(model.alert?.title == "未检测到 H200")
@@ -361,7 +365,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func managerExclusiveAccessShowsOccupiedPortAlert() {
+    @Test func managerExclusiveAccessShowsOccupiedPortAlert() async throws {
         let code = Self.exclusiveAccessReturnCode()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.communicationPortOccupied(code)]),
@@ -370,6 +374,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            model.status == .communicationPortOccupied(code)
+        }
 
         #expect(model.status == .communicationPortOccupied(code))
         #expect(model.alert?.title == "H200 通信端口被占用")
@@ -407,7 +414,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func successfulLaunchSendsDisplaysMatchingTheVisibleGrid() {
+    @Test func successfulLaunchSendsDisplaysMatchingTheVisibleGrid() async throws {
         let connectedIdentity = Self.protocolInterfaceIdentity()
         let syncer = FakeH200DeckSyncer(results: [
             .success(H200DeckSyncSummary(payloadByteCount: 4096, packetCount: 4, displayCount: 14)),
@@ -420,7 +427,9 @@ struct UlanziDeckSwiftTests {
 
         model.checkOnLaunch()
 
-        #expect(syncer.sentDisplays.count == 1)
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary?.packetCount == 4
+        }
         #expect(syncer.sentDisplays.first?.map(\.title) == Array(repeating: "0", count: 14))
         #expect(syncer.sentDisplays.first?.allSatisfy { $0.subtitle == "默认 0" } == true)
         #expect(syncer.sentDisplays.first?.last?.isWide == true)
@@ -428,7 +437,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func launchUsesPersistedConfigurationWhenSyncingDevice() {
+    @Test func launchUsesPersistedConfigurationWhenSyncingDevice() async throws {
         let layout = DeckGridLayout.h200Prototype
         var persistedState = DeckGridInteractionState(layout: layout)
         persistedState.setTallyDefaultValue(4, for: 3)
@@ -444,6 +453,9 @@ struct UlanziDeckSwiftTests {
 
         model.checkOnLaunch()
 
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         #expect(model.interactionState.tallyDefaultValue(for: 3) == 4)
         #expect(model.interactionState.tallyValue(for: 3) == 5)
         #expect(model.interactionState.configuration(for: 7)?.function == DeckKeyFunction.none)
@@ -451,6 +463,51 @@ struct UlanziDeckSwiftTests {
         #expect(syncer.sentDisplays.first?[2].subtitle == "默认 4")
         #expect(syncer.sentDisplays.first?[6].title == "")
         #expect(syncer.sentDisplays.first?[6].subtitle == "")
+    }
+
+    @MainActor
+    @Test func launchSyncDoesNotBlockUIAndFinishesLater() async throws {
+        let syncer = FakeH200DeckSyncer(packageDelayNanoseconds: 120_000_000)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
+        )
+
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        model.checkOnLaunch()
+        model.selectKey(keyID: 8)
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
+
+        #expect(elapsedNanoseconds < 60_000_000)
+        #expect(model.interactionState.selectedKeyID == 8)
+        #expect(syncer.sentDisplays.isEmpty)
+
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        #expect(model.syncSummary?.elapsedNanoseconds ?? 0 >= 120_000_000)
+    }
+
+    @MainActor
+    @Test func displayChangesDuringStartupSyncTriggerFullResyncAfterStartup() async throws {
+        let syncer = FakeH200DeckSyncer(packageDelayNanoseconds: 80_000_000)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 7)
+        model.setSelectedTallyDefaultValue(9)
+
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 2
+        }
+        #expect(syncer.sentDisplays[0][6].title == "0")
+        #expect(syncer.sentDisplays[1][6].title == "9")
+        #expect(syncer.partialDisplays.isEmpty)
     }
 
     @MainActor
@@ -464,6 +521,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.selectKey(keyID: 2)
         model.setSelectedTallyDefaultValue(3)
         syncer.emitInput(H200InputEvent(state: 1, index: 1, type: .button, action: .press))
@@ -479,7 +539,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func uiSelectionChangesParameterTargetWithoutSyncingDisplays() {
+    @Test func uiSelectionChangesParameterTargetWithoutSyncingDisplays() async throws {
         let connectedIdentity = Self.protocolInterfaceIdentity()
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
@@ -489,6 +549,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.selectKey(keyID: 8)
 
         #expect(model.interactionState.selectedKeyID == 8)
@@ -506,11 +569,17 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.clearKeyFunction(keyID: 7)
         syncer.emitInput(H200InputEvent(state: 1, index: 6, type: .button, action: .press))
         try await Task.sleep(nanoseconds: 50_000_000)
         syncer.emitInput(H200InputEvent(state: 0, index: 6, type: .button, action: .release))
         try await Task.sleep(nanoseconds: 50_000_000)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 1
+        }
 
         #expect(model.interactionState.selectedKeyID == 7)
         #expect(model.interactionState.configuration(for: 7)?.function == DeckKeyFunction.none)
@@ -524,7 +593,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func selectingTheSameSidebarFunctionAgainClearsIt() {
+    @Test func selectingTheSameSidebarFunctionAgainClearsIt() async throws {
         let connectedIdentity = Self.protocolInterfaceIdentity()
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
@@ -534,8 +603,14 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.selectKey(keyID: 7)
         model.assignSelectedFunction(.tally)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 1
+        }
 
         #expect(model.interactionState.configuration(for: 7)?.function == DeckKeyFunction.none)
         #expect(syncer.sentDisplays.count == 1)
@@ -546,7 +621,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func sidebarFunctionCanRestoreClearedKey() {
+    @Test func sidebarFunctionCanRestoreClearedKey() async throws {
         let connectedIdentity = Self.protocolInterfaceIdentity()
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
@@ -556,9 +631,15 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.clearKeyFunction(keyID: 7)
         model.assignSelectedFunction(.tally)
 
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 2
+        }
         #expect(model.interactionState.selectedKeyID == 7)
         #expect(model.interactionState.configuration(for: 7)?.function == .tally)
         #expect(syncer.sentDisplays.count == 1)
@@ -569,7 +650,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func selectingOpenFolderFunctionSyncsAndPersistsFolderPath() {
+    @Test func selectingOpenFolderFunctionSyncsAndPersistsFolderPath() async throws {
         let syncer = FakeH200DeckSyncer()
         let store = FakeDeckConfigurationStore()
         let model = H200ConnectionModel(
@@ -580,10 +661,16 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.openFolder)
         model.setSelectedFolderPath("/Users/ibobby/Documents")
 
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 2
+        }
         #expect(model.interactionState.configuration(for: 4)?.function == DeckKeyFunction.openFolder)
         #expect(model.interactionState.folderPath(for: 4) == "/Users/ibobby/Documents")
         #expect(syncer.sentDisplays.count == 1)
@@ -595,7 +682,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func selectingConnectSMBServerFunctionSyncsAndPersistsAddress() {
+    @Test func selectingConnectSMBServerFunctionSyncsAndPersistsAddress() async throws {
         let syncer = FakeH200DeckSyncer()
         let store = FakeDeckConfigurationStore()
         let model = H200ConnectionModel(
@@ -606,10 +693,16 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.connectSMBServer)
         model.setSelectedSMBServerAddress("smb://nas.local/media")
 
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 2
+        }
         #expect(model.interactionState.configuration(for: 4)?.function == DeckKeyFunction.connectSMBServer)
         #expect(model.interactionState.smbServerAddress(for: 4) == "nas.local/media")
         #expect(syncer.sentDisplays.count == 1)
@@ -632,6 +725,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         let sentDisplayCount = syncer.sentDisplays.count
 
         model.previewBrightnessPercent(10)
@@ -692,6 +788,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.commitBrightnessPercent(25)
         try await Self.waitUntil {
             model.alert?.title == "H200 通信端口被占用"
@@ -747,6 +846,9 @@ struct UlanziDeckSwiftTests {
         }
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         let result = BrightnessAdjustmentRuntime.shared.adjustBrightness(to: 35)
 
         #expect(result == .sent(35))
@@ -755,6 +857,18 @@ struct UlanziDeckSwiftTests {
         try await Self.waitUntil {
             syncer.brightnessPercents == [35]
         }
+    }
+
+    @Test func fakeDeckSyncerReturnsElapsedTimeAfterBlockingPackageSend() {
+        let syncer = FakeH200DeckSyncer(packageDelayNanoseconds: 25_000_000)
+        let layout = DeckGridLayout.h200Prototype
+        let display = DeckGridInteractionState(layout: layout).display(for: layout.keys[0])
+
+        let result = syncer.sendStartupPackage(displays: [display])
+
+        #expect(syncer.sentDisplays.count == 1)
+        #expect(result.elapsedNanoseconds >= 25_000_000)
+        #expect(result.elapsedMilliseconds >= 25)
     }
 
     @MainActor
@@ -768,6 +882,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.selectKey(keyID: 3)
         syncer.emitInput(H200InputEvent(state: 1, index: 6, type: .button, action: .press))
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -794,6 +911,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.openFolder)
         model.setSelectedFolderPath("/Users/ibobby/Documents")
@@ -820,6 +940,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.openFolder)
         syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
@@ -842,6 +965,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.connectSMBServer)
         model.setSelectedSMBServerAddress("nas.local/media")
@@ -868,6 +994,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.connectSMBServer)
         syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
@@ -891,6 +1020,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.openFolder)
         model.setSelectedFolderPath("/Users/ibobby/Documents")
@@ -913,6 +1045,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         syncer.emitInput(H200InputEvent(state: 1, index: 6, type: .button, action: .release))
         syncer.emitInput(H200InputEvent(state: 1, index: 17, type: .encoder, action: .press))
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -933,6 +1068,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
         model.setSelectedTallyDefaultValue(5)
         syncer.emitInput(H200InputEvent(state: 1, index: 0, type: .button, action: .press))
         try await Task.sleep(nanoseconds: 5_000_000)
@@ -949,9 +1087,9 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func syncFailureShowsPackageNotSentAlert() {
+    @Test func syncFailureShowsPackageNotSentAlert() async throws {
         let code = Self.exclusiveAccessReturnCode()
-        let syncer = FakeH200DeckSyncer(results: [.failure(.communicationPortOccupied(code))])
+        let syncer = FakeH200DeckSyncer(results: [.failure(.communicationPortOccupied(code), elapsedNanoseconds: 0)])
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
             syncer: syncer,
@@ -959,6 +1097,9 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil {
+            model.alert?.title == "H200 通信端口被占用"
+        }
 
         #expect(model.alert?.title == "H200 通信端口被占用")
         #expect(model.alert?.message.contains("按键包尚未发送") == true)
@@ -1220,6 +1361,7 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
     private var storedPartialDisplays: [[DeckKeyDisplay]] = []
     private var storedBrightnessPercents: [Int] = []
     private var inputHandler: H200InputHandler?
+    private let packageDelayNanoseconds: UInt64
     private let brightnessDelayNanoseconds: UInt64
 
     var sentDisplays: [[DeckKeyDisplay]] {
@@ -1238,19 +1380,23 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
         results: [H200DeckSyncResult] = [],
         brightnessFailures: [H200DeckSyncFailure] = [],
         brightnessResults: [H200DeckSyncFailure?]? = nil,
+        packageDelayNanoseconds: UInt64 = 0,
         brightnessDelayNanoseconds: UInt64 = 0
     ) {
         self.results = results
         self.brightnessResults = brightnessResults ?? brightnessFailures.map { Optional.some($0) }
+        self.packageDelayNanoseconds = packageDelayNanoseconds
         self.brightnessDelayNanoseconds = brightnessDelayNanoseconds
     }
 
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
-        locked {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        sleepIfNeeded(packageDelayNanoseconds)
+        let result = locked {
             storedSentDisplays.append(displays)
 
             guard !results.isEmpty else {
-                return .success(H200DeckSyncSummary(
+                return H200DeckSyncResult.success(H200DeckSyncSummary(
                     payloadByteCount: displays.count,
                     packetCount: 1,
                     displayCount: displays.count
@@ -1259,33 +1405,43 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
 
             return results.removeFirst()
         }
+
+        return result.withElapsedNanoseconds(DispatchTime.now().uptimeNanoseconds - startedAt)
     }
 
     func sendPartialPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
-        locked {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        sleepIfNeeded(packageDelayNanoseconds)
+        let result = locked {
             storedPartialDisplays.append(displays)
 
-            return .success(H200DeckSyncSummary(
+            return H200DeckSyncResult.success(H200DeckSyncSummary(
                 payloadByteCount: displays.count,
                 packetCount: 1,
                 displayCount: displays.count
             ))
         }
+
+        return result.withElapsedNanoseconds(DispatchTime.now().uptimeNanoseconds - startedAt)
     }
 
-    func setBrightness(percent: Int) -> H200DeckSyncFailure? {
-        if brightnessDelayNanoseconds > 0 {
-            Thread.sleep(forTimeInterval: Double(brightnessDelayNanoseconds) / 1_000_000_000)
-        }
+    func setBrightness(percent: Int) -> H200DeckCommandResult {
+        sleepIfNeeded(brightnessDelayNanoseconds)
 
-        return locked {
+        let error = locked {
             storedBrightnessPercents.append(percent)
             guard !brightnessResults.isEmpty else {
-                return nil
+                return H200DeckSyncFailure?.none
             }
 
             return brightnessResults.removeFirst()
         }
+
+        if let error {
+            return .failure(error, elapsedNanoseconds: brightnessDelayNanoseconds)
+        }
+
+        return .success(elapsedNanoseconds: brightnessDelayNanoseconds)
     }
 
     func setInputHandler(_ handler: H200InputHandler?) {
@@ -1304,6 +1460,30 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
         defer { lock.unlock() }
         return body()
     }
+
+    private func sleepIfNeeded(_ nanoseconds: UInt64) {
+        guard nanoseconds > 0 else {
+            return
+        }
+
+        Thread.sleep(forTimeInterval: Double(nanoseconds) / 1_000_000_000)
+    }
+}
+
+private extension H200DeckSyncResult {
+    func withElapsedNanoseconds(_ elapsedNanoseconds: UInt64) -> H200DeckSyncResult {
+        switch self {
+        case let .success(summary):
+            return .success(H200DeckSyncSummary(
+                payloadByteCount: summary.payloadByteCount,
+                packetCount: summary.packetCount,
+                displayCount: summary.displayCount,
+                elapsedNanoseconds: elapsedNanoseconds
+            ))
+        case let .failure(error, _):
+            return .failure(error, elapsedNanoseconds: elapsedNanoseconds)
+        }
+    }
 }
 
 private struct FakeH200ButtonIconRenderer: H200ButtonIconRendering {
@@ -1312,7 +1492,8 @@ private struct FakeH200ButtonIconRenderer: H200ButtonIconRendering {
     }
 }
 
-private final class FakeH200Discovery: H200Discovering {
+private final class FakeH200Discovery: H200Discovering, @unchecked Sendable {
+    private let lock = NSLock()
     private var results: [H200DiscoveryResult]
 
     init(results: [H200DiscoveryResult]) {
@@ -1320,11 +1501,19 @@ private final class FakeH200Discovery: H200Discovering {
     }
 
     func discoverH200() -> H200DiscoveryResult {
-        guard !results.isEmpty else {
-            return .notConnected
-        }
+        locked {
+            guard !results.isEmpty else {
+                return .notConnected
+            }
 
-        return results.removeFirst()
+            return results.removeFirst()
+        }
+    }
+
+    private func locked<Value>(_ body: () -> Value) -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
     }
 }
 

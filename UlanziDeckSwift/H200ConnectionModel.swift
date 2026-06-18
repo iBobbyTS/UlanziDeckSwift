@@ -19,12 +19,15 @@ final class H200ConnectionModel: ObservableObject {
     private let sub2APIFetcher: Sub2APIFetching
     private var hasPersistedBrightnessPercent: Bool
     private let longPressDurationNanoseconds: UInt64
-    private let brightnessUpdateQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200BrightnessUpdate")
+    private let deviceCommandQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200DeviceCommands")
     private var longPressTasks: [Int: Task<Void, Never>] = [:]
     private var longPressResetKeyIDs: Set<Int> = []
     private var brightnessUpdateRevision = 0
     private var brightnessUpdateInProgress = false
     private var latestBrightnessUpdate: BrightnessUpdateRequest?
+    private var deviceCommandGeneration = 0
+    private var displayRevision = 0
+    private var needsFullDisplaySyncAfterStartup = false
     private var sub2APITimers: [Int: Timer] = [:]
     private var sub2APIFetchTasks: [Int: Task<Void, Never>] = [:]
 
@@ -60,8 +63,11 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     deinit {
+        let syncer = syncer
         syncer.setInputHandler(nil)
-        syncer.close()
+        deviceCommandQueue.async {
+            syncer.close()
+        }
     }
 
     var connectedDevice: H200DeviceIdentity? {
@@ -288,27 +294,69 @@ final class H200ConnectionModel: ObservableObject {
         cancelAllLongPressTasks()
         cancelAllSub2APITimers()
         cancelAllSub2APIFetchTasks()
-        syncer.close()
+        deviceCommandGeneration += 1
+        let generation = deviceCommandGeneration
         status = .checking
         syncSummary = nil
         alert = nil
+        needsFullDisplaySyncAfterStartup = false
 
-        let result = discovery.discoverH200()
-        status = H200ConnectionStatus(result: result)
-        alert = H200ConnectionAlert(result: result)
+        let discovery = discovery
+        let syncer = syncer
+        let initialDisplays = interactionState.displays(for: layout)
+        let startupDisplayRevision = displayRevision
+        deviceCommandQueue.async { [weak self] in
+            syncer.close()
 
-        guard case .connected = result else {
+            let discoveryResult = discovery.discoverH200()
+            DispatchQueue.main.async { [weak self] in
+                self?.finishDiscovery(discoveryResult, generation: generation)
+            }
+
+            guard case .connected = discoveryResult else {
+                return
+            }
+
+            let syncResult = syncer.sendStartupPackage(displays: initialDisplays)
+            DispatchQueue.main.async { [weak self] in
+                self?.finishStartupSync(
+                    syncResult,
+                    generation: generation,
+                    startupDisplayRevision: startupDisplayRevision
+                )
+            }
+        }
+    }
+
+    private func finishDiscovery(_ result: H200DiscoveryResult, generation: Int) {
+        guard generation == deviceCommandGeneration else {
             return
         }
 
-        let initialDisplays = interactionState.displays(for: layout)
-        switch syncer.sendStartupPackage(displays: initialDisplays) {
+        status = H200ConnectionStatus(result: result)
+        alert = H200ConnectionAlert(result: result)
+    }
+
+    private func finishStartupSync(
+        _ result: H200DeckSyncResult,
+        generation: Int,
+        startupDisplayRevision: Int
+    ) {
+        guard generation == deviceCommandGeneration else {
+            return
+        }
+
+        switch result {
         case let .success(summary):
             syncSummary = summary
             if hasPersistedBrightnessPercent {
                 requestBrightnessUpdate(percent: brightnessPercent)
             }
-        case let .failure(error):
+            if needsFullDisplaySyncAfterStartup || displayRevision != startupDisplayRevision {
+                needsFullDisplaySyncAfterStartup = false
+                syncCurrentDisplays()
+            }
+        case let .failure(error, _):
             alert = H200ConnectionAlert(syncFailure: error)
         }
     }
@@ -424,10 +472,10 @@ final class H200ConnectionModel: ObservableObject {
     private func startBrightnessCommand(request: BrightnessUpdateRequest, revision: Int) {
         brightnessUpdateInProgress = true
         let syncer = syncer
-        brightnessUpdateQueue.async { [weak self] in
-            let error = syncer.setBrightness(percent: request.percent)
+        deviceCommandQueue.async { [weak self] in
+            let result = syncer.setBrightness(percent: request.percent)
             DispatchQueue.main.async { [weak self] in
-                self?.finishBrightnessCommand(request: request, revision: revision, error: error)
+                self?.finishBrightnessCommand(request: request, revision: revision, result: result)
             }
         }
     }
@@ -435,9 +483,9 @@ final class H200ConnectionModel: ObservableObject {
     private func finishBrightnessCommand(
         request: BrightnessUpdateRequest,
         revision: Int,
-        error: H200DeckSyncFailure?
+        result: H200DeckCommandResult
     ) {
-        if let error {
+        if case let .failure(error, _) = result {
             brightnessUpdateInProgress = false
             alert = H200ConnectionAlert(syncFailure: error)
             return
@@ -460,15 +508,22 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        switch syncer.sendStartupPackage(displays: interactionState.displays(for: layout)) {
-        case let .success(summary):
-            syncSummary = summary
-        case let .failure(error):
-            alert = H200ConnectionAlert(syncFailure: error)
+        let displays = interactionState.displays(for: layout)
+        let generation = deviceCommandGeneration
+        let syncer = syncer
+        deviceCommandQueue.async { [weak self] in
+            let result = syncer.sendStartupPackage(displays: displays)
+            DispatchQueue.main.async { [weak self] in
+                self?.finishDisplaySync(result, generation: generation)
+            }
         }
     }
 
     private func syncKeyDisplay(keyID: Int) {
+        displayRevision += 1
+        if syncSummary == nil {
+            needsFullDisplaySyncAfterStartup = true
+        }
         guard case .connected = status, syncSummary != nil,
               let key = layout.keys.first(where: { $0.id == keyID })
         else {
@@ -476,10 +531,25 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         let display = interactionState.display(for: key)
-        switch syncer.sendPartialPackage(displays: [display]) {
+        let generation = deviceCommandGeneration
+        let syncer = syncer
+        deviceCommandQueue.async { [weak self] in
+            let result = syncer.sendPartialPackage(displays: [display])
+            DispatchQueue.main.async { [weak self] in
+                self?.finishDisplaySync(result, generation: generation)
+            }
+        }
+    }
+
+    private func finishDisplaySync(_ result: H200DeckSyncResult, generation: Int) {
+        guard generation == deviceCommandGeneration else {
+            return
+        }
+
+        switch result {
         case let .success(summary):
             syncSummary = summary
-        case let .failure(error):
+        case let .failure(error, _):
             alert = H200ConnectionAlert(syncFailure: error)
         }
     }

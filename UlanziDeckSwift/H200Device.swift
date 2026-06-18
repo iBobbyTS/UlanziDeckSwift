@@ -84,6 +84,6 @@ nonisolated enum H200DiscoveryResult: Equatable {
     case managerOpenFailed(HIDReturnCode)
 }
 
-protocol H200Discovering {
+protocol H200Discovering: Sendable {
     func discoverH200() -> H200DiscoveryResult
 }

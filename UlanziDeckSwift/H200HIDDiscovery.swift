@@ -1,7 +1,7 @@
 import Foundation
 import IOKit.hid
 
-struct H200HIDDiscovery: H200Discovering {
+struct H200HIDDiscovery: H200Discovering, Sendable {
     nonisolated init() {}
 
     func discoverH200() -> H200DiscoveryResult {

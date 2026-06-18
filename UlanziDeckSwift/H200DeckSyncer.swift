@@ -8,11 +8,59 @@ nonisolated struct H200DeckSyncSummary: Equatable {
     let payloadByteCount: Int
     let packetCount: Int
     let displayCount: Int
+    let elapsedNanoseconds: UInt64
+
+    init(
+        payloadByteCount: Int,
+        packetCount: Int,
+        displayCount: Int,
+        elapsedNanoseconds: UInt64 = 0
+    ) {
+        self.payloadByteCount = payloadByteCount
+        self.packetCount = packetCount
+        self.displayCount = displayCount
+        self.elapsedNanoseconds = elapsedNanoseconds
+    }
+
+    var elapsedMilliseconds: Double {
+        Double(elapsedNanoseconds) / 1_000_000
+    }
 }
 
 nonisolated enum H200DeckSyncResult: Equatable {
     case success(H200DeckSyncSummary)
-    case failure(H200DeckSyncFailure)
+    case failure(H200DeckSyncFailure, elapsedNanoseconds: UInt64)
+
+    var elapsedNanoseconds: UInt64 {
+        switch self {
+        case let .success(summary):
+            return summary.elapsedNanoseconds
+        case let .failure(_, elapsedNanoseconds):
+            return elapsedNanoseconds
+        }
+    }
+
+    var elapsedMilliseconds: Double {
+        Double(elapsedNanoseconds) / 1_000_000
+    }
+}
+
+nonisolated enum H200DeckCommandResult: Equatable {
+    case success(elapsedNanoseconds: UInt64)
+    case failure(H200DeckSyncFailure, elapsedNanoseconds: UInt64)
+
+    var elapsedNanoseconds: UInt64 {
+        switch self {
+        case let .success(elapsedNanoseconds):
+            return elapsedNanoseconds
+        case let .failure(_, elapsedNanoseconds):
+            return elapsedNanoseconds
+        }
+    }
+
+    var elapsedMilliseconds: Double {
+        Double(elapsedNanoseconds) / 1_000_000
+    }
 }
 
 nonisolated enum H200DeckSyncFailure: Error, Equatable {
@@ -57,7 +105,7 @@ nonisolated enum H200DeckSyncFailure: Error, Equatable {
 nonisolated protocol H200DeckSyncing: Sendable {
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult
     func sendPartialPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult
-    func setBrightness(percent: Int) -> H200DeckSyncFailure?
+    func setBrightness(percent: Int) -> H200DeckCommandResult
     func setInputHandler(_ handler: H200InputHandler?)
     func close()
 }
@@ -67,7 +115,7 @@ extension H200DeckSyncing {
         sendStartupPackage(displays: displays)
     }
 
-    nonisolated func setBrightness(percent: Int) -> H200DeckSyncFailure? { nil }
+    nonisolated func setBrightness(percent: Int) -> H200DeckCommandResult { .success(elapsedNanoseconds: 0) }
     nonisolated func setInputHandler(_ handler: H200InputHandler?) {}
     nonisolated func close() {}
 }
@@ -88,14 +136,20 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
     }
 
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
-        operationQueue.sync {
-            sendStartupPackageOnQueue(displays: displays)
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        return operationQueue.sync {
+            timedSyncResult(startedAt: startedAt) {
+                sendStartupPackageOnQueue(displays: displays)
+            }
         }
     }
 
     func sendPartialPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
-        operationQueue.sync {
-            sendPartialPackageOnQueue(displays: displays)
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        return operationQueue.sync {
+            timedSyncResult(startedAt: startedAt) {
+                sendPartialPackageOnQueue(displays: displays)
+            }
         }
     }
 
@@ -112,9 +166,47 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
         }
     }
 
-    func setBrightness(percent: Int) -> H200DeckSyncFailure? {
-        operationQueue.sync {
-            setBrightnessOnQueue(percent: percent)
+    func setBrightness(percent: Int) -> H200DeckCommandResult {
+        let startedAt = DispatchTime.now().uptimeNanoseconds
+        return operationQueue.sync {
+            timedCommandResult(startedAt: startedAt) {
+                setBrightnessOnQueue(percent: percent)
+            }
+        }
+    }
+
+    private func timedSyncResult(
+        startedAt: UInt64,
+        _ operation: () -> H200DeckSyncResult
+    ) -> H200DeckSyncResult {
+        let result = operation()
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
+
+        switch result {
+        case let .success(summary):
+            return .success(H200DeckSyncSummary(
+                payloadByteCount: summary.payloadByteCount,
+                packetCount: summary.packetCount,
+                displayCount: summary.displayCount,
+                elapsedNanoseconds: elapsedNanoseconds
+            ))
+        case let .failure(error, _):
+            return .failure(error, elapsedNanoseconds: elapsedNanoseconds)
+        }
+    }
+
+    private func timedCommandResult(
+        startedAt: UInt64,
+        _ operation: () -> H200DeckCommandResult
+    ) -> H200DeckCommandResult {
+        let result = operation()
+        let elapsedNanoseconds = DispatchTime.now().uptimeNanoseconds - startedAt
+
+        switch result {
+        case .success:
+            return .success(elapsedNanoseconds: elapsedNanoseconds)
+        case let .failure(error, _):
+            return .failure(error, elapsedNanoseconds: elapsedNanoseconds)
         }
     }
 
@@ -123,7 +215,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
         do {
             package = try packageBuilder.buildPackage(displays: displays)
         } catch {
-            return .failure(.packageBuildFailed(String(describing: error)))
+            return .failure(.packageBuildFailed(String(describing: error)), elapsedNanoseconds: 0)
         }
 
         let packets = H200StartupPacketBuilder.buildStartupPackets(package: package)
@@ -135,7 +227,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
         do {
             package = try packageBuilder.buildPackage(displays: displays)
         } catch {
-            return .failure(.packageBuildFailed(String(describing: error)))
+            return .failure(.packageBuildFailed(String(describing: error)), elapsedNanoseconds: 0)
         }
 
         let packets = H200PartialUpdatePacketBuilder.buildPartialUpdatePackets(package: package)
@@ -147,22 +239,22 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
         connection = nil
     }
 
-    private func setBrightnessOnQueue(percent: Int) -> H200DeckSyncFailure? {
+    private func setBrightnessOnQueue(percent: Int) -> H200DeckCommandResult {
         let connection: H200HIDConnection
         switch openConnectionIfNeeded() {
         case let .success(openConnection):
             connection = openConnection
         case let .failure(error):
-            return error
+            return .failure(error, elapsedNanoseconds: 0)
         }
 
         if let error = connection.writePackets([H200BrightnessPacketBuilder.packet(percent: percent)]) {
             closeOnQueue()
-            return error
+            return .failure(error, elapsedNanoseconds: 0)
         }
 
         connection.startKeepAlive()
-        return nil
+        return .success(elapsedNanoseconds: 0)
     }
 
     private func sendPackets(_ packets: [Data], package: H200ButtonPackage) -> H200DeckSyncResult {
@@ -171,19 +263,20 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
         case let .success(openConnection):
             connection = openConnection
         case let .failure(error):
-            return .failure(error)
+            return .failure(error, elapsedNanoseconds: 0)
         }
 
         if let error = connection.writePackets(packets) {
             closeOnQueue()
-            return .failure(error)
+            return .failure(error, elapsedNanoseconds: 0)
         }
         connection.startKeepAlive()
 
         return .success(H200DeckSyncSummary(
             payloadByteCount: package.payload.count,
             packetCount: packets.count,
-            displayCount: package.displayCount
+            displayCount: package.displayCount,
+            elapsedNanoseconds: 0
         ))
     }
 

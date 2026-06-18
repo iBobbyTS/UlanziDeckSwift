@@ -41,6 +41,14 @@
 - 参考实现里 5 秒 `keepAlive` 针对小窗时钟/状态数据，不是完整按键包刷新。
 - 当前原型会在启动同步后继续保活：1 秒后先发送一次 `0x0006` background 小窗数据，之后每 2 秒重复发送一次，避免 H200 在几秒后恢复离线/默认显示。
 
+## 发包线程边界
+
+- `H200HIDConnection.writePackets(_:)` 是通信层唯一 HID 写入口，通过内部串行队列同步执行，逐包调用 `IOHIDDeviceSetReport`，调用返回即表示本批写入已结束或已经得到写入错误。
+- `H200DeckSyncing` 暴露的发包函数保持同步阻塞：`sendStartupPackage(displays:)`、`sendPartialPackage(displays:)`、`setBrightness(percent:)` 都只在 PNG/ZIP 构建和本次 HID 写入完成后返回。
+- `H200DeckSyncResult` 和 `H200DeckCommandResult` 都携带 `elapsedNanoseconds` / `elapsedMilliseconds`。完整包和局部包的耗时包含排队进入设备同步器、PNG/ZIP 构建、HID 打开/写入和返回；亮度命令的耗时包含排队进入设备同步器、HID 打开/写入和返回。
+- SwiftUI 状态层不在主线程直接调用阻塞设备函数。`H200ConnectionModel` 统一通过后台 `deviceCommandQueue` 串行执行发现、关闭、完整同步、局部同步和亮度命令，再回到主线程更新 `status`、`syncSummary` 和 `alert`，因此发包期间 UI 仍可响应。
+- 如果用户在启动完整包尚未返回时修改格子，应用会先记录显示版本变化；启动包完成后自动补发一次当前完整显示，避免设备停留在启动时的旧画面。
+
 ## 当前边界
 
 - 启动时发送完整按键包，并追加一次小窗 background 模式包。

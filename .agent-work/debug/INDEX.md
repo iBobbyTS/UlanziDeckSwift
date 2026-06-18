@@ -20,3 +20,4 @@
 | resolved/20260617-preview-min-width-unequal-margins.md | 最小窗口宽度时预览区四边距不等，已用统一预览布局度量和左侧列最小宽度修复。 |
 | resolved/20260617-focus-runtime-status-debug.md | app 运行时专注状态读取不随勿扰开关变化，已沉淀工程 note 并移除轮询和权限请求。 |
 | resolved/20260613-h200-display-disappears.md | H200 启动包短暂显示后消失，已通过持续 HID 连接和 `0x0006` 小窗 background 保活解决。 |
+| resolved/20260617-h200-send-serialization.md | H200 发包边界改为设备层阻塞返回耗时、UI 后台串行调用，并修复异步测试竞态。 |
