@@ -508,6 +508,8 @@ private struct FunctionRow: View {
     let isSelected: Bool
     let action: () -> Void
 
+    @State private var isHovered = false
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
@@ -531,8 +533,15 @@ private struct FunctionRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(isHovered && !isSelected ? Color.white.opacity(0.72) : Color.clear, lineWidth: 1)
+            }
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
         .accessibilityLabel(function.title)
         .accessibilityValue(isSelected ? "已选中" : "未选中")
     }
