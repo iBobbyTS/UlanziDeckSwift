@@ -459,6 +459,22 @@ nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
     }
 }
 
+nonisolated enum DeckKeySub2APIGroupListState: Equatable {
+    case idle
+    case loading
+    case success(items: [Sub2APICapacityItem])
+    case tokenExpired
+    case networkError(String)
+
+    var items: [Sub2APICapacityItem] {
+        guard case let .success(items) = self else {
+            return []
+        }
+
+        return items
+    }
+}
+
 nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     var baseURL: String
     var targetGroupID: Int
@@ -468,22 +484,43 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     /// 最近一次成功查询的结果。不参与持久化，反序列化时使用空值。
     var lastResult: Sub2APICapacityResult?
 
+    /// 从服务端获取的号池列表。不参与持久化，配置里仍只保存目标分组 ID。
+    var groupListState: DeckKeySub2APIGroupListState = .idle
+
     init(
         baseURL: String = "",
         targetGroupID: Int = 0,
         refreshInterval: Int = 30,
         bearerKey: String = "",
-        lastResult: Sub2APICapacityResult? = nil
+        lastResult: Sub2APICapacityResult? = nil,
+        groupListState: DeckKeySub2APIGroupListState = .idle
     ) {
         self.baseURL = baseURL
         self.targetGroupID = targetGroupID
         self.refreshInterval = refreshInterval
         self.bearerKey = bearerKey
         self.lastResult = lastResult
+        self.groupListState = groupListState
     }
 
     var displayName: String {
-        targetGroupID == 0 ? "未配置" : "分组 \(targetGroupID)"
+        guard targetGroupID > 0 else {
+            return "未配置"
+        }
+
+        return selectedGroupName ?? "分组 \(targetGroupID)"
+    }
+
+    var selectedGroupName: String? {
+        if let option = groupListState.items.first(where: { $0.groupID == targetGroupID }) {
+            return option.groupName.isEmpty ? nil : option.groupName
+        }
+
+        if case let .success(item) = lastResult, item.groupID == targetGroupID, !item.groupName.isEmpty {
+            return item.groupName
+        }
+
+        return nil
     }
 
     enum CodingKeys: CodingKey {
@@ -737,7 +774,12 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         selectedKeyID = keyID
-        configurations[keyID, default: .tallyDefault].sub2API.baseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if configurations[keyID, default: .tallyDefault].sub2API.baseURL != normalizedBaseURL {
+            configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
+            configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
+        }
+        configurations[keyID, default: .tallyDefault].sub2API.baseURL = normalizedBaseURL
         return true
     }
 
@@ -750,6 +792,9 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         selectedKeyID = keyID
+        if configurations[keyID, default: .tallyDefault].sub2API.targetGroupID != groupID {
+            configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
+        }
         configurations[keyID, default: .tallyDefault].sub2API.targetGroupID = groupID
         return true
     }
@@ -776,6 +821,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         selectedKeyID = keyID
+        if configurations[keyID, default: .tallyDefault].sub2API.bearerKey != bearerKey {
+            configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
+            configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
+        }
         configurations[keyID, default: .tallyDefault].sub2API.bearerKey = bearerKey
         return true
     }
@@ -789,6 +838,18 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         configurations[keyID, default: .tallyDefault].sub2API.lastResult = result
+        return true
+    }
+
+    @discardableResult
+    mutating func setSub2APIGroupListState(_ state: DeckKeySub2APIGroupListState, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2API
+        else {
+            return false
+        }
+
+        configurations[keyID, default: .tallyDefault].sub2API.groupListState = state
         return true
     }
 

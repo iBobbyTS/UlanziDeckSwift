@@ -375,6 +375,73 @@ struct UlanziDeckSwiftTests {
         #expect(restored.mihoyoGame.lastResult == nil)
     }
 
+    @Test func sub2APICapacityResponseParsesGroupNamesAndIDs() throws {
+        let data = Data("""
+        {"code":0,"message":"success","data":{"items":[{"group_id":61711,"group_name":"OpenAI账号模式","group_platform":"openai","concurrency_used":1,"concurrency_max":2131,"sessions_used":0,"sessions_max":0,"rpm_used":0,"rpm_max":0},{"group_id":18,"group_name":"TEAM共享号池","group_platform":"openai","concurrency_used":0,"concurrency_max":0,"sessions_used":0,"sessions_max":0,"rpm_used":0,"rpm_max":0},{"group_id":59,"group_name":"CODEX【兜底】","group_platform":"openai","concurrency_used":0,"concurrency_max":0,"sessions_used":0,"sessions_max":0,"rpm_used":0,"rpm_max":0},{"group_id":1197,"group_name":"FREE共享号池","group_platform":"openai","concurrency_used":0,"concurrency_max":3,"sessions_used":0,"sessions_max":0,"rpm_used":0,"rpm_max":0},{"group_id":1198,"group_name":"PRO共享号池","group_platform":"openai","concurrency_used":6,"concurrency_max":705,"sessions_used":0,"sessions_max":0,"rpm_used":0,"rpm_max":0},{"group_id":1215,"group_name":"PLUS共享号池","group_platform":"openai","concurrency_used":37,"concurrency_max":3332,"sessions_used":0,"sessions_max":0,"rpm_used":0,"rpm_max":0},{"group_id":63196,"group_name":"OPENAI官key【生图专用· 倍率*8】","group_platform":"openai","concurrency_used":0,"concurrency_max":10000,"sessions_used":0,"sessions_max":0,"rpm_used":0,"rpm_max":0}],"total":{"group_id":0,"group_name":"","group_platform":"","concurrency_used":44,"concurrency_max":16171,"sessions_used":0,"sessions_max":0,"rpm_used":0,"rpm_max":0}}}
+        """.utf8)
+
+        let response = try JSONDecoder().decode(Sub2APICapacityResponse.self, from: data)
+
+        #expect(response.code == .success)
+        #expect(response.data?.items.map(\.groupID) == [61711, 18, 59, 1197, 1198, 1215, 63196])
+        let plusPool = try #require(response.data?.items.first(where: { $0.groupID == 1215 }))
+        #expect(plusPool.groupName == "PLUS共享号池")
+        #expect(plusPool.availableConcurrency == 3295)
+        #expect(response.data?.total.concurrencyMax == 16171)
+    }
+
+    @MainActor
+    @Test func fetchingSub2APIGroupListPopulatesOptionsAndPersistsSelectedIDOnly() async throws {
+        let plusPool = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLUS共享号池", availableConcurrency: 3078)
+        let freePool = Self.sub2APICapacityItem(groupID: 1197, groupName: "FREE共享号池", availableConcurrency: 3)
+        let fetcher = FakeSub2APIFetcher(
+            results: [.success(item: plusPool)],
+            groupListResults: [.success(items: [freePool, plusPool])]
+        )
+        let store = FakeDeckConfigurationStore()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.notConnected]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: store,
+            sub2APIFetcher: fetcher
+        )
+
+        model.selectKey(keyID: 3)
+        model.assignSelectedFunction(.sub2API)
+        model.setSelectedSub2APIBaseURL("api.example.com")
+        model.setSelectedSub2APIBearerKey("token")
+        model.refreshSelectedSub2APIGroupList()
+
+        try await Self.waitUntil {
+            fetcher.groupListRequests.count == 1
+                && model.interactionState.sub2APIConfiguration(for: 3).groupListState == .success(items: [freePool, plusPool])
+        }
+
+        model.setSelectedSub2APITargetGroupID(1215)
+
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+                && model.interactionState.sub2APIConfiguration(for: 3).lastResult == .success(item: plusPool)
+        }
+
+        let configuration = try #require(model.interactionState.configuration(for: 3))
+        #expect(configuration.sub2API.targetGroupID == 1215)
+        #expect(configuration.sub2API.displayName == "PLUS共享号池")
+        #expect(fetcher.groupListRequests == [
+            FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "token"),
+        ])
+        #expect(fetcher.requests == [
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "token"),
+        ])
+        #expect(store.savedStates.last?.sub2APIConfiguration(for: 3).targetGroupID == 1215)
+
+        let data = try JSONEncoder().encode(configuration)
+        let restored = try JSONDecoder().decode(DeckKeyConfiguration.self, from: data)
+        #expect(restored.sub2API.targetGroupID == 1215)
+        #expect(restored.sub2API.groupListState == .idle)
+        #expect(restored.sub2API.lastResult == nil)
+    }
+
     @Test func h200ProtocolInterfaceMatchesObservedReportShape() {
         let identity = Self.protocolInterfaceIdentity()
 
@@ -825,6 +892,37 @@ struct UlanziDeckSwiftTests {
         #expect(syncer.partialDisplays.last?.first?.title == "连接")
         #expect(syncer.partialDisplays.last?.first?.subtitle == "nas.local/media")
         #expect(store.savedStates.last?.smbServerAddress(for: 4) == "nas.local/media")
+    }
+
+    @MainActor
+    @Test func launchImmediatelyRefreshesConfiguredSub2APIKey() async throws {
+        let item = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3078)
+        let fetcher = FakeSub2APIFetcher(results: [.success(item: item)])
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        loadedState.setSub2APITargetGroupID(1215, for: 3)
+        loadedState.setSub2APIBearerKey("token", for: 3)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            sub2APIFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .success(item: item)
+                && Self.hasSyncedDisplayTitle("PLU", for: 3, syncer: syncer)
+        }
+
+        #expect(fetcher.requests == [
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "token"),
+        ])
     }
 
     @MainActor
@@ -1908,6 +2006,35 @@ struct UlanziDeckSwiftTests {
         #expect(condition())
     }
 
+    private static func hasSyncedDisplayTitle(_ title: String, for keyID: Int, syncer: FakeH200DeckSyncer) -> Bool {
+        let sentDisplayMatches = syncer.sentDisplays.contains { displays in
+            displays.contains { $0.id == keyID && $0.title == title }
+        }
+        let partialDisplayMatches = syncer.partialDisplays.contains { displays in
+            displays.contains { $0.id == keyID && $0.title == title }
+        }
+
+        return sentDisplayMatches || partialDisplayMatches
+    }
+
+    private static func sub2APICapacityItem(
+        groupID: Int,
+        groupName: String,
+        availableConcurrency: Int
+    ) -> Sub2APICapacityItem {
+        Sub2APICapacityItem(
+            groupID: groupID,
+            groupName: groupName,
+            groupPlatform: "claude",
+            concurrencyUsed: 0,
+            concurrencyMax: availableConcurrency,
+            sessionsUsed: 0,
+            sessionsMax: 0,
+            rpmUsed: 0,
+            rpmMax: 0
+        )
+    }
+
     private static func mihoyoRole(game: MihoyoGame, uid: String = "100000001") -> MihoyoBoundRole {
         MihoyoBoundRole(
             game: game,
@@ -2136,6 +2263,75 @@ private final class FakeH200Discovery: H200Discovering, @unchecked Sendable {
             }
 
             return results.removeFirst()
+        }
+    }
+
+    private func locked<Value>(_ body: () -> Value) -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
+private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
+    struct Request: Equatable {
+        let baseURL: String
+        let targetGroupID: Int
+        let bearerKey: String
+    }
+
+    struct GroupListRequest: Equatable {
+        let baseURL: String
+        let bearerKey: String
+    }
+
+    private let lock = NSLock()
+    private var results: [Sub2APICapacityResult]
+    private let defaultResult: Sub2APICapacityResult
+    private var groupListResults: [Sub2APIGroupListResult]
+    private let defaultGroupListResult: Sub2APIGroupListResult
+    private var storedRequests: [Request] = []
+    private var storedGroupListRequests: [GroupListRequest] = []
+
+    var requests: [Request] {
+        locked { storedRequests }
+    }
+
+    var groupListRequests: [GroupListRequest] {
+        locked { storedGroupListRequests }
+    }
+
+    init(
+        results: [Sub2APICapacityResult] = [],
+        defaultResult: Sub2APICapacityResult = .networkError("未配置响应"),
+        groupListResults: [Sub2APIGroupListResult] = [],
+        defaultGroupListResult: Sub2APIGroupListResult = .networkError("未配置响应")
+    ) {
+        self.results = results
+        self.defaultResult = defaultResult
+        self.groupListResults = groupListResults
+        self.defaultGroupListResult = defaultGroupListResult
+    }
+
+    func fetchCapacitySummary(baseURL: String, targetGroupID: Int, bearerKey: String) async -> Sub2APICapacityResult {
+        locked {
+            storedRequests.append(Request(baseURL: baseURL, targetGroupID: targetGroupID, bearerKey: bearerKey))
+            guard !results.isEmpty else {
+                return defaultResult
+            }
+
+            return results.removeFirst()
+        }
+    }
+
+    func fetchCapacityGroups(baseURL: String, bearerKey: String) async -> Sub2APIGroupListResult {
+        locked {
+            storedGroupListRequests.append(GroupListRequest(baseURL: baseURL, bearerKey: bearerKey))
+            guard !groupListResults.isEmpty else {
+                return defaultGroupListResult
+            }
+
+            return groupListResults.removeFirst()
         }
     }
 

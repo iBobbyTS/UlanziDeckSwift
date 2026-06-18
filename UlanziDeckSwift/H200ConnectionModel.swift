@@ -35,6 +35,7 @@ final class H200ConnectionModel: ObservableObject {
     private var needsFullDisplaySyncAfterStartup = false
     private var sub2APITimers: [Int: Timer] = [:]
     private var sub2APIFetchTasks: [Int: Task<Void, Never>] = [:]
+    private var sub2APIGroupListTasks: [Int: Task<Void, Never>] = [:]
     private var mihoyoLoginTask: Task<Void, Never>?
     private var mihoyoGameTimers: [Int: Timer] = [:]
     private var mihoyoGameFetchTasks: [Int: Task<Void, Never>] = [:]
@@ -86,6 +87,15 @@ final class H200ConnectionModel: ObservableObject {
     deinit {
         let syncer = syncer
         mihoyoLoginTask?.cancel()
+        for timer in sub2APITimers.values {
+            timer.invalidate()
+        }
+        for task in sub2APIFetchTasks.values {
+            task.cancel()
+        }
+        for task in sub2APIGroupListTasks.values {
+            task.cancel()
+        }
         for timer in mihoyoGameTimers.values {
             timer.invalidate()
         }
@@ -220,6 +230,7 @@ final class H200ConnectionModel: ObservableObject {
             syncKeyDisplay(keyID: selectedKeyID)
             if function == .sub2API {
                 startSub2APITimer(for: selectedKeyID)
+                fetchSub2API(for: selectedKeyID)
             } else {
                 stopSub2APITimer(for: selectedKeyID)
             }
@@ -286,6 +297,7 @@ final class H200ConnectionModel: ObservableObject {
         if interactionState.setSub2APITargetGroupID(groupID, for: selectedKeyID) {
             persistCurrentConfiguration()
             syncKeyDisplay(keyID: selectedKeyID)
+            fetchSub2API(for: selectedKeyID)
         }
     }
 
@@ -307,7 +319,16 @@ final class H200ConnectionModel: ObservableObject {
 
         if interactionState.setSub2APIBearerKey(bearerKey, for: selectedKeyID) {
             persistCurrentConfiguration()
+            syncKeyDisplay(keyID: selectedKeyID)
         }
+    }
+
+    func refreshSelectedSub2APIGroupList() {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        fetchSub2APIGroupList(for: selectedKeyID)
     }
 
     func setSelectedMihoyoGameRefreshIntervalMinutes(_ minutes: Int) {
@@ -411,6 +432,7 @@ final class H200ConnectionModel: ObservableObject {
         cancelAllLongPressTasks()
         cancelAllSub2APITimers()
         cancelAllSub2APIFetchTasks()
+        cancelAllSub2APIGroupListTasks()
         cancelAllMihoyoGameTimers()
         cancelAllMihoyoGameFetchTasks()
         deviceCommandGeneration += 1
@@ -420,6 +442,7 @@ final class H200ConnectionModel: ObservableObject {
         alert = nil
         needsFullDisplaySyncAfterStartup = false
         startAssignedSub2APITimers()
+        refreshAssignedSub2APIStatuses()
         if mihoyoSession != nil {
             startAssignedMihoyoGameTimers()
         }
@@ -550,6 +573,45 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    private func fetchSub2APIGroupList(for keyID: Int) {
+        let config = interactionState.sub2APIConfiguration(for: keyID)
+        guard interactionState.configuration(for: keyID)?.function == .sub2API else {
+            return
+        }
+
+        guard !config.baseURL.isEmpty, !config.bearerKey.isEmpty else {
+            interactionState.setSub2APIGroupListState(
+                .networkError("请先填写 Base URL 和 Bearer Key"),
+                for: keyID
+            )
+            return
+        }
+
+        sub2APIGroupListTasks[keyID]?.cancel()
+        interactionState.setSub2APIGroupListState(.loading, for: keyID)
+        let fetcher = sub2APIFetcher
+        let baseURL = config.baseURL
+        let bearerKey = config.bearerKey
+        sub2APIGroupListTasks[keyID] = Task { @MainActor [weak self] in
+            let result = await fetcher.fetchCapacityGroups(baseURL: baseURL, bearerKey: bearerKey)
+            guard !Task.isCancelled else { return }
+
+            guard let self else { return }
+            let groupListState: DeckKeySub2APIGroupListState
+            switch result {
+            case let .success(items):
+                groupListState = .success(items: items)
+            case .tokenExpired:
+                groupListState = .tokenExpired
+            case let .networkError(message):
+                groupListState = .networkError(message)
+            }
+
+            self.interactionState.setSub2APIGroupListState(groupListState, for: keyID)
+            self.syncKeyDisplay(keyID: keyID)
+        }
+    }
+
     private func fetchMihoyoGameStatus(for keyID: Int) {
         guard let game = interactionState.mihoyoGame(for: keyID) else {
             return
@@ -627,6 +689,12 @@ final class H200ConnectionModel: ObservableObject {
             if interactionState.setMihoyoGameLastResult(result, for: key.id) {
                 syncKeyDisplay(keyID: key.id)
             }
+        }
+    }
+
+    private func refreshAssignedSub2APIStatuses() {
+        for key in layout.keys where interactionState.configuration(for: key.id)?.function == .sub2API {
+            fetchSub2API(for: key.id)
         }
     }
 
@@ -789,6 +857,8 @@ final class H200ConnectionModel: ObservableObject {
         stopSub2APITimer(for: keyID)
         sub2APIFetchTasks[keyID]?.cancel()
         sub2APIFetchTasks[keyID] = nil
+        sub2APIGroupListTasks[keyID]?.cancel()
+        sub2APIGroupListTasks[keyID] = nil
         stopMihoyoGameTimer(for: keyID)
         mihoyoGameFetchTasks[keyID]?.cancel()
         mihoyoGameFetchTasks[keyID] = nil
@@ -830,6 +900,14 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         sub2APIFetchTasks.removeAll()
+    }
+
+    private func cancelAllSub2APIGroupListTasks() {
+        for task in sub2APIGroupListTasks.values {
+            task.cancel()
+        }
+
+        sub2APIGroupListTasks.removeAll()
     }
 
     private func cancelAllMihoyoGameTimers() {

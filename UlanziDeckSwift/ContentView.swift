@@ -20,6 +20,7 @@ struct ContentView: View {
     let onBrightnessPercentCommit: (Int) -> Void
     let onSub2APIBaseURLChange: (String) -> Void
     let onSub2APITargetGroupIDChange: (Int) -> Void
+    let onSub2APIGroupListRefresh: () -> Void
     let onSub2APIRefreshIntervalChange: (Int) -> Void
     let onSub2APIBearerKeyChange: (String) -> Void
     let onMihoyoQRCodeLoginRequest: () -> Void
@@ -477,13 +478,40 @@ struct ContentView: View {
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("目标分组 ID")
+                        Text("目标分组")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
-                        TextField("目标分组 ID", value: selectedSub2APITargetGroupIDBinding, format: .number)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 140)
+                        HStack(spacing: 8) {
+                            Picker("目标分组", selection: selectedSub2APITargetGroupIDBinding) {
+                                Text("未选择").tag(0)
+
+                                ForEach(selectedSub2APIGroupOptions, id: \.groupID) { item in
+                                    Text(sub2APIGroupOptionTitle(item))
+                                        .tag(item.groupID)
+                                }
+
+                                if let fallbackGroupOption = selectedSub2APIFallbackGroupOption {
+                                    Text(fallbackGroupOption.title)
+                                        .tag(fallbackGroupOption.groupID)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Button("从服务器获取号池") {
+                                onSub2APIGroupListRefresh()
+                            }
+                            .disabled(!canRefreshSelectedSub2APIGroupList)
+                        }
+
+                        if let statusText = selectedSub2APIGroupListStatusText {
+                            Text(statusText)
+                                .font(.caption)
+                                .foregroundStyle(selectedSub2APIGroupListStatusIsError ? Color.red : Color.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -597,6 +625,69 @@ private extension ContentView {
                 onSub2APITargetGroupIDChange(groupID)
             }
         )
+    }
+
+    var selectedSub2APIGroupOptions: [Sub2APICapacityItem] {
+        selectedConfiguration?.sub2API.groupListState.items ?? []
+    }
+
+    var selectedSub2APIFallbackGroupOption: (groupID: Int, title: String)? {
+        guard let sub2API = selectedConfiguration?.sub2API,
+              sub2API.targetGroupID > 0,
+              !selectedSub2APIGroupOptions.contains(where: { $0.groupID == sub2API.targetGroupID })
+        else {
+            return nil
+        }
+
+        return (sub2API.targetGroupID, sub2API.displayName)
+    }
+
+    var canRefreshSelectedSub2APIGroupList: Bool {
+        guard let sub2API = selectedConfiguration?.sub2API else {
+            return false
+        }
+
+        guard case .loading = sub2API.groupListState else {
+            return !sub2API.baseURL.isEmpty && !sub2API.bearerKey.isEmpty
+        }
+
+        return false
+    }
+
+    var selectedSub2APIGroupListStatusText: String? {
+        guard let state = selectedConfiguration?.sub2API.groupListState else {
+            return nil
+        }
+
+        switch state {
+        case .idle:
+            return nil
+        case .loading:
+            return "正在获取号池..."
+        case let .success(items):
+            return items.isEmpty ? "服务器没有返回号池" : "已获取 \(items.count) 个号池"
+        case .tokenExpired:
+            return "Bearer Key 已过期或无权限"
+        case let .networkError(message):
+            return "获取号池失败：\(message)"
+        }
+    }
+
+    var selectedSub2APIGroupListStatusIsError: Bool {
+        guard let state = selectedConfiguration?.sub2API.groupListState else {
+            return false
+        }
+
+        switch state {
+        case .tokenExpired, .networkError:
+            return true
+        case .idle, .loading, .success:
+            return false
+        }
+    }
+
+    func sub2APIGroupOptionTitle(_ item: Sub2APICapacityItem) -> String {
+        item.groupName.isEmpty ? "分组 \(item.groupID)" : item.groupName
     }
 
     var selectedSub2APIRefreshIntervalBinding: Binding<Int> {
@@ -1132,6 +1223,7 @@ private struct MihoyoQRCodeView: View {
         onBrightnessPercentCommit: { _ in },
         onSub2APIBaseURLChange: { _ in },
         onSub2APITargetGroupIDChange: { _ in },
+        onSub2APIGroupListRefresh: {},
         onSub2APIRefreshIntervalChange: { _ in },
         onSub2APIBearerKeyChange: { _ in },
         onMihoyoQRCodeLoginRequest: {},

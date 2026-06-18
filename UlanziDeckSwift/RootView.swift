@@ -66,6 +66,9 @@ struct RootView: View {
             onSub2APITargetGroupIDChange: { groupID in
                 connectionModel.setSelectedSub2APITargetGroupID(groupID)
             },
+            onSub2APIGroupListRefresh: {
+                connectionModel.refreshSelectedSub2APIGroupList()
+            },
             onSub2APIRefreshIntervalChange: { interval in
                 connectionModel.setSelectedSub2APIRefreshInterval(interval)
             },
