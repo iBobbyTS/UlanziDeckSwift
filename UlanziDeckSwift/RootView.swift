@@ -39,6 +39,9 @@ struct RootView: View {
             onKeyFunctionDeletion: { keyID in
                 connectionModel.clearKeyFunction(keyID: keyID)
             },
+            onKeyDisplayModeSelection: { keyID, displayMode in
+                connectionModel.setKeyDisplayMode(displayMode, for: keyID)
+            },
             onFunctionSelection: { function in
                 connectionModel.assignSelectedFunction(function)
             },

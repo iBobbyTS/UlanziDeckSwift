@@ -28,7 +28,7 @@
   - 最多 1016 字节 payload
 - 后续 report 每包 1024 字节，末包补零。
 - 生成 ZIP 后会检查固件问题：payload 偏移 `1016 + 1024 * N` 的字节不能是 `0x00` 或 `0x7c`。如果命中，会加入 padding 文件并按 1 字节步长重建 ZIP，直到避开这些分片边界。
-- 完整按键包发送后，会追加一条 `0x0006` 小窗数据包，把 `3_2` 宽槽位设置为 background 模式，避免设备按默认小窗模式覆盖该槽位。
+- 完整按键包发送后，会追加一条 `0x0006` 小窗数据包，按 `3_2` 宽槽位当前显示模式设置小窗。`功能` 对应 `BACKGROUND(2)` 并显示自定义 PNG，`时钟` 对应 `DIAL(1)`，`系统状态` 对应 `STATS(0)`。
 
 ## 连接生命周期
 
@@ -39,21 +39,22 @@
 - 用户修改按键功能、修改默认值、文件夹路径、亮度百分比、物理短按计数和长按重置后，会同步写入本地 `UserDefaults`，下次启动用同一份状态生成首包。
 - app 会在启动同步成功后持续持有 H200 协议 HID 接口连接，直到重试、退出或同步器释放。
 - 参考实现里 5 秒 `keepAlive` 针对小窗时钟/状态数据，不是完整按键包刷新。
-- 当前原型会在启动同步后继续保活：1 秒后先发送一次 `0x0006` background 小窗数据，之后每 2 秒重复发送一次，避免 H200 在几秒后恢复离线/默认显示。
+- 当前原型会在启动同步后继续保活：1 秒后先发送一次当前小窗模式的 `0x0006` 数据，之后每 2 秒重复发送一次，避免 H200 在几秒后恢复离线/默认显示。时钟模式的保活包会带当前时间。
 
 ## 发包线程边界
 
 - `H200HIDConnection.writePackets(_:)` 是通信层唯一 HID 写入口，通过内部串行队列同步执行，逐包调用 `IOHIDDeviceSetReport`，调用返回即表示本批写入已结束或已经得到写入错误。
-- `H200DeckSyncing` 暴露的发包函数保持同步阻塞：`sendStartupPackage(displays:)`、`sendPartialPackage(displays:)`、`setBrightness(percent:)` 都只在 PNG/ZIP 构建和本次 HID 写入完成后返回。
+- `H200DeckSyncing` 暴露的发包函数保持同步阻塞：`sendStartupPackage(displays:)`、`sendPartialPackage(displays:)`、`setBrightness(percent:)` 都只在 PNG/ZIP 构建或本次 HID 写入完成后返回。
 - `H200DeckSyncResult` 和 `H200DeckCommandResult` 都携带 `elapsedNanoseconds` / `elapsedMilliseconds`。完整包和局部包的耗时包含排队进入设备同步器、PNG/ZIP 构建、HID 打开/写入和返回；亮度命令的耗时包含排队进入设备同步器、HID 打开/写入和返回。
 - SwiftUI 状态层不在主线程直接调用阻塞设备函数。`H200ConnectionModel` 统一通过后台 `deviceCommandQueue` 串行执行发现、关闭、完整同步、局部同步和亮度命令，再回到主线程更新 `status`、`syncSummary` 和 `alert`，因此发包期间 UI 仍可响应。
 - 如果用户在启动完整包尚未返回时修改格子，应用会先记录显示版本变化；启动包完成后自动补发一次当前完整显示，避免设备停留在启动时的旧画面。
 
 ## 当前边界
 
-- 启动时发送完整按键包，并追加一次小窗 background 模式包。
-- 保活只发送小窗 background 小包，不周期性重发完整按键 ZIP。
+- 启动时发送完整按键包，并追加一次当前小窗模式包。
+- 保活只发送当前小窗模式的小包，不周期性重发完整按键 ZIP。
 - tally、文件夹和 SMB 配置状态变化后使用 `0x000d` 局部更新；payload 仍然是 ZIP，`manifest.json` 只包含本次变化的单个格子，图片也只包含该格子的 PNG。
+- 宽槽位切到 `时钟` 或 `系统状态` 时会先清空该槽位功能，并用 `0x000d` 发送一张透明宽图清掉设备上的旧自定义背景；同一批局部更新会附带 `0x0006` 小窗模式包切到 `DIAL(1)` 或 `STATS(0)`。切回 `功能` 时继续发送宽槽位局部 PNG，并附带 `BACKGROUND(2)` 小窗模式包恢复自定义显示。
 - app 内修改顶部亮度百分比或 Shortcuts 亮度调节器动作时，只发送 `0x000a` 简单包；payload 是 UTF-8 百分比数字，例如 `"50"`。
 - 亮度不再是按键功能，物理按键不会触发亮度调节。
 - 如果发送阶段发现端口被 Ulanzi Studio 或其他软件占用，会显示“按键包尚未发送”的错误提示。

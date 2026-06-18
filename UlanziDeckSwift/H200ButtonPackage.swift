@@ -30,7 +30,7 @@ nonisolated struct H200ButtonPackageBuilder {
         let manifest = try buildManifest(displays: sortedDisplays)
         let manifestData = try makeJSONData(manifest)
         let imageFiles = try sortedDisplays.map { display in
-            ZIPArchiveFile(path: iconPath(for: display), data: try renderer.pngData(for: display))
+            ZIPArchiveFile(path: iconPath(for: display), data: try imageData(for: display))
         }
         let payload = try makeSafePayload(manifestData: manifestData, imageFiles: imageFiles)
 
@@ -51,7 +51,7 @@ nonisolated struct H200ButtonPackageBuilder {
             let entry = H200ManifestEntry(
                 State: 0,
                 ViewParam: [viewParam],
-                SmallViewMode: display.isWide ? H200SmallWindowMode.background.rawValue : nil
+                SmallViewMode: display.isWide ? H200SmallWindowMode(displayMode: display.displayMode).rawValue : nil
             )
 
             return ("\(display.column)_\(display.row)", entry)
@@ -62,6 +62,14 @@ nonisolated struct H200ButtonPackageBuilder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         return try encoder.encode(manifest)
+    }
+
+    private func imageData(for display: DeckKeyDisplay) throws -> Data {
+        guard display.isWide && display.displayMode != .function else {
+            return try renderer.pngData(for: display)
+        }
+
+        return try H200ButtonIconRenderer.transparentPNGData(size: display.devicePixelSize)
     }
 
     private func makeSafePayload(manifestData: Data, imageFiles: [ZIPArchiveFile]) throws -> Data {
@@ -134,10 +142,6 @@ nonisolated private enum SafetyPaddingPlacement: CaseIterable {
     case beforeManifest
 }
 
-nonisolated private enum H200SmallWindowMode: Int, Encodable {
-    case background = 2
-}
-
 nonisolated private struct H200ManifestEntry: Encodable, Equatable {
     let State: Int
     let ViewParam: [H200ManifestViewParam]
@@ -184,8 +188,30 @@ nonisolated private struct H200ManifestFont: Encodable, Equatable {
 nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
     nonisolated init() {}
 
+    static func transparentPNGData(size: H200DeviceTarget.PixelSize) throws -> Data {
+        let rep = try makeBitmap(size: size)
+        guard let context = NSGraphicsContext(bitmapImageRep: rep) else {
+            throw H200ButtonIconRenderError.cannotCreateBitmap
+        }
+
+        context.cgContext.clear(CGRect(x: 0, y: 0, width: size.width, height: size.height))
+        return try pngData(from: rep)
+    }
+
     func pngData(for display: DeckKeyDisplay) throws -> Data {
         let size = display.devicePixelSize
+        let rep = try Self.makeBitmap(size: size)
+
+        let context = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        draw(display: display, in: NSRect(x: 0, y: 0, width: size.width, height: size.height))
+        NSGraphicsContext.restoreGraphicsState()
+
+        return try Self.pngData(from: rep)
+    }
+
+    private static func makeBitmap(size: H200DeviceTarget.PixelSize) throws -> NSBitmapImageRep {
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil,
             pixelsWide: size.width,
@@ -201,12 +227,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             throw H200ButtonIconRenderError.cannotCreateBitmap
         }
 
-        let context = NSGraphicsContext(bitmapImageRep: rep)
-        NSGraphicsContext.saveGraphicsState()
-        NSGraphicsContext.current = context
-        draw(display: display, in: NSRect(x: 0, y: 0, width: size.width, height: size.height))
-        NSGraphicsContext.restoreGraphicsState()
+        return rep
+    }
 
+    private static func pngData(from rep: NSBitmapImageRep) throws -> Data {
         guard let png = rep.representation(using: .png, properties: [:]) else {
             throw H200ButtonIconRenderError.cannotEncodePNG
         }

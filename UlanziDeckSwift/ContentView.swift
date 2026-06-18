@@ -11,6 +11,7 @@ struct ContentView: View {
     let mihoyoLoginState: MihoyoLoginState
     let onKeySelection: (Int) -> Void
     let onKeyFunctionDeletion: (Int) -> Void
+    let onKeyDisplayModeSelection: (Int, DeckKeyDisplayMode) -> Void
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
     let onFolderPathSelection: (String) -> Void
@@ -206,6 +207,8 @@ struct ContentView: View {
                             onKeySelection(key.id)
                         } deleteAction: {
                             onKeyFunctionDeletion(key.id)
+                        } displayModeSelectionAction: { displayMode in
+                            onKeyDisplayModeSelection(key.id, displayMode)
                         }
                     }
                 }
@@ -905,26 +908,93 @@ private struct DeckKeyButton: View {
     let metrics: DeckPreviewGridMetrics
     let action: () -> Void
     let deleteAction: () -> Void
+    let displayModeSelectionAction: (DeckKeyDisplayMode) -> Void
+
+    @State private var isHovered = false
 
     var body: some View {
-        Button(action: action) {
-            DeckKeyRenderedImage(display: display, metrics: metrics)
-                .equatable()
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .strokeBorder(display.isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
-                }
-                .shadow(color: .black.opacity(0.22), radius: 7, y: 4)
+        ZStack(alignment: .topTrailing) {
+            Button(action: action) {
+                DeckKeyRenderedImage(display: display, metrics: metrics)
+                    .equatable()
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(display.isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
+                    }
+                    .shadow(color: .black.opacity(0.22), radius: 7, y: 4)
+            }
+            .buttonStyle(.plain)
+            .focusable(false)
+
+            if display.isWide && display.displayMode != .function {
+                displayModeBadge
+                    .padding(8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .allowsHitTesting(false)
+            }
+
+            if display.isWide && (isHovered || display.isSelected) {
+                displayModeMenu
+                    .padding(7)
+            }
         }
-        .buttonStyle(.plain)
-        .focusable(false)
+        .onHover { hovering in
+            isHovered = hovering
+        }
         .contextMenu {
             Button(role: .destructive, action: deleteAction) {
                 Label("删除", systemImage: "trash")
             }
         }
+        .accessibilityElement(children: .combine)
         .accessibilityLabel("设备按键 \(display.id)")
-        .accessibilityValue(display.title.isEmpty ? "无功能" : "\(display.title)，\(display.subtitle)")
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var accessibilityValue: String {
+        let content = display.title.isEmpty ? "无功能" : "\(display.title)，\(display.subtitle)"
+        guard display.isWide, display.displayMode != .function else {
+            return content
+        }
+
+        return "\(display.displayMode.title)，\(content)"
+    }
+
+    private var displayModeBadge: some View {
+        Label(display.displayMode.title, systemImage: display.displayMode.systemImageName)
+            .font(.system(size: 10, weight: .semibold))
+            .labelStyle(.titleAndIcon)
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 4)
+            .background(.black.opacity(0.62), in: Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(.white.opacity(0.18), lineWidth: 1)
+            }
+    }
+
+    private var displayModeMenu: some View {
+        Menu {
+            ForEach(DeckKeyDisplayMode.allCases) { displayMode in
+                Button {
+                    displayModeSelectionAction(displayMode)
+                } label: {
+                    Label(displayMode.title, systemImage: displayMode.systemImageName)
+                }
+                .disabled(displayMode == display.displayMode)
+            }
+        } label: {
+            Image(systemName: "chevron.down.circle.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Color.white, Color.black.opacity(0.48))
+                .frame(width: 24, height: 24)
+                .contentShape(Circle())
+        }
+        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
+        .help("选择小窗显示")
     }
 }
 
@@ -1021,6 +1091,7 @@ private struct MihoyoQRCodeView: View {
         mihoyoLoginState: .notLoggedIn,
         onKeySelection: { _ in },
         onKeyFunctionDeletion: { _ in },
+        onKeyDisplayModeSelection: { _, _ in },
         onFunctionSelection: { _ in },
         onTallyDefaultValueChange: { _ in },
         onFolderPathSelection: { _ in },

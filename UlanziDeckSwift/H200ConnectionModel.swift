@@ -130,14 +130,19 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        longPressTasks[keyID]?.cancel()
-        longPressTasks[keyID] = nil
-        longPressResetKeyIDs.remove(keyID)
-        stopSub2APITimer(for: keyID)
-        sub2APIFetchTasks[keyID]?.cancel()
-        sub2APIFetchTasks[keyID] = nil
-        mihoyoGameFetchTasks[keyID]?.cancel()
-        mihoyoGameFetchTasks[keyID] = nil
+        cancelRuntime(for: keyID)
+        persistCurrentConfiguration()
+        syncKeyDisplay(keyID: keyID)
+    }
+
+    func setKeyDisplayMode(_ displayMode: DeckKeyDisplayMode, for keyID: Int) {
+        guard interactionState.setDisplayMode(displayMode, for: keyID) else {
+            return
+        }
+
+        if displayMode != .function {
+            cancelRuntime(for: keyID)
+        }
         persistCurrentConfiguration()
         syncKeyDisplay(keyID: keyID)
     }
@@ -706,6 +711,17 @@ final class H200ConnectionModel: ObservableObject {
                 self?.finishDisplaySync(result, generation: generation)
             }
         }
+    }
+
+    private func cancelRuntime(for keyID: Int) {
+        longPressTasks[keyID]?.cancel()
+        longPressTasks[keyID] = nil
+        longPressResetKeyIDs.remove(keyID)
+        stopSub2APITimer(for: keyID)
+        sub2APIFetchTasks[keyID]?.cancel()
+        sub2APIFetchTasks[keyID] = nil
+        mihoyoGameFetchTasks[keyID]?.cancel()
+        mihoyoGameFetchTasks[keyID] = nil
     }
 
     private func finishDisplaySync(_ result: H200DeckSyncResult, generation: Int) {

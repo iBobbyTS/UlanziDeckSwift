@@ -8,6 +8,35 @@ nonisolated enum H200Command {
     static let inButton: UInt16 = 0x0101
 }
 
+nonisolated enum H200SmallWindowMode: Int, Encodable, Equatable {
+    case stats = 0
+    case dial = 1
+    case background = 2
+
+    init(displayMode: DeckKeyDisplayMode) {
+        switch displayMode {
+        case .function:
+            self = .background
+        case .clock:
+            self = .dial
+        case .systemStatus:
+            self = .stats
+        }
+    }
+
+    static func mode(for displays: [DeckKeyDisplay]) -> H200SmallWindowMode {
+        modeIfPresent(in: displays) ?? .background
+    }
+
+    static func modeIfPresent(in displays: [DeckKeyDisplay]) -> H200SmallWindowMode? {
+        guard let display = displays.first(where: \.isWide) else {
+            return nil
+        }
+
+        return H200SmallWindowMode(displayMode: display.displayMode)
+    }
+}
+
 nonisolated enum H200PacketBuilder {
     static let packetSize = H200DeviceTarget.reportSize
     static let headerSize = 8
@@ -74,32 +103,56 @@ nonisolated enum H200PacketBuilder {
 }
 
 nonisolated enum H200StartupPacketBuilder {
-    static func buildStartupPackets(package: H200ButtonPackage) -> [Data] {
+    static func buildStartupPackets(package: H200ButtonPackage, smallWindowMode: H200SmallWindowMode = .background) -> [Data] {
         var packets = H200PacketBuilder.buildChunkedPackets(
             command: H200Command.outSetButtons,
             payload: package.payload
         )
-        packets.append(H200SmallWindowDataPacketBuilder.backgroundModePacket())
+        packets.append(H200SmallWindowDataPacketBuilder.packet(mode: smallWindowMode))
         return packets
     }
 }
 
 nonisolated enum H200PartialUpdatePacketBuilder {
-    static func buildPartialUpdatePackets(package: H200ButtonPackage) -> [Data] {
-        H200PacketBuilder.buildChunkedPackets(
+    static func buildPartialUpdatePackets(package: H200ButtonPackage, smallWindowMode: H200SmallWindowMode? = nil) -> [Data] {
+        var packets = H200PacketBuilder.buildChunkedPackets(
             command: H200Command.outPartiallyUpdateButtons,
             payload: package.payload
         )
+        if let smallWindowMode {
+            packets.append(H200SmallWindowDataPacketBuilder.packet(mode: smallWindowMode))
+        }
+
+        return packets
     }
 }
 
 nonisolated enum H200SmallWindowDataPacketBuilder {
     static let backgroundModePayload = Data("2|0|0|00:00:00|0|24H|".utf8)
 
-    static func backgroundModePacket() -> Data {
+    static func payload(mode: H200SmallWindowMode, date: Date = Date()) -> Data {
+        let time = mode == .background ? "00:00:00" : timeString(from: date)
+        return Data("\(mode.rawValue)|0|0|\(time)|0|24H|".utf8)
+    }
+
+    static func packet(mode: H200SmallWindowMode, date: Date = Date()) -> Data {
         H200PacketBuilder.buildSimplePacket(
             command: H200Command.outSetSmallWindowData,
-            payload: backgroundModePayload
+            payload: payload(mode: mode, date: date)
+        )
+    }
+
+    static func backgroundModePacket() -> Data {
+        packet(mode: .background)
+    }
+
+    private static func timeString(from date: Date) -> String {
+        let components = Calendar(identifier: .gregorian).dateComponents(in: .current, from: date)
+        return String(
+            format: "%02d:%02d:%02d",
+            components.hour ?? 0,
+            components.minute ?? 0,
+            components.second ?? 0
         )
     }
 }

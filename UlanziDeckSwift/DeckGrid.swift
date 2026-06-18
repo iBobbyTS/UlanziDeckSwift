@@ -57,6 +57,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let row: Int
     let column: Int
     let columnSpan: Int
+    let displayMode: DeckKeyDisplayMode
     let title: String
     let subtitle: String
     let isSelected: Bool
@@ -67,58 +68,65 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         row = key.row
         column = key.column
         columnSpan = key.columnSpan
-        switch configuration.function {
-        case .none:
-            title = ""
-            subtitle = ""
-        case .tally:
-            title = "\(configuration.tally.value)"
-            subtitle = "默认 \(configuration.tally.defaultValue)"
-        case .openFolder:
-            title = "打开"
-            subtitle = configuration.openFolder.displayName
-        case .connectSMBServer:
-            title = "连接"
-            subtitle = configuration.smbServer.displayName
-        case .brightness:
-            title = ""
-            subtitle = ""
-        case .sub2API:
-            if case let .success(item) = configuration.sub2API.lastResult {
-                title = item.groupName
-                subtitle = "可用 \(item.availableConcurrency)"
-            } else if case .tokenExpired = configuration.sub2API.lastResult {
-                title = "令牌"
-                subtitle = "已过期"
-            } else if case .notFound = configuration.sub2API.lastResult {
-                title = "未找到"
-                subtitle = "分组 \(configuration.sub2API.targetGroupID)"
-            } else if case .networkError = configuration.sub2API.lastResult {
-                title = "网络"
-                subtitle = "错误"
-            } else {
-                title = "号池"
-                subtitle = configuration.sub2API.displayName
-            }
-        case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
-            if case let .success(status) = configuration.mihoyoGame.lastResult {
-                title = status.buttonTitle
-                subtitle = status.buttonSubtitle
-            } else if case .loginRequired = configuration.mihoyoGame.lastResult {
-                title = configuration.function.game?.shortDisplayName ?? "游戏"
-                subtitle = "未登录"
-            } else if case .loginExpired = configuration.mihoyoGame.lastResult {
-                title = configuration.function.game?.shortDisplayName ?? "游戏"
-                subtitle = "需重登"
-            } else if case .noBoundRole = configuration.mihoyoGame.lastResult {
-                title = configuration.function.game?.shortDisplayName ?? "游戏"
-                subtitle = "无角色"
-            } else if case .networkError = configuration.mihoyoGame.lastResult {
-                title = configuration.function.game?.shortDisplayName ?? "游戏"
-                subtitle = "查询失败"
-            } else {
-                title = configuration.function.game?.shortDisplayName ?? "游戏"
-                subtitle = "未查询"
+        displayMode = key.columnSpan > 1 ? configuration.displayMode : .function
+
+        if key.columnSpan > 1 && configuration.displayMode != .function {
+            title = configuration.displayMode.previewTitle
+            subtitle = configuration.displayMode.previewSubtitle
+        } else {
+            switch configuration.function {
+            case .none:
+                title = ""
+                subtitle = ""
+            case .tally:
+                title = "\(configuration.tally.value)"
+                subtitle = "默认 \(configuration.tally.defaultValue)"
+            case .openFolder:
+                title = "打开"
+                subtitle = configuration.openFolder.displayName
+            case .connectSMBServer:
+                title = "连接"
+                subtitle = configuration.smbServer.displayName
+            case .brightness:
+                title = ""
+                subtitle = ""
+            case .sub2API:
+                if case let .success(item) = configuration.sub2API.lastResult {
+                    title = item.groupName
+                    subtitle = "可用 \(item.availableConcurrency)"
+                } else if case .tokenExpired = configuration.sub2API.lastResult {
+                    title = "令牌"
+                    subtitle = "已过期"
+                } else if case .notFound = configuration.sub2API.lastResult {
+                    title = "未找到"
+                    subtitle = "分组 \(configuration.sub2API.targetGroupID)"
+                } else if case .networkError = configuration.sub2API.lastResult {
+                    title = "网络"
+                    subtitle = "错误"
+                } else {
+                    title = "号池"
+                    subtitle = configuration.sub2API.displayName
+                }
+            case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
+                if case let .success(status) = configuration.mihoyoGame.lastResult {
+                    title = status.buttonTitle
+                    subtitle = status.buttonSubtitle
+                } else if case .loginRequired = configuration.mihoyoGame.lastResult {
+                    title = configuration.function.game?.shortDisplayName ?? "游戏"
+                    subtitle = "未登录"
+                } else if case .loginExpired = configuration.mihoyoGame.lastResult {
+                    title = configuration.function.game?.shortDisplayName ?? "游戏"
+                    subtitle = "需重登"
+                } else if case .noBoundRole = configuration.mihoyoGame.lastResult {
+                    title = configuration.function.game?.shortDisplayName ?? "游戏"
+                    subtitle = "无角色"
+                } else if case .networkError = configuration.mihoyoGame.lastResult {
+                    title = configuration.function.game?.shortDisplayName ?? "游戏"
+                    subtitle = "查询失败"
+                } else {
+                    title = configuration.function.game?.shortDisplayName ?? "游戏"
+                    subtitle = "未查询"
+                }
             }
         }
         self.isSelected = isSelected
@@ -139,6 +147,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             row: row,
             column: column,
             columnSpan: columnSpan,
+            displayMode: displayMode,
             title: title,
             subtitle: subtitle,
             devicePixelSize: devicePixelSize
@@ -151,6 +160,7 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let row: Int
     let column: Int
     let columnSpan: Int
+    let displayMode: DeckKeyDisplayMode
     let title: String
     let subtitle: String
     let devicePixelSize: H200DeviceTarget.PixelSize
@@ -321,6 +331,60 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     }
 }
 
+nonisolated enum DeckKeyDisplayMode: String, Codable, Equatable, CaseIterable, Identifiable {
+    case function
+    case clock
+    case systemStatus
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .function:
+            return "功能"
+        case .clock:
+            return "时钟"
+        case .systemStatus:
+            return "系统状态"
+        }
+    }
+
+    var systemImageName: String {
+        switch self {
+        case .function:
+            return "square.grid.2x2"
+        case .clock:
+            return "clock"
+        case .systemStatus:
+            return "chart.line.uptrend.xyaxis"
+        }
+    }
+
+    var previewTitle: String {
+        switch self {
+        case .function:
+            return ""
+        case .clock:
+            return "时钟"
+        case .systemStatus:
+            return "状态"
+        }
+    }
+
+    var previewSubtitle: String {
+        switch self {
+        case .function:
+            return ""
+        case .clock:
+            return "模拟表盘"
+        case .systemStatus:
+            return "CPU RAM GPU"
+        }
+    }
+}
+
 nonisolated struct DeckKeyTallyConfiguration: Codable, Equatable {
     var defaultValue: Int
     var value: Int
@@ -445,6 +509,7 @@ nonisolated struct DeckKeyMihoyoGameConfiguration: Codable, Equatable {
 
 nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var function: DeckKeyFunction
+    var displayMode: DeckKeyDisplayMode
     var tally: DeckKeyTallyConfiguration
     var openFolder: DeckKeyOpenFolderConfiguration
     var smbServer: DeckKeySMBServerConfiguration
@@ -453,6 +518,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
 
     static let empty = DeckKeyConfiguration(
         function: .none,
+        displayMode: .function,
         tally: DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
@@ -462,6 +528,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
 
     static let tallyDefault = DeckKeyConfiguration(
         function: .tally,
+        displayMode: .function,
         tally: DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
@@ -471,6 +538,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
 
     init(
         function: DeckKeyFunction,
+        displayMode: DeckKeyDisplayMode = .function,
         tally: DeckKeyTallyConfiguration = DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration = DeckKeyOpenFolderConfiguration(),
         smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration(),
@@ -478,6 +546,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration()
     ) {
         self.function = function
+        self.displayMode = displayMode
         self.tally = tally
         self.openFolder = openFolder
         self.smbServer = smbServer
@@ -487,6 +556,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
 
     enum CodingKeys: CodingKey {
         case function
+        case displayMode
         case tally
         case openFolder
         case smbServer
@@ -497,6 +567,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         function = try container.decode(DeckKeyFunction.self, forKey: .function)
+        displayMode = try container.decodeIfPresent(DeckKeyDisplayMode.self, forKey: .displayMode) ?? .function
         tally = try container.decodeIfPresent(DeckKeyTallyConfiguration.self, forKey: .tally) ?? DeckKeyTallyConfiguration()
         openFolder = try container.decodeIfPresent(DeckKeyOpenFolderConfiguration.self, forKey: .openFolder) ?? DeckKeyOpenFolderConfiguration()
         smbServer = try container.decodeIfPresent(DeckKeySMBServerConfiguration.self, forKey: .smbServer) ?? DeckKeySMBServerConfiguration()
@@ -507,6 +578,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(function, forKey: .function)
+        try container.encode(displayMode, forKey: .displayMode)
         try container.encode(tally, forKey: .tally)
         try container.encode(openFolder, forKey: .openFolder)
         try container.encode(smbServer, forKey: .smbServer)
@@ -520,35 +592,44 @@ nonisolated struct DeckGridInteractionState: Equatable {
     private(set) var configurations: [Int: DeckKeyConfiguration]
     private(set) var pressedKeyIDs: Set<Int>
     private let validKeyIDs: Set<Int>
+    private let wideKeyIDs: Set<Int>
 
     init(layout: DeckGridLayout) {
         selectedKeyID = layout.keys.first?.id
         configurations = Dictionary(uniqueKeysWithValues: layout.keys.map { ($0.id, .tallyDefault) })
         pressedKeyIDs = []
         validKeyIDs = Set(layout.keys.map(\.id))
+        wideKeyIDs = Set(layout.keys.filter { $0.columnSpan > 1 }.map(\.id))
     }
 
     init(layout: DeckGridLayout, configurations storedConfigurations: [Int: DeckKeyConfiguration]) {
         let validKeyIDs = Set(layout.keys.map(\.id))
+        let wideKeyIDs = Set(layout.keys.filter { $0.columnSpan > 1 }.map(\.id))
 
         selectedKeyID = layout.keys.first?.id
         configurations = Dictionary(uniqueKeysWithValues: layout.keys.map { ($0.id, .tallyDefault) })
         pressedKeyIDs = []
         self.validKeyIDs = validKeyIDs
+        self.wideKeyIDs = wideKeyIDs
 
         for keyID in validKeyIDs {
             if let configuration = storedConfigurations[keyID] {
-                configurations[keyID] = Self.normalized(configuration)
+                configurations[keyID] = Self.normalized(configuration, isWide: wideKeyIDs.contains(keyID))
             }
         }
     }
 
-    private static func normalized(_ configuration: DeckKeyConfiguration) -> DeckKeyConfiguration {
-        guard configuration.function == .brightness else {
-            return configuration
+    private static func normalized(_ configuration: DeckKeyConfiguration, isWide: Bool) -> DeckKeyConfiguration {
+        var normalizedConfiguration = configuration
+        if normalizedConfiguration.function == .brightness {
+            normalizedConfiguration = .empty
         }
 
-        return .empty
+        if !isWide {
+            normalizedConfiguration.displayMode = .function
+        }
+
+        return normalizedConfiguration
     }
 
     mutating func select(keyID: Int) {
@@ -561,6 +642,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     mutating func beginPress(keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].displayMode == .function,
               DeckKeyFunction.assignableCases.contains(configurations[keyID, default: .tallyDefault].function),
               !pressedKeyIDs.contains(keyID)
         else {
@@ -578,6 +660,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
     @discardableResult
     mutating func triggerShortPress(keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].displayMode == .function,
               configurations[keyID, default: .tallyDefault].function == .tally
         else {
             return false
@@ -682,6 +765,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
     @discardableResult
     mutating func resetTally(keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].displayMode == .function,
               configurations[keyID, default: .tallyDefault].function == .tally
         else {
             return false
@@ -741,7 +825,25 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].displayMode = .function
         configurations[keyID, default: .tallyDefault].function = function
+        return true
+    }
+
+    @discardableResult
+    mutating func setDisplayMode(_ displayMode: DeckKeyDisplayMode, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              wideKeyIDs.contains(keyID)
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        pressedKeyIDs.remove(keyID)
+        if displayMode != .function {
+            configurations[keyID] = .empty
+        }
+        configurations[keyID, default: .tallyDefault].displayMode = displayMode
         return true
     }
 

@@ -126,6 +126,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
     private let operationQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200HIDDeckSyncer")
     private var connection: H200HIDConnection?
     private var inputHandler: H200InputHandler?
+    private var currentSmallWindowMode: H200SmallWindowMode = .background
 
     nonisolated init(packageBuilder: H200ButtonPackageBuilder = H200ButtonPackageBuilder()) {
         self.packageBuilder = packageBuilder
@@ -218,7 +219,9 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
             return .failure(.packageBuildFailed(String(describing: error)), elapsedNanoseconds: 0)
         }
 
-        let packets = H200StartupPacketBuilder.buildStartupPackets(package: package)
+        let smallWindowMode = H200SmallWindowMode.mode(for: displays)
+        currentSmallWindowMode = smallWindowMode
+        let packets = H200StartupPacketBuilder.buildStartupPackets(package: package, smallWindowMode: smallWindowMode)
         return sendPackets(packets, package: package)
     }
 
@@ -230,7 +233,11 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
             return .failure(.packageBuildFailed(String(describing: error)), elapsedNanoseconds: 0)
         }
 
-        let packets = H200PartialUpdatePacketBuilder.buildPartialUpdatePackets(package: package)
+        let smallWindowMode = H200SmallWindowMode.modeIfPresent(in: displays)
+        if let smallWindowMode {
+            currentSmallWindowMode = smallWindowMode
+        }
+        let packets = H200PartialUpdatePacketBuilder.buildPartialUpdatePackets(package: package, smallWindowMode: smallWindowMode)
         return sendPackets(packets, package: package)
     }
 
@@ -253,7 +260,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
             return .failure(error, elapsedNanoseconds: 0)
         }
 
-        connection.startKeepAlive()
+        connection.startKeepAlive(mode: currentSmallWindowMode)
         return .success(elapsedNanoseconds: 0)
     }
 
@@ -270,7 +277,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
             closeOnQueue()
             return .failure(error, elapsedNanoseconds: 0)
         }
-        connection.startKeepAlive()
+        connection.startKeepAlive(mode: currentSmallWindowMode)
 
         return .success(H200DeckSyncSummary(
             payloadByteCount: package.payload.count,
@@ -396,7 +403,7 @@ nonisolated private final class H200HIDConnection: @unchecked Sendable {
         }
     }
 
-    func startKeepAlive() {
+    func startKeepAlive(mode: H200SmallWindowMode) {
         queue.async { [weak self] in
             guard let self, self.isOpen else {
                 return
@@ -410,7 +417,7 @@ nonisolated private final class H200HIDConnection: @unchecked Sendable {
                     return
                 }
 
-                _ = self.writePacketsOnQueue([H200SmallWindowDataPacketBuilder.backgroundModePacket()])
+                _ = self.writePacketsOnQueue([H200SmallWindowDataPacketBuilder.packet(mode: mode)])
             }
             self.keepAliveTimer = timer
             timer.resume()

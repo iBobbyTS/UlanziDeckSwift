@@ -166,6 +166,32 @@ struct UlanziDeckSwiftTests {
         #expect(displays.last?.devicePixelSize == H200DeviceTarget.smallWindowIconSize)
     }
 
+    @Test func wideKeyDisplayModeChangesPreviewAndDisablesFunctionPresses() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        let didRejectNormalKey = state.setDisplayMode(.clock, for: 1)
+        let didSetClock = state.setDisplayMode(.clock, for: 14)
+        let didBeginPress = state.beginPress(keyID: 14)
+        let didTriggerShortPress = state.triggerShortPress(keyID: 14)
+        let display = state.display(for: layout.keys[13])
+
+        #expect(!didRejectNormalKey)
+        #expect(didSetClock)
+        #expect(!didBeginPress)
+        #expect(!didTriggerShortPress)
+        #expect(state.tallyValue(for: 14) == 0)
+        #expect(state.configuration(for: 14)?.function == DeckKeyFunction.none)
+        #expect(state.configuration(for: 14)?.displayMode == .clock)
+        #expect(display.title == "时钟")
+        #expect(display.subtitle == "模拟表盘")
+
+        state.assign(.sub2API, to: 14)
+
+        #expect(state.configuration(for: 14)?.displayMode == .function)
+        #expect(state.display(for: layout.keys[13]).title == "号池")
+    }
+
     @Test func uiSelectionDoesNotChangeDisplayRenderIdentity() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
@@ -536,6 +562,67 @@ struct UlanziDeckSwiftTests {
         #expect(store.savedStates[0].tallyDefaultValue(for: 2) == 3)
         #expect(store.savedStates[1].tallyValue(for: 2) == 4)
         #expect(store.savedStates[2].configuration(for: 2)?.function == DeckKeyFunction.none)
+    }
+
+    @MainActor
+    @Test func wideKeyBuiltInDisplayModesClearFunctionAndSendPartialPackage() async throws {
+        let store = FakeDeckConfigurationStore()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.setKeyDisplayMode(.systemStatus, for: 14)
+        try await Self.waitUntil {
+            syncer.smallWindowModes == [.stats]
+        }
+        model.setKeyDisplayMode(.clock, for: 14)
+        try await Self.waitUntil {
+            syncer.smallWindowModes == [.stats, .dial]
+        }
+
+        #expect(syncer.sentDisplays.count == 1)
+        #expect(syncer.partialDisplays.count == 2)
+        #expect(syncer.partialDisplays[0].map(\.id) == [14])
+        #expect(syncer.partialDisplays[0].first?.displayMode == .systemStatus)
+        #expect(syncer.partialDisplays[1].first?.displayMode == .clock)
+        #expect(model.interactionState.configuration(for: 14)?.function == DeckKeyFunction.none)
+        #expect(model.interactionState.configuration(for: 14)?.displayMode == .clock)
+        #expect(store.savedStates.first?.configuration(for: 14)?.function == DeckKeyFunction.none)
+        #expect(store.savedStates.last?.configuration(for: 14)?.displayMode == .clock)
+    }
+
+    @MainActor
+    @Test func returningWideKeyToFunctionModeSendsPartialPackage() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.setKeyDisplayMode(.systemStatus, for: 14)
+        try await Self.waitUntil {
+            syncer.smallWindowModes == [.stats]
+        }
+        model.setKeyDisplayMode(.function, for: 14)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 2
+        }
+
+        #expect(model.interactionState.configuration(for: 14)?.function == DeckKeyFunction.none)
+        #expect(syncer.partialDisplays.last?.map(\.id) == [14])
+        #expect(syncer.partialDisplays.last?.first?.displayMode == .function)
     }
 
     @MainActor
@@ -1128,6 +1215,35 @@ struct UlanziDeckSwiftTests {
         #expect(smallViewParam?["Icon"] as? String == "Images/key_14.png")
     }
 
+    @Test func buttonPackageManifestUsesSelectedSmallWindowMode() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.setDisplayMode(.systemStatus, for: 14)
+        let builder = H200ButtonPackageBuilder(renderer: FakeH200ButtonIconRenderer())
+
+        let package = try builder.buildPackage(displays: state.displays(for: layout))
+        let manifest = try JSONSerialization.jsonObject(with: package.manifestData) as? [String: Any] ?? [:]
+        let smallEntry = manifest["3_2"] as? [String: Any]
+
+        #expect(smallEntry?["SmallViewMode"] as? Int == H200SmallWindowMode.stats.rawValue)
+    }
+
+    @Test func buttonPackageUsesTransparentImageWhenClearingBuiltInSmallWindowMode() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.setDisplayMode(.clock, for: 14)
+        let display = state.display(for: layout.keys[13])
+        let builder = H200ButtonPackageBuilder(renderer: FailingH200ButtonIconRenderer())
+
+        let package = try builder.buildPackage(displays: [display])
+        let manifest = try JSONSerialization.jsonObject(with: package.manifestData) as? [String: Any] ?? [:]
+        let smallEntry = manifest["3_2"] as? [String: Any]
+
+        #expect(package.displayCount == 1)
+        #expect(smallEntry?["SmallViewMode"] as? Int == H200SmallWindowMode.dial.rawValue)
+        #expect(H200PacketBuilder.isPayloadSafe(package.payload))
+    }
+
     @Test func realButtonPackageBuilderCreatesSafePayload() throws {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
@@ -1199,6 +1315,25 @@ struct UlanziDeckSwiftTests {
         #expect(String(data: smallWindowPayload, encoding: .utf8) == "2|0|0|00:00:00|0|24H|")
     }
 
+    @Test func smallWindowDataPacketsUseSelectedModePayload() throws {
+        let calendar = Calendar(identifier: .gregorian)
+        let date = try #require(calendar.date(from: DateComponents(
+            timeZone: .current,
+            year: 2026,
+            month: 6,
+            day: 18,
+            hour: 12,
+            minute: 34,
+            second: 56
+        )))
+
+        let clockPayload = H200SmallWindowDataPacketBuilder.payload(mode: .dial, date: date)
+        let statsPayload = H200SmallWindowDataPacketBuilder.payload(mode: .stats, date: date)
+
+        #expect(String(data: clockPayload, encoding: .utf8) == "1|0|0|12:34:56|0|24H|")
+        #expect(String(data: statsPayload, encoding: .utf8) == "0|0|0|12:34:56|0|24H|")
+    }
+
     @Test func partialUpdatePacketsUsePartialUpdateCommand() {
         let package = H200ButtonPackage(
             payload: Data(repeating: 0xab, count: H200PacketBuilder.firstChunkDataSize + 2),
@@ -1210,6 +1345,24 @@ struct UlanziDeckSwiftTests {
 
         #expect(packets.count == 2)
         #expect(Array(packets[0].prefix(4)) == [0x7c, 0x7c, 0x00, 0x0d])
+    }
+
+    @Test func partialUpdateCanAppendSmallWindowModePacket() {
+        let package = H200ButtonPackage(
+            payload: Data(repeating: 0xab, count: H200PacketBuilder.firstChunkDataSize + 2),
+            manifestData: Data(),
+            displayCount: 1
+        )
+
+        let packets = H200PartialUpdatePacketBuilder.buildPartialUpdatePackets(package: package, smallWindowMode: .stats)
+        let smallWindowPacket = packets.last!
+        let smallWindowLength = Self.payloadLength(in: smallWindowPacket)
+        let smallWindowPayload = smallWindowPacket.subdata(in: H200PacketBuilder.headerSize..<(H200PacketBuilder.headerSize + smallWindowLength))
+
+        #expect(packets.count == 3)
+        #expect(Array(packets[0].prefix(4)) == [0x7c, 0x7c, 0x00, 0x0d])
+        #expect(Array(smallWindowPacket.prefix(4)) == [0x7c, 0x7c, 0x00, 0x06])
+        #expect(String(data: smallWindowPayload, encoding: .utf8)?.hasPrefix("0|0|0|") == true)
     }
 
     @MainActor
@@ -1622,6 +1775,7 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
     private var storedSentDisplays: [[DeckKeyDisplay]] = []
     private var storedPartialDisplays: [[DeckKeyDisplay]] = []
     private var storedBrightnessPercents: [Int] = []
+    private var storedSmallWindowModes: [H200SmallWindowMode] = []
     private var inputHandler: H200InputHandler?
     private let packageDelayNanoseconds: UInt64
     private let brightnessDelayNanoseconds: UInt64
@@ -1636,6 +1790,10 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
 
     var brightnessPercents: [Int] {
         locked { storedBrightnessPercents }
+    }
+
+    var smallWindowModes: [H200SmallWindowMode] {
+        locked { storedSmallWindowModes }
     }
 
     init(
@@ -1676,6 +1834,9 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
         sleepIfNeeded(packageDelayNanoseconds)
         let result = locked {
             storedPartialDisplays.append(displays)
+            if let smallWindowMode = H200SmallWindowMode.modeIfPresent(in: displays) {
+                storedSmallWindowModes.append(smallWindowMode)
+            }
 
             return H200DeckSyncResult.success(H200DeckSyncSummary(
                 payloadByteCount: displays.count,
@@ -1751,6 +1912,12 @@ private extension H200DeckSyncResult {
 private struct FakeH200ButtonIconRenderer: H200ButtonIconRendering {
     func pngData(for display: DeckKeyDisplay) throws -> Data {
         Data([0x89, 0x50, 0x4e, 0x47, UInt8(display.id)])
+    }
+}
+
+private struct FailingH200ButtonIconRenderer: H200ButtonIconRendering {
+    func pngData(for display: DeckKeyDisplay) throws -> Data {
+        throw H200ButtonIconRenderError.cannotEncodePNG
     }
 }
 
