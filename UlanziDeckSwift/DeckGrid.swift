@@ -77,6 +77,9 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         case .openFolder:
             title = "打开"
             subtitle = configuration.openFolder.displayName
+        case .connectSMBServer:
+            title = "连接"
+            subtitle = configuration.smbServer.displayName
         case .brightness:
             title = ""
             subtitle = ""
@@ -196,9 +199,10 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case none
     case tally
     case openFolder
+    case connectSMBServer
     case brightness
 
-    static let assignableCases: [DeckKeyFunction] = [.tally, .openFolder]
+    static let assignableCases: [DeckKeyFunction] = [.tally, .openFolder, .connectSMBServer]
 
     var title: String {
         switch self {
@@ -208,6 +212,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "计数器"
         case .openFolder:
             return "打开文件夹"
+        case .connectSMBServer:
+            return "连接 SMB"
         case .brightness:
             return "亮度调节"
         }
@@ -221,6 +227,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "number.square"
         case .openFolder:
             return "folder"
+        case .connectSMBServer:
+            return "network"
         case .brightness:
             return "sun.max"
         }
@@ -254,6 +262,41 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
     }
 }
 
+nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
+    var address: String
+
+    init(address: String = "") {
+        self.address = Self.normalizedAddress(address)
+    }
+
+    var displayName: String {
+        address.isEmpty ? "填写地址" : address
+    }
+
+    var fullURLString: String? {
+        guard !address.isEmpty else {
+            return nil
+        }
+
+        return "smb://\(address)"
+    }
+
+    static func normalizedAddress(_ rawValue: String) -> String {
+        var address = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        while address.range(of: "smb://", options: [.caseInsensitive, .anchored]) != nil {
+            address.removeFirst("smb://".count)
+            address = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        while address.hasPrefix("/") {
+            address.removeFirst()
+        }
+
+        return address
+    }
+}
+
 nonisolated enum DeckBrightnessConfiguration {
     static let defaultPercent = 100
 
@@ -266,33 +309,39 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var function: DeckKeyFunction
     var tally: DeckKeyTallyConfiguration
     var openFolder: DeckKeyOpenFolderConfiguration
+    var smbServer: DeckKeySMBServerConfiguration
 
     static let empty = DeckKeyConfiguration(
         function: .none,
         tally: DeckKeyTallyConfiguration(),
-        openFolder: DeckKeyOpenFolderConfiguration()
+        openFolder: DeckKeyOpenFolderConfiguration(),
+        smbServer: DeckKeySMBServerConfiguration()
     )
 
     static let tallyDefault = DeckKeyConfiguration(
         function: .tally,
         tally: DeckKeyTallyConfiguration(),
-        openFolder: DeckKeyOpenFolderConfiguration()
+        openFolder: DeckKeyOpenFolderConfiguration(),
+        smbServer: DeckKeySMBServerConfiguration()
     )
 
     init(
         function: DeckKeyFunction,
         tally: DeckKeyTallyConfiguration = DeckKeyTallyConfiguration(),
-        openFolder: DeckKeyOpenFolderConfiguration = DeckKeyOpenFolderConfiguration()
+        openFolder: DeckKeyOpenFolderConfiguration = DeckKeyOpenFolderConfiguration(),
+        smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration()
     ) {
         self.function = function
         self.tally = tally
         self.openFolder = openFolder
+        self.smbServer = smbServer
     }
 
     enum CodingKeys: CodingKey {
         case function
         case tally
         case openFolder
+        case smbServer
     }
 
     init(from decoder: Decoder) throws {
@@ -300,6 +349,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         function = try container.decode(DeckKeyFunction.self, forKey: .function)
         tally = try container.decodeIfPresent(DeckKeyTallyConfiguration.self, forKey: .tally) ?? DeckKeyTallyConfiguration()
         openFolder = try container.decodeIfPresent(DeckKeyOpenFolderConfiguration.self, forKey: .openFolder) ?? DeckKeyOpenFolderConfiguration()
+        smbServer = try container.decodeIfPresent(DeckKeySMBServerConfiguration.self, forKey: .smbServer) ?? DeckKeySMBServerConfiguration()
     }
 
     func encode(to encoder: Encoder) throws {
@@ -307,6 +357,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         try container.encode(function, forKey: .function)
         try container.encode(tally, forKey: .tally)
         try container.encode(openFolder, forKey: .openFolder)
+        try container.encode(smbServer, forKey: .smbServer)
     }
 }
 
@@ -386,6 +437,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations[keyID, default: .tallyDefault].openFolder.path
     }
 
+    func smbServerAddress(for keyID: Int) -> String {
+        configurations[keyID, default: .tallyDefault].smbServer.address
+    }
+
     @discardableResult
     mutating func resetTally(keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
@@ -423,6 +478,19 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].openFolder.path = path
+        return true
+    }
+
+    @discardableResult
+    mutating func setSMBServerAddress(_ address: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .connectSMBServer
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].smbServer.address = DeckKeySMBServerConfiguration.normalizedAddress(address)
         return true
     }
 

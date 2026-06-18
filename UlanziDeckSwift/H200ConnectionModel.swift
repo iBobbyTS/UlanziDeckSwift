@@ -15,6 +15,7 @@ final class H200ConnectionModel: ObservableObject {
     private let syncer: H200DeckSyncing
     private let configurationStore: DeckConfigurationStoring
     private let folderOpener: FinderFolderOpening
+    private let smbServerConnector: SMBServerConnecting
     private var hasPersistedBrightnessPercent: Bool
     private let longPressDurationNanoseconds: UInt64
     private let brightnessUpdateQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200BrightnessUpdate")
@@ -33,12 +34,14 @@ final class H200ConnectionModel: ObservableObject {
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         folderOpener: FinderFolderOpening? = nil,
+        smbServerConnector: SMBServerConnecting? = nil,
         longPressDurationNanoseconds: UInt64 = 1_000_000_000
     ) {
         self.discovery = discovery
         self.syncer = syncer
         self.configurationStore = configurationStore
         self.folderOpener = folderOpener ?? FinderFolderOpener()
+        self.smbServerConnector = smbServerConnector ?? SMBServerConnector()
         self.longPressDurationNanoseconds = longPressDurationNanoseconds
         interactionState = configurationStore.loadInteractionState(for: layout) ?? DeckGridInteractionState(layout: layout)
         let loadedBrightnessPercent = configurationStore.loadBrightnessPercent()
@@ -139,6 +142,8 @@ final class H200ConnectionModel: ObservableObject {
             }
         case .some(.openFolder):
             openFolder(for: keyID)
+        case .some(.connectSMBServer):
+            connectSMBServer(for: keyID)
         case .some(.brightness), .some(.none), nil:
             return
         }
@@ -177,6 +182,17 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         if interactionState.setFolderPath(path, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            syncCurrentDisplays()
+        }
+    }
+
+    func setSelectedSMBServerAddress(_ address: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        if interactionState.setSMBServerAddress(address, for: selectedKeyID) {
             persistCurrentConfiguration()
             syncCurrentDisplays()
         }
@@ -270,6 +286,15 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         _ = folderOpener.openFolder(at: path)
+    }
+
+    private func connectSMBServer(for keyID: Int) {
+        let address = interactionState.smbServerAddress(for: keyID)
+        guard !address.isEmpty else {
+            return
+        }
+
+        _ = smbServerConnector.connect(to: address)
     }
 
     private func requestBrightnessUpdate(percent: Int) {

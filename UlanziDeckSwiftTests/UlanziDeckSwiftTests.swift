@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import Testing
 @testable import UlanziDeckSwift
 
@@ -130,6 +131,20 @@ struct UlanziDeckSwiftTests {
         #expect(state.folderPath(for: 5) == "/Users/ibobby/Documents/Codex")
     }
 
+    @Test func connectSMBServerFunctionDisplaysNormalizedAddress() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.assign(.connectSMBServer, to: 5)
+        state.setSMBServerAddress("smb://server.local/share", for: 5)
+        let display = state.display(for: layout.keys[4])
+
+        #expect(display.title == "连接")
+        #expect(display.subtitle == "server.local/share")
+        #expect(state.smbServerAddress(for: 5) == "server.local/share")
+        #expect(state.configuration(for: 5)?.smbServer.fullURLString == "smb://server.local/share")
+    }
+
     @Test func legacyBrightnessKeyFunctionIsNormalizedToNoFunction() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(
@@ -166,6 +181,8 @@ struct UlanziDeckSwiftTests {
         state.clearFunction(keyID: 8)
         state.assign(.openFolder, to: 9)
         state.setFolderPath("/Users/ibobby/Documents", for: 9)
+        state.assign(.connectSMBServer, to: 10)
+        state.setSMBServerAddress("smb://nas.local/media", for: 10)
 
         store.saveInteractionState(state, for: layout)
         store.saveBrightnessPercent(140)
@@ -176,6 +193,8 @@ struct UlanziDeckSwiftTests {
         #expect(restored.configuration(for: 8)?.function == DeckKeyFunction.none)
         #expect(restored.configuration(for: 9)?.function == DeckKeyFunction.openFolder)
         #expect(restored.folderPath(for: 9) == "/Users/ibobby/Documents")
+        #expect(restored.configuration(for: 10)?.function == DeckKeyFunction.connectSMBServer)
+        #expect(restored.smbServerAddress(for: 10) == "nas.local/media")
         #expect(store.loadBrightnessPercent() == 100)
         #expect(restored.pressedKeyIDs.isEmpty)
         #expect(restored.selectedKeyID == 1)
@@ -461,6 +480,30 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func selectingConnectSMBServerFunctionSyncsAndPersistsAddress() {
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            smbServerConnector: FakeSMBServerConnector()
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.connectSMBServer)
+        model.setSelectedSMBServerAddress("smb://nas.local/media")
+
+        #expect(model.interactionState.configuration(for: 4)?.function == DeckKeyFunction.connectSMBServer)
+        #expect(model.interactionState.smbServerAddress(for: 4) == "nas.local/media")
+        #expect(syncer.sentDisplays.count == 3)
+        #expect(syncer.sentDisplays.last?[3].title == "连接")
+        #expect(syncer.sentDisplays.last?[3].subtitle == "nas.local/media")
+        #expect(store.savedStates.last?.smbServerAddress(for: 4) == "nas.local/media")
+    }
+
+    @MainActor
     @Test func topBrightnessSliderSendsLatestValueWithoutPilingUp() async throws {
         let syncer = FakeH200DeckSyncer(brightnessDelayNanoseconds: 100_000_000)
         let store = FakeDeckConfigurationStore()
@@ -668,6 +711,54 @@ struct UlanziDeckSwiftTests {
         try await Task.sleep(nanoseconds: 50_000_000)
 
         #expect(opener.openedPaths.isEmpty)
+    }
+
+    @MainActor
+    @Test func physicalButtonShortPressConnectsConfiguredSMBServerWithoutSyncingDisplay() async throws {
+        let connector = FakeSMBServerConnector()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            smbServerConnector: connector
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.connectSMBServer)
+        model.setSelectedSMBServerAddress("nas.local/media")
+        let sentDisplayCount = syncer.sentDisplays.count
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(connector.connectedAddresses == ["nas.local/media"])
+        #expect(syncer.sentDisplays.count == sentDisplayCount)
+        #expect(model.interactionState.selectedKeyID == 4)
+    }
+
+    @MainActor
+    @Test func physicalButtonConnectSMBServerWithoutAddressDoesNothing() async throws {
+        let connector = FakeSMBServerConnector()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            smbServerConnector: connector
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.connectSMBServer)
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(connector.connectedAddresses.isEmpty)
     }
 
     @MainActor
@@ -881,6 +972,46 @@ struct UlanziDeckSwiftTests {
         #expect(H200DeckInputMapper.keyID(for: releaseEvent!, layout: .h200Prototype) == 1)
     }
 
+    @MainActor
+    @Test func smbConnectorFallsBackToWorkspaceWhenNetFSReturnsPermissionError() {
+        let mounter = FakeNetFSMounter(status: Int(EPERM))
+        let opener = FakeSMBURLOpener()
+        let connector = SMBServerConnector(netFSMounter: mounter, urlOpener: opener)
+
+        let didConnect = connector.connect(to: "smb://ibobby-nas.local")
+
+        #expect(didConnect)
+        #expect(mounter.mountedURLs.map { $0.absoluteString } == ["smb://ibobby-nas.local"])
+        #expect(opener.openedURLs.map { $0.absoluteString } == ["smb://ibobby-nas.local"])
+    }
+
+    @MainActor
+    @Test func smbConnectorFallsBackToWorkspaceWhenAsyncNetFSCompletionReturnsPermissionError() {
+        let mounter = FakeNetFSMounter(status: 0, completionStatus: Int(EPERM))
+        let opener = FakeSMBURLOpener()
+        let connector = SMBServerConnector(netFSMounter: mounter, urlOpener: opener)
+
+        let didConnect = connector.connect(to: "smb://ibobby-nas.local")
+        mounter.completePendingMount()
+
+        #expect(didConnect)
+        #expect(mounter.mountedURLs.map { $0.absoluteString } == ["smb://ibobby-nas.local"])
+        #expect(opener.openedURLs.map { $0.absoluteString } == ["smb://ibobby-nas.local"])
+    }
+
+    @MainActor
+    @Test func smbConnectorDoesNotFallbackForOtherNetFSErrors() {
+        let mounter = FakeNetFSMounter(status: Int(ENOENT))
+        let opener = FakeSMBURLOpener()
+        let connector = SMBServerConnector(netFSMounter: mounter, urlOpener: opener)
+
+        let didConnect = connector.connect(to: "ibobby-nas.local")
+
+        #expect(!didConnect)
+        #expect(mounter.mountedURLs.map { $0.absoluteString } == ["smb://ibobby-nas.local"])
+        #expect(opener.openedURLs.isEmpty)
+    }
+
     private static func protocolInterfaceIdentity() -> H200DeviceIdentity {
         H200DeviceIdentity(
             vendorID: H200DeviceTarget.vendorID,
@@ -1077,6 +1208,54 @@ private final class FakeFinderFolderOpener: FinderFolderOpening {
 
     func openFolder(at path: String) -> Bool {
         openedPaths.append(path)
+        return true
+    }
+}
+
+@MainActor
+private final class FakeSMBServerConnector: SMBServerConnecting {
+    private(set) var connectedAddresses: [String] = []
+
+    func connect(to address: String) -> Bool {
+        connectedAddresses.append(address)
+        return true
+    }
+}
+
+@MainActor
+private final class FakeNetFSMounter: NetFSMounting {
+    private let status: Int
+    private let completionStatus: Int?
+    private var pendingCompletion: ((Int) -> Void)?
+    private(set) var mountedURLs: [URL] = []
+
+    init(status: Int, completionStatus: Int? = nil) {
+        self.status = status
+        self.completionStatus = completionStatus
+    }
+
+    func mount(url: URL, completion: @escaping (Int) -> Void) -> Int {
+        mountedURLs.append(url)
+        pendingCompletion = completion
+        return status
+    }
+
+    func completePendingMount() {
+        guard let completionStatus, let pendingCompletion else {
+            return
+        }
+
+        pendingCompletion(completionStatus)
+        self.pendingCompletion = nil
+    }
+}
+
+@MainActor
+private final class FakeSMBURLOpener: SMBURLOpening {
+    private(set) var openedURLs: [URL] = []
+
+    func open(_ url: URL) -> Bool {
+        openedURLs.append(url)
         return true
     }
 }

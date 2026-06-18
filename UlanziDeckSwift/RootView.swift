@@ -9,13 +9,15 @@ struct RootView: View {
         discovery: H200Discovering = H200HIDDiscovery(),
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
-        folderOpener: FinderFolderOpening? = nil
+        folderOpener: FinderFolderOpening? = nil,
+        smbServerConnector: SMBServerConnecting? = nil
     ) {
         _connectionModel = StateObject(wrappedValue: H200ConnectionModel(
             discovery: discovery,
             syncer: syncer,
             configurationStore: configurationStore,
-            folderOpener: folderOpener
+            folderOpener: folderOpener,
+            smbServerConnector: smbServerConnector
         ))
     }
 
@@ -38,6 +40,9 @@ struct RootView: View {
             },
             onFolderPathSelection: { path in
                 connectionModel.setSelectedFolderPath(path)
+            },
+            onSMBServerAddressChange: { address in
+                connectionModel.setSelectedSMBServerAddress(address)
             },
             onBrightnessPercentPreview: { percent in
                 connectionModel.previewBrightnessPercent(percent)

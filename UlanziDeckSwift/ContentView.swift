@@ -12,6 +12,7 @@ struct ContentView: View {
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
     let onFolderPathSelection: (String) -> Void
+    let onSMBServerAddressChange: (String) -> Void
     let onBrightnessPercentPreview: (Int) -> Void
     let onBrightnessPercentCommit: (Int) -> Void
 
@@ -378,6 +379,45 @@ struct ContentView: View {
                 Spacer()
             }
 
+        case .connectSMBServer:
+            HStack(alignment: .top, spacing: 28) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("功能")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
+                        .font(.callout.weight(.medium))
+                }
+                .frame(width: 150, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("服务器地址")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 0) {
+                        Text("smb://")
+                            .font(.callout.monospaced())
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 9)
+                            .frame(height: 24)
+                            .background(Color(nsColor: .controlBackgroundColor))
+
+                        TextField("server.local/share", text: selectedSMBServerAddressBinding)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    .frame(maxWidth: 360, alignment: .leading)
+
+                    Text("只填写服务器和共享名，例如 server.local/share。连接时会使用系统认证窗口。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+            }
+
         }
     }
 }
@@ -393,7 +433,7 @@ private extension ContentView {
             FunctionSection(
                 title: "访达",
                 systemImageName: "folder",
-                functions: [.openFolder]
+                functions: [.openFolder, .connectSMBServer]
             ),
         ]
     }
@@ -413,6 +453,17 @@ private extension ContentView {
             },
             set: { value in
                 onTallyDefaultValueChange(value)
+            }
+        )
+    }
+
+    var selectedSMBServerAddressBinding: Binding<String> {
+        Binding(
+            get: {
+                selectedConfiguration?.smbServer.address ?? ""
+            },
+            set: { address in
+                onSMBServerAddressChange(address)
             }
         )
     }
@@ -633,6 +684,7 @@ private struct DeckKeyRenderedImage: View, Equatable {
         onFunctionSelection: { _ in },
         onTallyDefaultValueChange: { _ in },
         onFolderPathSelection: { _ in },
+        onSMBServerAddressChange: { _ in },
         onBrightnessPercentPreview: { _ in },
         onBrightnessPercentCommit: { _ in }
     )
