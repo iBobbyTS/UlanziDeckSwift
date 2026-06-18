@@ -36,7 +36,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: minimumWindowWidth, minHeight: 640)
+        .frame(minWidth: minimumWindowWidth, minHeight: 674)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -52,8 +52,20 @@ struct ContentView: View {
         previewLayoutMetrics.gridMetrics
     }
 
-    private var previewOuterPadding: CGFloat {
-        CGFloat(previewLayoutMetrics.outerPadding)
+    private var previewOuterHorizontalPadding: CGFloat {
+        CGFloat(previewLayoutMetrics.outerHorizontalPadding)
+    }
+
+    private var previewOuterVerticalPadding: CGFloat {
+        CGFloat(previewLayoutMetrics.outerVerticalPadding)
+    }
+
+    private var previewContentTopPadding: CGFloat {
+        CGFloat(previewLayoutMetrics.contentTopPadding)
+    }
+
+    private var previewContentBottomPadding: CGFloat {
+        CGFloat(previewLayoutMetrics.contentBottomPadding)
     }
 
     private var previewInnerPadding: CGFloat {
@@ -144,23 +156,27 @@ struct ContentView: View {
     }
 
     private var workbench: some View {
-        HStack(spacing: 0) {
-            VStack(spacing: 0) {
-                deckPreviewArea
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    deckPreviewArea
+                    Divider()
+                    parameterPanel
+                }
+                .frame(minWidth: deckPreviewAreaMinimumWidth)
+                .frame(maxHeight: .infinity, alignment: .top)
+
                 Divider()
-                parameterPanel
+
+                functionSidebar
+                    .frame(
+                        minWidth: functionSidebarMinimumWidth,
+                        idealWidth: functionSidebarPreferredWidth,
+                        maxWidth: functionSidebarMaximumWidth
+                    )
+                    .frame(height: geometry.size.height)
             }
-            .frame(minWidth: deckPreviewAreaMinimumWidth)
-            .frame(maxHeight: .infinity, alignment: .top)
-
-            Divider()
-
-            functionSidebar
-                .frame(
-                    minWidth: functionSidebarMinimumWidth,
-                    idealWidth: functionSidebarPreferredWidth,
-                    maxWidth: functionSidebarMaximumWidth
-                )
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
         }
     }
 
@@ -169,7 +185,10 @@ struct ContentView: View {
             deckSurface
             pageSelector
         }
-        .padding(previewOuterPadding)
+        .padding(.horizontal, previewOuterHorizontalPadding)
+        .padding(.vertical, previewOuterVerticalPadding)
+        .padding(.top, previewContentTopPadding)
+        .padding(.bottom, previewContentBottomPadding)
         .frame(maxWidth: .infinity)
         .frame(height: deckPreviewAreaHeight, alignment: .top)
     }
@@ -233,7 +252,7 @@ struct ContentView: View {
     }
 
     private var functionSidebar: some View {
-        ScrollView {
+        ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(functionSections) { section in
                     FunctionSectionCard(
@@ -243,9 +262,11 @@ struct ContentView: View {
                     )
                 }
             }
-            .padding(18)
+            .padding(.horizontal, 18)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
         }
-        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -267,7 +288,10 @@ struct ContentView: View {
             Divider()
 
             if let selectedConfiguration {
-                parameterContent(for: selectedConfiguration)
+                ScrollView(.vertical) {
+                    parameterContent(for: selectedConfiguration)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             } else {
                 Text("选择一个按键")
                     .font(.callout)

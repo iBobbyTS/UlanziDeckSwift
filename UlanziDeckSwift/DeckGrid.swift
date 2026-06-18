@@ -169,16 +169,22 @@ nonisolated struct DeckPreviewGridMetrics: Equatable {
 
 nonisolated struct DeckPreviewLayoutMetrics: Equatable {
     let gridMetrics: DeckPreviewGridMetrics
-    let outerPadding: Double
+    let outerHorizontalPadding: Double
+    let outerVerticalPadding: Double
+    let contentTopPadding: Double
+    let contentBottomPadding: Double
     let innerPadding: Double
     let pageSpacing: Double
     let pageSelectorHeight: Double
 
     static let h200 = DeckPreviewLayoutMetrics(
         gridMetrics: .h200,
-        outerPadding: 28,
+        outerHorizontalPadding: 28,
+        outerVerticalPadding: 0,
+        contentTopPadding: 16,
+        contentBottomPadding: 16,
         innerPadding: 28,
-        pageSpacing: 18,
+        pageSpacing: 12,
         pageSelectorHeight: 26
     )
 
@@ -201,14 +207,16 @@ nonisolated struct DeckPreviewLayoutMetrics: Equatable {
     }
 
     func previewAreaMinimumWidth(for layout: DeckGridLayout) -> Double {
-        deckSurfaceWidth(for: layout) + outerPadding * 2
+        deckSurfaceWidth(for: layout) + outerHorizontalPadding * 2
     }
 
     func previewAreaHeight(for layout: DeckGridLayout) -> Double {
-        deckSurfaceHeight(for: layout)
+        contentTopPadding
+            + deckSurfaceHeight(for: layout)
             + pageSpacing
             + pageSelectorHeight
-            + outerPadding * 2
+            + contentBottomPadding
+            + outerVerticalPadding * 2
     }
 }
 

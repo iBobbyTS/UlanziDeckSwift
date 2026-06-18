@@ -138,7 +138,7 @@ struct UlanziDeckSwiftTests {
         #expect(layoutMetrics.deckSurfaceWidth(for: layout) == 530)
         #expect(layoutMetrics.deckSurfaceHeight(for: layout) == 334)
         #expect(layoutMetrics.previewAreaMinimumWidth(for: layout) == 586)
-        #expect(layoutMetrics.previewAreaHeight(for: layout) == 434)
+        #expect(layoutMetrics.previewAreaHeight(for: layout) == 404)
     }
 
     @Test func shortPressingAKeyDoesNotChangeUISelectionAndIncrementsTally() {

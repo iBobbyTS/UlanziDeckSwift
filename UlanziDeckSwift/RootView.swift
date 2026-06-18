@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct RootView: View {
-    private let windowContentMinimumSize = CGSize(width: 880, height: 640)
+    private let windowContentMinimumSize = CGSize(width: 880, height: 674)
     private let windowContentMaximumSize = CGSize(width: 1000, height: CGFloat.greatestFiniteMagnitude)
     @StateObject private var connectionModel: H200ConnectionModel
 
