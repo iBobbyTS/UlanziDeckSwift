@@ -16,6 +16,86 @@ struct UlanziDeckSwiftTests {
         #expect(layout.keyID(forSequentialInputIndex: 14) == nil)
     }
 
+    @Test func fileSingleInstanceLockerRejectsDuplicateBundleIdentifier() throws {
+        let lockDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("UlanziDeckSwiftTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: lockDirectory, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: lockDirectory)
+        }
+
+        let secondLocker = FileSingleInstanceLocker(lockDirectory: lockDirectory)
+
+        do {
+            let firstLocker = FileSingleInstanceLocker(lockDirectory: lockDirectory)
+
+            #expect(firstLocker.tryAcquire(identifier: "com.iBobby.UlanziDeckSwift"))
+            #expect(!secondLocker.tryAcquire(identifier: "com.iBobby.UlanziDeckSwift"))
+        }
+
+        #expect(secondLocker.tryAcquire(identifier: "com.iBobby.UlanziDeckSwift"))
+    }
+
+    @Test func singleInstanceGuardActivatesExistingApplicationWhenLockIsBusy() {
+        let locker = FakeSingleInstanceLocker(results: [false])
+        let activator = FakeExistingApplicationActivator()
+        let guardInstance = SingleInstanceGuard(
+            bundleIdentifier: "com.iBobby.UlanziDeckSwift",
+            locker: locker,
+            activator: activator
+        )
+
+        #expect(!guardInstance.acquireOrActivateExisting())
+        #expect(locker.requestedIdentifiers == ["com.iBobby.UlanziDeckSwift"])
+        #expect(activator.activationRequests == [
+            FakeExistingApplicationActivator.ActivationRequest(
+                bundleIdentifier: "com.iBobby.UlanziDeckSwift",
+                latestLaunchDate: nil
+            )
+        ])
+    }
+
+    @Test func singleInstanceGuardRejectsWhenOlderApplicationAlreadyExists() {
+        let locker = FakeSingleInstanceLocker(results: [true])
+        let activator = FakeExistingApplicationActivator(results: [true])
+        let launchDate = Date(timeIntervalSince1970: 100)
+        let guardInstance = SingleInstanceGuard(
+            bundleIdentifier: "com.iBobby.UlanziDeckSwift",
+            locker: locker,
+            activator: activator,
+            currentLaunchDate: launchDate,
+            existingApplicationGraceInterval: 2
+        )
+
+        #expect(!guardInstance.acquireOrActivateExisting())
+        #expect(locker.requestedIdentifiers == ["com.iBobby.UlanziDeckSwift"])
+        #expect(activator.activationRequests == [
+            FakeExistingApplicationActivator.ActivationRequest(
+                bundleIdentifier: "com.iBobby.UlanziDeckSwift",
+                latestLaunchDate: launchDate.addingTimeInterval(-2)
+            )
+        ])
+    }
+
+    @Test func singleInstanceGuardAllowsLaunchWhenNoExistingApplicationIsFound() {
+        let locker = FakeSingleInstanceLocker(results: [true])
+        let activator = FakeExistingApplicationActivator(results: [false])
+        let guardInstance = SingleInstanceGuard(
+            bundleIdentifier: "com.iBobby.UlanziDeckSwift",
+            locker: locker,
+            activator: activator,
+            currentLaunchDate: Date(timeIntervalSince1970: 100),
+            existingApplicationGraceInterval: 2
+        )
+
+        #expect(guardInstance.acquireOrActivateExisting())
+        #expect(locker.requestedIdentifiers == ["com.iBobby.UlanziDeckSwift"])
+    }
+
+    @Test func appSkipsSingleInstanceGuardDuringTests() {
+        #expect(UlanziDeckSwiftApp.isRunningTests)
+    }
+
     @Test func previewGridMetricsKeepsWideKeyRowAligned() {
         let layout = DeckGridLayout.h200Prototype
         let metrics = DeckPreviewGridMetrics.h200
@@ -1246,6 +1326,50 @@ private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
 
     func saveBrightnessPercent(_ percent: Int) {
         savedBrightnessPercents.append(percent)
+    }
+}
+
+private final class FakeSingleInstanceLocker: SingleInstanceLocking {
+    private var results: [Bool]
+    private(set) var requestedIdentifiers: [String] = []
+
+    init(results: [Bool]) {
+        self.results = results
+    }
+
+    func tryAcquire(identifier: String) -> Bool {
+        requestedIdentifiers.append(identifier)
+        guard !results.isEmpty else {
+            return false
+        }
+
+        return results.removeFirst()
+    }
+}
+
+private final class FakeExistingApplicationActivator: ExistingApplicationActivating {
+    struct ActivationRequest: Equatable {
+        let bundleIdentifier: String
+        let latestLaunchDate: Date?
+    }
+
+    private var results: [Bool]
+    private(set) var activationRequests: [ActivationRequest] = []
+
+    init(results: [Bool] = []) {
+        self.results = results
+    }
+
+    func activateExistingApplication(bundleIdentifier: String, launchedBefore latestLaunchDate: Date?) -> Bool {
+        activationRequests.append(ActivationRequest(
+            bundleIdentifier: bundleIdentifier,
+            latestLaunchDate: latestLaunchDate
+        ))
+        guard !results.isEmpty else {
+            return false
+        }
+
+        return results.removeFirst()
     }
 }
 
