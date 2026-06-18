@@ -99,7 +99,7 @@ final class H200ConnectionModel: ObservableObject {
         longPressTasks[keyID] = nil
         longPressResetKeyIDs.remove(keyID)
         persistCurrentConfiguration()
-        syncCurrentDisplays()
+        syncKeyDisplay(keyID: keyID)
     }
 
     private func beginKeyPress(keyID: Int) {
@@ -138,7 +138,7 @@ final class H200ConnectionModel: ObservableObject {
         case .some(.tally):
             if interactionState.triggerShortPress(keyID: keyID) {
                 persistCurrentConfiguration()
-                syncCurrentDisplays()
+                syncKeyDisplay(keyID: keyID)
             }
         case .some(.openFolder):
             openFolder(for: keyID)
@@ -161,7 +161,7 @@ final class H200ConnectionModel: ObservableObject {
 
         if interactionState.assign(function, to: selectedKeyID) {
             persistCurrentConfiguration()
-            syncCurrentDisplays()
+            syncKeyDisplay(keyID: selectedKeyID)
         }
     }
 
@@ -172,7 +172,7 @@ final class H200ConnectionModel: ObservableObject {
 
         if interactionState.setTallyDefaultValue(value, for: selectedKeyID) {
             persistCurrentConfiguration()
-            syncCurrentDisplays()
+            syncKeyDisplay(keyID: selectedKeyID)
         }
     }
 
@@ -183,7 +183,7 @@ final class H200ConnectionModel: ObservableObject {
 
         if interactionState.setFolderPath(path, for: selectedKeyID) {
             persistCurrentConfiguration()
-            syncCurrentDisplays()
+            syncKeyDisplay(keyID: selectedKeyID)
         }
     }
 
@@ -194,7 +194,7 @@ final class H200ConnectionModel: ObservableObject {
 
         if interactionState.setSMBServerAddress(address, for: selectedKeyID) {
             persistCurrentConfiguration()
-            syncCurrentDisplays()
+            syncKeyDisplay(keyID: selectedKeyID)
         }
     }
 
@@ -276,7 +276,7 @@ final class H200ConnectionModel: ObservableObject {
         if interactionState.resetTally(keyID: keyID) {
             longPressResetKeyIDs.insert(keyID)
             persistCurrentConfiguration()
-            syncCurrentDisplays()
+            syncKeyDisplay(keyID: keyID)
         }
     }
 
@@ -353,6 +353,22 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         switch syncer.sendStartupPackage(displays: interactionState.displays(for: layout)) {
+        case let .success(summary):
+            syncSummary = summary
+        case let .failure(error):
+            alert = H200ConnectionAlert(syncFailure: error)
+        }
+    }
+
+    private func syncKeyDisplay(keyID: Int) {
+        guard case .connected = status, syncSummary != nil,
+              let key = layout.keys.first(where: { $0.id == keyID })
+        else {
+            return
+        }
+
+        let display = interactionState.display(for: key)
+        switch syncer.sendPartialPackage(displays: [display]) {
         case let .success(summary):
             syncSummary = summary
         case let .failure(error):

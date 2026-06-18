@@ -409,9 +409,11 @@ struct UlanziDeckSwiftTests {
         #expect(model.interactionState.configuration(for: 7)?.function == DeckKeyFunction.none)
         #expect(model.interactionState.tallyValue(for: 7) == 0)
         #expect(model.interactionState.pressedKeyIDs.isEmpty)
-        #expect(syncer.sentDisplays.count == 2)
-        #expect(syncer.sentDisplays.last?[6].title == "")
-        #expect(syncer.sentDisplays.last?[6].subtitle == "")
+        #expect(syncer.sentDisplays.count == 1)
+        #expect(syncer.partialDisplays.count == 1)
+        #expect(syncer.partialDisplays.last?.map(\.id) == [7])
+        #expect(syncer.partialDisplays.last?.first?.title == "")
+        #expect(syncer.partialDisplays.last?.first?.subtitle == "")
     }
 
     @MainActor
@@ -429,9 +431,11 @@ struct UlanziDeckSwiftTests {
         model.assignSelectedFunction(.tally)
 
         #expect(model.interactionState.configuration(for: 7)?.function == DeckKeyFunction.none)
-        #expect(syncer.sentDisplays.count == 2)
-        #expect(syncer.sentDisplays.last?[6].title == "")
-        #expect(syncer.sentDisplays.last?[6].subtitle == "")
+        #expect(syncer.sentDisplays.count == 1)
+        #expect(syncer.partialDisplays.count == 1)
+        #expect(syncer.partialDisplays.last?.map(\.id) == [7])
+        #expect(syncer.partialDisplays.last?.first?.title == "")
+        #expect(syncer.partialDisplays.last?.first?.subtitle == "")
     }
 
     @MainActor
@@ -450,9 +454,11 @@ struct UlanziDeckSwiftTests {
 
         #expect(model.interactionState.selectedKeyID == 7)
         #expect(model.interactionState.configuration(for: 7)?.function == .tally)
-        #expect(syncer.sentDisplays.count == 3)
-        #expect(syncer.sentDisplays.last?[6].title == "0")
-        #expect(syncer.sentDisplays.last?[6].subtitle == "默认 0")
+        #expect(syncer.sentDisplays.count == 1)
+        #expect(syncer.partialDisplays.count == 2)
+        #expect(syncer.partialDisplays.last?.map(\.id) == [7])
+        #expect(syncer.partialDisplays.last?.first?.title == "0")
+        #expect(syncer.partialDisplays.last?.first?.subtitle == "默认 0")
     }
 
     @MainActor
@@ -473,9 +479,11 @@ struct UlanziDeckSwiftTests {
 
         #expect(model.interactionState.configuration(for: 4)?.function == DeckKeyFunction.openFolder)
         #expect(model.interactionState.folderPath(for: 4) == "/Users/ibobby/Documents")
-        #expect(syncer.sentDisplays.count == 3)
-        #expect(syncer.sentDisplays.last?[3].title == "打开")
-        #expect(syncer.sentDisplays.last?[3].subtitle == "Documents")
+        #expect(syncer.sentDisplays.count == 1)
+        #expect(syncer.partialDisplays.count == 2)
+        #expect(syncer.partialDisplays.last?.map(\.id) == [4])
+        #expect(syncer.partialDisplays.last?.first?.title == "打开")
+        #expect(syncer.partialDisplays.last?.first?.subtitle == "Documents")
         #expect(store.savedStates.last?.folderPath(for: 4) == "/Users/ibobby/Documents")
     }
 
@@ -497,9 +505,11 @@ struct UlanziDeckSwiftTests {
 
         #expect(model.interactionState.configuration(for: 4)?.function == DeckKeyFunction.connectSMBServer)
         #expect(model.interactionState.smbServerAddress(for: 4) == "nas.local/media")
-        #expect(syncer.sentDisplays.count == 3)
-        #expect(syncer.sentDisplays.last?[3].title == "连接")
-        #expect(syncer.sentDisplays.last?[3].subtitle == "nas.local/media")
+        #expect(syncer.sentDisplays.count == 1)
+        #expect(syncer.partialDisplays.count == 2)
+        #expect(syncer.partialDisplays.last?.map(\.id) == [4])
+        #expect(syncer.partialDisplays.last?.first?.title == "连接")
+        #expect(syncer.partialDisplays.last?.first?.subtitle == "nas.local/media")
         #expect(store.savedStates.last?.smbServerAddress(for: 4) == "nas.local/media")
     }
 
@@ -941,6 +951,36 @@ struct UlanziDeckSwiftTests {
         #expect(String(data: smallWindowPayload, encoding: .utf8) == "2|0|0|00:00:00|0|24H|")
     }
 
+    @Test func partialUpdatePacketsUsePartialUpdateCommand() {
+        let package = H200ButtonPackage(
+            payload: Data(repeating: 0xab, count: H200PacketBuilder.firstChunkDataSize + 2),
+            manifestData: Data(),
+            displayCount: 1
+        )
+
+        let packets = H200PartialUpdatePacketBuilder.buildPartialUpdatePackets(package: package)
+
+        #expect(packets.count == 2)
+        #expect(Array(packets[0].prefix(4)) == [0x7c, 0x7c, 0x00, 0x0d])
+    }
+
+    @MainActor
+    @Test func partialButtonPackageManifestContainsOnlyRequestedDisplay() throws {
+        let layout = DeckGridLayout.h200Prototype
+        let state = DeckGridInteractionState(layout: layout)
+        let display = state.display(for: layout.keys[6])
+        let builder = H200ButtonPackageBuilder(renderer: FakeH200ButtonIconRenderer())
+
+        let package = try builder.buildPackage(displays: [display])
+        let manifest = try JSONSerialization.jsonObject(with: package.manifestData) as? [String: Any] ?? [:]
+        let entry = manifest["1_1"] as? [String: Any]
+        let viewParam = (entry?["ViewParam"] as? [[String: Any]])?.first
+
+        #expect(package.displayCount == 1)
+        #expect(manifest.count == 1)
+        #expect(viewParam?["Icon"] as? String == "Images/key_7.png")
+    }
+
     @Test func brightnessPacketUsesObservedSimpleFrame() {
         let packet = H200BrightnessPacketBuilder.packet(percent: 140)
         let payloadLength = Self.payloadLength(in: packet)
@@ -1070,12 +1110,17 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
     private var results: [H200DeckSyncResult]
     private var brightnessResults: [H200DeckSyncFailure?]
     private var storedSentDisplays: [[DeckKeyDisplay]] = []
+    private var storedPartialDisplays: [[DeckKeyDisplay]] = []
     private var storedBrightnessPercents: [Int] = []
     private var inputHandler: H200InputHandler?
     private let brightnessDelayNanoseconds: UInt64
 
     var sentDisplays: [[DeckKeyDisplay]] {
         locked { storedSentDisplays }
+    }
+
+    var partialDisplays: [[DeckKeyDisplay]] {
+        locked { storedPartialDisplays }
     }
 
     var brightnessPercents: [Int] {
@@ -1106,6 +1151,18 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
             }
 
             return results.removeFirst()
+        }
+    }
+
+    func sendPartialPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
+        locked {
+            storedPartialDisplays.append(displays)
+
+            return .success(H200DeckSyncSummary(
+                payloadByteCount: displays.count,
+                packetCount: 1,
+                displayCount: displays.count
+            ))
         }
     }
 

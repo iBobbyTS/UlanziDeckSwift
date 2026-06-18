@@ -56,12 +56,17 @@ nonisolated enum H200DeckSyncFailure: Error, Equatable {
 
 nonisolated protocol H200DeckSyncing: Sendable {
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult
+    func sendPartialPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult
     func setBrightness(percent: Int) -> H200DeckSyncFailure?
     func setInputHandler(_ handler: H200InputHandler?)
     func close()
 }
 
 extension H200DeckSyncing {
+    nonisolated func sendPartialPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
+        sendStartupPackage(displays: displays)
+    }
+
     nonisolated func setBrightness(percent: Int) -> H200DeckSyncFailure? { nil }
     nonisolated func setInputHandler(_ handler: H200InputHandler?) {}
     nonisolated func close() {}
@@ -85,6 +90,12 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
         operationQueue.sync {
             sendStartupPackageOnQueue(displays: displays)
+        }
+    }
+
+    func sendPartialPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
+        operationQueue.sync {
+            sendPartialPackageOnQueue(displays: displays)
         }
     }
 
@@ -116,6 +127,18 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
         }
 
         let packets = H200StartupPacketBuilder.buildStartupPackets(package: package)
+        return sendPackets(packets, package: package)
+    }
+
+    private func sendPartialPackageOnQueue(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
+        let package: H200ButtonPackage
+        do {
+            package = try packageBuilder.buildPackage(displays: displays)
+        } catch {
+            return .failure(.packageBuildFailed(String(describing: error)))
+        }
+
+        let packets = H200PartialUpdatePacketBuilder.buildPartialUpdatePackets(package: package)
         return sendPackets(packets, package: package)
     }
 

@@ -84,6 +84,15 @@ nonisolated enum H200StartupPacketBuilder {
     }
 }
 
+nonisolated enum H200PartialUpdatePacketBuilder {
+    static func buildPartialUpdatePackets(package: H200ButtonPackage) -> [Data] {
+        H200PacketBuilder.buildChunkedPackets(
+            command: H200Command.outPartiallyUpdateButtons,
+            payload: package.payload
+        )
+    }
+}
+
 nonisolated enum H200SmallWindowDataPacketBuilder {
     static let backgroundModePayload = Data("2|0|0|00:00:00|0|24H|".utf8)
 
