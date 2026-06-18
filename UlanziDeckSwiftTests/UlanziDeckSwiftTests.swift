@@ -1300,6 +1300,209 @@ struct UlanziDeckSwiftTests {
         #expect(opener.openedURLs.isEmpty)
     }
 
+    @Test func zzzStatusUsesVitalityAndDoesNotClampOverCapEnergy() {
+        let role = Self.mihoyoRole(game: .zenlessZoneZero)
+        let status = MihoyoGameStatusMapper.dailyStatus(
+            for: role,
+            data: [
+                "energy": [
+                    "progress": [
+                        "current": 320,
+                        "max": 240,
+                    ],
+                    "restore": 0,
+                ],
+                "vitality": [
+                    "current": 400,
+                    "max": 400,
+                ],
+                "bounty_commission": [
+                    "num": 2,
+                    "total": 4,
+                ],
+            ],
+            source: .record
+        )
+
+        #expect(status.staminaName == "电量")
+        #expect(status.currentStamina == 320)
+        #expect(status.maxStamina == 240)
+        #expect(status.staminaValueText == "320/240")
+        #expect(status.dailyName == "活跃度")
+        #expect(status.dailyCurrent == 400)
+        #expect(status.dailyMax == 400)
+        #expect(status.dailyDone == true)
+        #expect(status.buttonTitle == "电量 320")
+        #expect(status.buttonSubtitle == "活跃 400/400")
+    }
+
+    @Test func mihoyoJSONParsesNumericRetcodeWithoutTreatingItAsBool() throws {
+        let rawData = try #require(
+            """
+            {"retcode":0,"data":{"code":200},"success":false}
+            """.data(using: .utf8)
+        )
+        let payload = try #require(try JSONSerialization.jsonObject(with: rawData) as? [String: Any])
+        let data = try #require(payload["data"] as? [String: Any])
+
+        #expect(MihoyoJSON.int(payload["retcode"]) == 0)
+        #expect(MihoyoJSON.int(data["code"]) == 200)
+        #expect(MihoyoJSON.int(NSNumber(value: 0)) == 0)
+        #expect(MihoyoJSON.int(payload["success"]) == nil)
+        #expect(MihoyoJSON.int(NSNumber(value: false)) == nil)
+    }
+
+    @Test func gameFunctionDisplaysLatestStatusAndErrorStates() {
+        let layout = DeckGridLayout.h200Prototype
+        let status = Self.mihoyoStatus(
+            game: .zenlessZoneZero,
+            currentStamina: 320,
+            maxStamina: 240,
+            dailyCurrent: 400,
+            dailyMax: 400
+        )
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.assign(.zenlessZoneStatus, to: 5)
+        var display = state.display(for: layout.keys[4])
+
+        #expect(display.title == "绝区零")
+        #expect(display.subtitle == "未查询")
+
+        state.setMihoyoGameLastResult(.success(status), for: 5)
+        display = state.display(for: layout.keys[4])
+
+        #expect(display.title == "电量 320")
+        #expect(display.subtitle == "活跃 400/400")
+
+        state.setMihoyoGameLastResult(.loginExpired("登录已失效"), for: 5)
+        display = state.display(for: layout.keys[4])
+
+        #expect(display.title == "绝区零")
+        #expect(display.subtitle == "需重登")
+    }
+
+    @Test func gameRuntimeStatusIsNotPersistedWithDeckConfiguration() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let layout = DeckGridLayout.h200Prototype
+        let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: "deckConfiguration")
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.genshinStatus, to: 3)
+        state.setMihoyoGameLastResult(.success(Self.mihoyoStatus(game: .genshin)), for: 3)
+
+        store.saveInteractionState(state, for: layout)
+
+        let restored = try #require(store.loadInteractionState(for: layout))
+        #expect(restored.configuration(for: 3)?.function == .genshinStatus)
+        #expect(restored.configuration(for: 3)?.mihoyoGame.lastResult == nil)
+    }
+
+    @MainActor
+    @Test func assigningGameFunctionUsesSharedStoredLoginSession() async throws {
+        let session = Self.mihoyoSession()
+        let status = Self.mihoyoStatus(game: .genshin, currentStamina: 180, maxStamina: 200)
+        let mihoyoService = FakeMihoyoGameService(fetchResults: [.success(status)])
+        let sessionStore = FakeMihoyoSessionStore(loadedSession: session)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            mihoyoGameService: mihoyoService,
+            mihoyoSessionStore: sessionStore
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.genshinStatus)
+
+        try await Self.waitUntil {
+            syncer.partialDisplays.last?.first?.title == "树脂 180"
+        }
+
+        #expect(model.mihoyoLoginState == .loggedIn(accountID: session.accountID))
+        #expect(mihoyoService.fetchRequests.map(\.game) == [.genshin])
+        #expect(model.interactionState.configuration(for: 4)?.mihoyoGame.lastResult == .success(status))
+        #expect(syncer.partialDisplays.last?.first?.subtitle == "委托 4/4")
+    }
+
+    @MainActor
+    @Test func expiredGameQueryClearsSharedLoginAndMarksAllGameKeysExpired() async throws {
+        let session = Self.mihoyoSession()
+        let sessionStore = FakeMihoyoSessionStore(loadedSession: session)
+        let mihoyoService = FakeMihoyoGameService(defaultFetchResult: .loginExpired("Cookie 已失效"))
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.genshinStatus, to: 1)
+        loadedState.assign(.zenlessZoneStatus, to: 2)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            mihoyoGameService: mihoyoService,
+            mihoyoSessionStore: sessionStore
+        )
+
+        model.checkOnLaunch()
+
+        try await Self.waitUntil {
+            model.mihoyoLoginState == .expired("Cookie 已失效")
+        }
+
+        #expect(sessionStore.clearCount >= 1)
+        #expect(model.interactionState.configuration(for: 1)?.mihoyoGame.lastResult == .loginExpired("Cookie 已失效"))
+        #expect(model.interactionState.configuration(for: 2)?.mihoyoGame.lastResult == .loginExpired("Cookie 已失效"))
+    }
+
+    @MainActor
+    @Test func qrLoginStoresSharedSessionAndRefreshesConfiguredGameKeys() async throws {
+        let session = Self.mihoyoSession(accountID: "100002")
+        let qrSession = MihoyoQRLoginSession(ticket: "ticket", url: "https://example.com/login", deviceID: "device")
+        let status = Self.mihoyoStatus(game: .starRail, currentStamina: 94, maxStamina: 300, dailyCurrent: 500, dailyMax: 500)
+        let mihoyoService = FakeMihoyoGameService(
+            createdQRCode: qrSession,
+            qrResults: [.scanned, .confirmed(session)],
+            fetchResults: [.success(status)]
+        )
+        let sessionStore = FakeMihoyoSessionStore()
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.starRailStatus, to: 6)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            mihoyoGameService: mihoyoService,
+            mihoyoSessionStore: sessionStore,
+            mihoyoLoginPollNanoseconds: 1_000_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.beginMihoyoQRCodeLogin()
+
+        try await Self.waitUntil {
+            model.mihoyoLoginState == .loggedIn(accountID: session.accountID)
+                && model.interactionState.configuration(for: 6)?.mihoyoGame.lastResult == .success(status)
+        }
+
+        #expect(sessionStore.savedSessions == [session])
+        #expect(sessionStore.clearCount == 1)
+        #expect(mihoyoService.queryRequests == [qrSession, qrSession])
+        #expect(mihoyoService.fetchRequests.map(\.game) == [.starRail])
+    }
+
     private static func protocolInterfaceIdentity() -> H200DeviceIdentity {
         H200DeviceIdentity(
             vendorID: H200DeviceTarget.vendorID,
@@ -1350,6 +1553,65 @@ struct UlanziDeckSwiftTests {
         }
 
         #expect(condition())
+    }
+
+    private static func mihoyoRole(game: MihoyoGame, uid: String = "100000001") -> MihoyoBoundRole {
+        MihoyoBoundRole(
+            game: game,
+            gameBiz: game.roleGameBiz,
+            gameUID: uid,
+            region: "cn_gf01",
+            nickname: game.shortDisplayName,
+            level: 60
+        )
+    }
+
+    private static func mihoyoStatus(
+        game: MihoyoGame,
+        currentStamina: Int = 160,
+        maxStamina: Int = 200,
+        dailyCurrent: Int = 4,
+        dailyMax: Int = 4
+    ) -> MihoyoDailyStatus {
+        let staminaName: String
+        let dailyName: String
+        switch game {
+        case .genshin:
+            staminaName = "树脂"
+            dailyName = "每日委托"
+        case .starRail:
+            staminaName = "开拓力"
+            dailyName = "每日实训"
+        case .zenlessZoneZero:
+            staminaName = "电量"
+            dailyName = "活跃度"
+        }
+
+        return MihoyoDailyStatus(
+            game: game,
+            role: mihoyoRole(game: game),
+            staminaName: staminaName,
+            currentStamina: currentStamina,
+            maxStamina: maxStamina,
+            staminaRecoverSeconds: 0,
+            dailyName: dailyName,
+            dailyCurrent: dailyCurrent,
+            dailyMax: dailyMax,
+            dailyDone: dailyCurrent == dailyMax,
+            source: .record
+        )
+    }
+
+    private static func mihoyoSession(accountID: String = "100001") -> MihoyoLoginSession {
+        MihoyoLoginSession(
+            accountID: accountID,
+            stokenV2: "stoken",
+            mid: "mid",
+            cookieToken: "cookie",
+            ltoken: "ltoken",
+            deviceID: "device-id",
+            deviceFP: "device-fp"
+        )
     }
 }
 
@@ -1542,6 +1804,95 @@ private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
 
     func saveBrightnessPercent(_ percent: Int) {
         savedBrightnessPercents.append(percent)
+    }
+}
+
+private final class FakeMihoyoGameService: MihoyoGameServicing, @unchecked Sendable {
+    struct FetchRequest: Equatable {
+        let game: MihoyoGame
+        let session: MihoyoLoginSession
+    }
+
+    private let lock = NSLock()
+    private let createdQRCode: MihoyoQRLoginSession
+    private var qrResults: [MihoyoQRCodeStatusResult]
+    private var fetchResults: [MihoyoGameStatusResult]
+    private let defaultFetchResult: MihoyoGameStatusResult
+    private var storedQueryRequests: [MihoyoQRLoginSession] = []
+    private var storedFetchRequests: [FetchRequest] = []
+
+    var queryRequests: [MihoyoQRLoginSession] {
+        locked { storedQueryRequests }
+    }
+
+    var fetchRequests: [FetchRequest] {
+        locked { storedFetchRequests }
+    }
+
+    init(
+        createdQRCode: MihoyoQRLoginSession = MihoyoQRLoginSession(ticket: "ticket", url: "https://example.com/login", deviceID: "device"),
+        qrResults: [MihoyoQRCodeStatusResult] = [],
+        fetchResults: [MihoyoGameStatusResult] = [],
+        defaultFetchResult: MihoyoGameStatusResult = .networkError("未配置响应")
+    ) {
+        self.createdQRCode = createdQRCode
+        self.qrResults = qrResults
+        self.fetchResults = fetchResults
+        self.defaultFetchResult = defaultFetchResult
+    }
+
+    func createQRCodeLogin() async throws -> MihoyoQRLoginSession {
+        createdQRCode
+    }
+
+    func queryQRCodeLogin(_ session: MihoyoQRLoginSession) async throws -> MihoyoQRCodeStatusResult {
+        locked {
+            storedQueryRequests.append(session)
+            guard !qrResults.isEmpty else {
+                return .waitingForScan
+            }
+
+            return qrResults.removeFirst()
+        }
+    }
+
+    func fetchDailyStatus(game: MihoyoGame, session: MihoyoLoginSession) async -> MihoyoGameStatusResult {
+        locked {
+            storedFetchRequests.append(FetchRequest(game: game, session: session))
+            guard !fetchResults.isEmpty else {
+                return defaultFetchResult
+            }
+
+            return fetchResults.removeFirst()
+        }
+    }
+
+    private func locked<Value>(_ body: () -> Value) -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
+private final class FakeMihoyoSessionStore: MihoyoSessionStoring {
+    private let loadedSession: MihoyoLoginSession?
+    private(set) var savedSessions: [MihoyoLoginSession] = []
+    private(set) var clearCount = 0
+
+    init(loadedSession: MihoyoLoginSession? = nil) {
+        self.loadedSession = loadedSession
+    }
+
+    func loadSession() -> MihoyoLoginSession? {
+        loadedSession
+    }
+
+    func saveSession(_ session: MihoyoLoginSession) {
+        savedSessions.append(session)
+    }
+
+    func clearSession() {
+        clearCount += 1
     }
 }
 

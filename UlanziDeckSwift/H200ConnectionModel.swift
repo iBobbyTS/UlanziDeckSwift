@@ -8,6 +8,7 @@ final class H200ConnectionModel: ObservableObject {
     @Published private(set) var syncSummary: H200DeckSyncSummary?
     @Published private(set) var interactionState = DeckGridInteractionState(layout: .h200Prototype)
     @Published private(set) var brightnessPercent = DeckBrightnessConfiguration.defaultPercent
+    @Published private(set) var mihoyoLoginState: MihoyoLoginState = .notLoggedIn
     @Published var alert: H200ConnectionAlert?
 
     private let layout = DeckGridLayout.h200Prototype
@@ -17,8 +18,12 @@ final class H200ConnectionModel: ObservableObject {
     private let folderOpener: FinderFolderOpening
     private let smbServerConnector: SMBServerConnecting
     private let sub2APIFetcher: Sub2APIFetching
+    private let mihoyoGameService: MihoyoGameServicing
+    private let mihoyoSessionStore: MihoyoSessionStoring
     private var hasPersistedBrightnessPercent: Bool
+    private var mihoyoSession: MihoyoLoginSession?
     private let longPressDurationNanoseconds: UInt64
+    private let mihoyoLoginPollNanoseconds: UInt64
     private let deviceCommandQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200DeviceCommands")
     private var longPressTasks: [Int: Task<Void, Never>] = [:]
     private var longPressResetKeyIDs: Set<Int> = []
@@ -30,6 +35,8 @@ final class H200ConnectionModel: ObservableObject {
     private var needsFullDisplaySyncAfterStartup = false
     private var sub2APITimers: [Int: Timer] = [:]
     private var sub2APIFetchTasks: [Int: Task<Void, Never>] = [:]
+    private var mihoyoLoginTask: Task<Void, Never>?
+    private var mihoyoGameFetchTasks: [Int: Task<Void, Never>] = [:]
 
     private struct BrightnessUpdateRequest {
         let percent: Int
@@ -42,7 +49,10 @@ final class H200ConnectionModel: ObservableObject {
         folderOpener: FinderFolderOpening? = nil,
         smbServerConnector: SMBServerConnecting? = nil,
         sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher(),
-        longPressDurationNanoseconds: UInt64 = 1_000_000_000
+        mihoyoGameService: MihoyoGameServicing = MihoyoGameClient(),
+        mihoyoSessionStore: MihoyoSessionStoring = KeychainMihoyoSessionStore(),
+        longPressDurationNanoseconds: UInt64 = 1_000_000_000,
+        mihoyoLoginPollNanoseconds: UInt64 = 2_000_000_000
     ) {
         self.discovery = discovery
         self.syncer = syncer
@@ -50,11 +60,18 @@ final class H200ConnectionModel: ObservableObject {
         self.folderOpener = folderOpener ?? FinderFolderOpener()
         self.smbServerConnector = smbServerConnector ?? SMBServerConnector()
         self.sub2APIFetcher = sub2APIFetcher
+        self.mihoyoGameService = mihoyoGameService
+        self.mihoyoSessionStore = mihoyoSessionStore
         self.longPressDurationNanoseconds = longPressDurationNanoseconds
+        self.mihoyoLoginPollNanoseconds = mihoyoLoginPollNanoseconds
         interactionState = configurationStore.loadInteractionState(for: layout) ?? DeckGridInteractionState(layout: layout)
         let loadedBrightnessPercent = configurationStore.loadBrightnessPercent()
         hasPersistedBrightnessPercent = loadedBrightnessPercent != nil
         brightnessPercent = loadedBrightnessPercent ?? DeckBrightnessConfiguration.defaultPercent
+        mihoyoSession = mihoyoSessionStore.loadSession()
+        if let mihoyoSession {
+            mihoyoLoginState = .loggedIn(accountID: mihoyoSession.accountID)
+        }
         self.syncer.setInputHandler { [weak self] event in
             Task { @MainActor [weak self] in
                 self?.handleInputEvent(event)
@@ -64,6 +81,10 @@ final class H200ConnectionModel: ObservableObject {
 
     deinit {
         let syncer = syncer
+        mihoyoLoginTask?.cancel()
+        for task in mihoyoGameFetchTasks.values {
+            task.cancel()
+        }
         syncer.setInputHandler(nil)
         deviceCommandQueue.async {
             syncer.close()
@@ -84,6 +105,9 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         refresh()
+        if mihoyoSession != nil {
+            refreshAssignedMihoyoGameStatuses()
+        }
     }
 
     func retry() {
@@ -112,6 +136,8 @@ final class H200ConnectionModel: ObservableObject {
         stopSub2APITimer(for: keyID)
         sub2APIFetchTasks[keyID]?.cancel()
         sub2APIFetchTasks[keyID] = nil
+        mihoyoGameFetchTasks[keyID]?.cancel()
+        mihoyoGameFetchTasks[keyID] = nil
         persistCurrentConfiguration()
         syncKeyDisplay(keyID: keyID)
     }
@@ -160,6 +186,8 @@ final class H200ConnectionModel: ObservableObject {
             connectSMBServer(for: keyID)
         case .some(.sub2API):
             fetchSub2API(for: keyID)
+        case .some(.genshinStatus), .some(.starRailStatus), .some(.zenlessZoneStatus):
+            fetchMihoyoGameStatus(for: keyID)
         case .some(.brightness), .some(.none), nil:
             return
         }
@@ -182,6 +210,12 @@ final class H200ConnectionModel: ObservableObject {
                 startSub2APITimer(for: selectedKeyID)
             } else {
                 stopSub2APITimer(for: selectedKeyID)
+            }
+            if function.game != nil {
+                fetchMihoyoGameStatus(for: selectedKeyID)
+            } else {
+                mihoyoGameFetchTasks[selectedKeyID]?.cancel()
+                mihoyoGameFetchTasks[selectedKeyID] = nil
             }
         }
     }
@@ -262,6 +296,63 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    func beginMihoyoQRCodeLogin() {
+        mihoyoLoginTask?.cancel()
+        mihoyoSession = nil
+        mihoyoSessionStore.clearSession()
+        mihoyoLoginState = .creatingQRCode
+        markAllMihoyoKeys(result: .loginRequired)
+
+        let service = mihoyoGameService
+        let pollNanoseconds = mihoyoLoginPollNanoseconds
+        mihoyoLoginTask = Task { @MainActor [weak self] in
+            do {
+                let qrSession = try await service.createQRCodeLogin()
+                guard !Task.isCancelled else { return }
+
+                self?.mihoyoLoginState = .waitingForScan(qrSession)
+                let deadline = Date().addingTimeInterval(120)
+                while Date() < deadline {
+                    try await Task.sleep(nanoseconds: pollNanoseconds)
+                    guard !Task.isCancelled else { return }
+
+                    let result = try await service.queryQRCodeLogin(qrSession)
+                    guard !Task.isCancelled else { return }
+
+                    switch result {
+                    case .waitingForScan:
+                        self?.mihoyoLoginState = .waitingForScan(qrSession)
+                    case .scanned:
+                        self?.mihoyoLoginState = .scanned(qrSession)
+                    case let .confirmed(session):
+                        self?.finishMihoyoLogin(session)
+                        return
+                    case let .expired(message):
+                        self?.expireMihoyoLogin(message)
+                        return
+                    case let .failed(message):
+                        self?.failMihoyoLogin(message)
+                        return
+                    }
+                }
+
+                self?.expireMihoyoLogin("二维码已超时")
+            } catch is CancellationError {
+                return
+            } catch {
+                self?.failMihoyoLogin(error.localizedDescription)
+            }
+        }
+    }
+
+    func refreshSelectedMihoyoGameStatus() {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        fetchMihoyoGameStatus(for: selectedKeyID)
+    }
+
     func previewBrightnessPercent(_ percent: Int) {
         updateBrightnessPercent(percent, persist: false)
     }
@@ -294,6 +385,7 @@ final class H200ConnectionModel: ObservableObject {
         cancelAllLongPressTasks()
         cancelAllSub2APITimers()
         cancelAllSub2APIFetchTasks()
+        cancelAllMihoyoGameFetchTasks()
         deviceCommandGeneration += 1
         let generation = deviceCommandGeneration
         status = .checking
@@ -424,6 +516,81 @@ final class H200ConnectionModel: ObservableObject {
             self.interactionState.setSub2APILastResult(result, for: keyID)
             self.persistCurrentConfiguration()
             self.syncKeyDisplay(keyID: keyID)
+        }
+    }
+
+    private func fetchMihoyoGameStatus(for keyID: Int) {
+        guard let game = interactionState.mihoyoGame(for: keyID) else {
+            return
+        }
+
+        guard let session = mihoyoSession else {
+            if interactionState.setMihoyoGameLastResult(.loginRequired, for: keyID) {
+                syncKeyDisplay(keyID: keyID)
+            }
+            return
+        }
+
+        mihoyoGameFetchTasks[keyID]?.cancel()
+        let service = mihoyoGameService
+        mihoyoGameFetchTasks[keyID] = Task { @MainActor [weak self] in
+            let result = await service.fetchDailyStatus(game: game, session: session)
+            guard !Task.isCancelled else { return }
+
+            guard let self else { return }
+            self.interactionState.setMihoyoGameLastResult(result, for: keyID)
+            switch result {
+            case let .loginExpired(message):
+                self.mihoyoSession = nil
+                self.mihoyoSessionStore.clearSession()
+                self.mihoyoLoginState = .expired(message)
+                self.markAllMihoyoKeys(result: .loginExpired(message))
+                return
+            case .loginRequired:
+                self.mihoyoSession = nil
+                self.mihoyoSessionStore.clearSession()
+                self.mihoyoLoginState = .notLoggedIn
+                self.markAllMihoyoKeys(result: .loginRequired)
+                return
+            case .success, .noBoundRole, .networkError:
+                break
+            }
+            self.syncKeyDisplay(keyID: keyID)
+        }
+    }
+
+    private func finishMihoyoLogin(_ session: MihoyoLoginSession) {
+        mihoyoSession = session
+        mihoyoSessionStore.saveSession(session)
+        mihoyoLoginState = .loggedIn(accountID: session.accountID)
+        refreshAssignedMihoyoGameStatuses()
+    }
+
+    private func failMihoyoLogin(_ message: String) {
+        mihoyoSession = nil
+        mihoyoSessionStore.clearSession()
+        mihoyoLoginState = .failed(message)
+        markAllMihoyoKeys(result: .loginRequired)
+    }
+
+    private func expireMihoyoLogin(_ message: String) {
+        mihoyoSession = nil
+        mihoyoSessionStore.clearSession()
+        mihoyoLoginState = .expired(message)
+        markAllMihoyoKeys(result: .loginRequired)
+    }
+
+    private func refreshAssignedMihoyoGameStatuses() {
+        for key in layout.keys where interactionState.mihoyoGame(for: key.id) != nil {
+            fetchMihoyoGameStatus(for: key.id)
+        }
+    }
+
+    private func markAllMihoyoKeys(result: MihoyoGameStatusResult) {
+        for key in layout.keys where interactionState.mihoyoGame(for: key.id) != nil {
+            if interactionState.setMihoyoGameLastResult(result, for: key.id) {
+                syncKeyDisplay(keyID: key.id)
+            }
         }
     }
 
@@ -577,6 +744,14 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         sub2APIFetchTasks.removeAll()
+    }
+
+    private func cancelAllMihoyoGameFetchTasks() {
+        for task in mihoyoGameFetchTasks.values {
+            task.cancel()
+        }
+
+        mihoyoGameFetchTasks.removeAll()
     }
 }
 

@@ -8,6 +8,7 @@
 - [h200-startup-sync.md](h200-startup-sync.md)：启动成功后向 H200 同步 14 格数字包的实现约定。
 - [h200-input-events.md](h200-input-events.md)：H200 物理按键输入包解析和应用内按键状态映射。
 - [shortcuts.md](shortcuts.md)：macOS Shortcuts 暴露的亮度调节器动作。
+- [mihoyo-games.md](mihoyo-games.md)：米游社扫码登录和原神、星铁、绝区零状态按键功能。
 - [engineering-notes/macos-appintents-signing-runtime.md](engineering-notes/macos-appintents-signing-runtime.md)：macOS AppIntents 执行通信对签名和 TeamIdentifier 的要求。
 
 ## 更新规则

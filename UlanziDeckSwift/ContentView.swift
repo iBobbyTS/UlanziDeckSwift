@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage.CIFilterBuiltins
 import SwiftUI
 
 struct ContentView: View {
@@ -7,6 +8,7 @@ struct ContentView: View {
     let connectedDevice: H200DeviceIdentity?
     let brightnessPercent: Int
     let interactionState: DeckGridInteractionState
+    let mihoyoLoginState: MihoyoLoginState
     let onKeySelection: (Int) -> Void
     let onKeyFunctionDeletion: (Int) -> Void
     let onFunctionSelection: (DeckKeyFunction) -> Void
@@ -19,6 +21,8 @@ struct ContentView: View {
     let onSub2APITargetGroupIDChange: (Int) -> Void
     let onSub2APIRefreshIntervalChange: (Int) -> Void
     let onSub2APIBearerKeyChange: (String) -> Void
+    let onMihoyoQRCodeLoginRequest: () -> Void
+    let onMihoyoGameStatusRefresh: () -> Void
 
     private let layout = DeckGridLayout.h200Prototype
     private let previewLayoutMetrics = DeckPreviewLayoutMetrics.h200
@@ -507,6 +511,8 @@ struct ContentView: View {
                 Spacer()
             }
 
+        case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
+            mihoyoGameParameterContent(for: configuration)
         }
     }
 }
@@ -528,6 +534,11 @@ private extension ContentView {
                 title: "网站",
                 systemImageName: "globe",
                 functions: [.sub2API]
+            ),
+            FunctionSection(
+                title: "游戏",
+                systemImageName: "gamecontroller",
+                functions: [.genshinStatus, .starRailStatus, .zenlessZoneStatus]
             ),
         ]
     }
@@ -639,6 +650,159 @@ private extension ContentView {
         }
 
         onFolderPathSelection(url.path)
+    }
+
+    func mihoyoGameParameterContent(for configuration: DeckKeyConfiguration) -> some View {
+        HStack(alignment: .top, spacing: 28) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("功能")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Label(configuration.function.title, systemImage: configuration.function.systemImageName)
+                    .font(.callout.weight(.medium))
+            }
+            .frame(width: 150, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Image(systemName: mihoyoLoginStateIconName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(mihoyoLoginStateColor)
+                        .frame(width: 18)
+
+                    Text(mihoyoLoginState.statusText)
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(mihoyoLoginStateColor)
+
+                    Spacer(minLength: 0)
+                }
+
+                if let qrCodeURLString = mihoyoLoginState.qrCodeURLString {
+                    MihoyoQRCodeView(payload: qrCodeURLString)
+                        .frame(width: 132, height: 132)
+                        .padding(8)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+                        }
+                }
+
+                if let gameStatus = configuration.mihoyoGame.lastResult {
+                    mihoyoGameStatusSummary(gameStatus)
+                }
+            }
+            .frame(maxWidth: 360, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 10) {
+                Button(action: onMihoyoQRCodeLoginRequest) {
+                    Label(mihoyoLoginState.loginButtonTitle, systemImage: "qrcode")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(mihoyoLoginState == .creatingQRCode)
+
+                Button(action: onMihoyoGameStatusRefresh) {
+                    Label("刷新状态", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(!mihoyoLoginState.canRefreshGameStatus)
+            }
+
+            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    func mihoyoGameStatusSummary(_ result: MihoyoGameStatusResult) -> some View {
+        switch result {
+        case let .success(status):
+            Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 8) {
+                GridRow {
+                    Text("角色")
+                        .foregroundStyle(.secondary)
+                    Text(status.role.displayName)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                GridRow {
+                    Text(status.staminaName)
+                        .foregroundStyle(.secondary)
+                    Text(status.staminaValueText)
+                        .monospacedDigit()
+                }
+                GridRow {
+                    Text(status.dailyName)
+                        .foregroundStyle(.secondary)
+                    Text(status.dailyValueText)
+                        .monospacedDigit()
+                }
+                GridRow {
+                    Text("恢复")
+                        .foregroundStyle(.secondary)
+                    Text(status.recoverDescription)
+                }
+                GridRow {
+                    Text("来源")
+                        .foregroundStyle(.secondary)
+                    Text(status.source.displayName)
+                }
+            }
+            .font(.caption)
+
+            if status.staminaMayBeCappedBySource {
+                Label("该接口可能返回受限体力值", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+        case .loginRequired:
+            Label("需要登录后查询", systemImage: "person.crop.circle.badge.exclamationmark")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case let .loginExpired(message):
+            Label(message, systemImage: "person.crop.circle.badge.xmark")
+                .font(.caption)
+                .foregroundStyle(.red)
+        case let .noBoundRole(game):
+            Label("未找到 \(game.displayName) 绑定角色", systemImage: "person.crop.circle.badge.questionmark")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        case let .networkError(message):
+            Label(message, systemImage: "wifi.exclamationmark")
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+    }
+
+    var mihoyoLoginStateIconName: String {
+        switch mihoyoLoginState {
+        case .notLoggedIn:
+            return "person.crop.circle.badge.exclamationmark"
+        case .creatingQRCode:
+            return "qrcode"
+        case .waitingForScan:
+            return "qrcode.viewfinder"
+        case .scanned:
+            return "checkmark.circle"
+        case .loggedIn:
+            return "person.crop.circle.fill.badge.checkmark"
+        case .failed:
+            return "xmark.octagon"
+        case .expired:
+            return "clock.badge.exclamationmark"
+        }
+    }
+
+    var mihoyoLoginStateColor: Color {
+        switch mihoyoLoginState {
+        case .loggedIn:
+            return .green
+        case .failed, .expired:
+            return .red
+        case .notLoggedIn, .creatingQRCode, .waitingForScan, .scanned:
+            return .secondary
+        }
     }
 
 }
@@ -801,6 +965,43 @@ private struct DeckKeyRenderedImage: View, Equatable {
     }
 }
 
+private struct MihoyoQRCodeView: View {
+    let payload: String
+
+    private let context = CIContext()
+    private let filter = CIFilter.qrCodeGenerator()
+
+    var body: some View {
+        if let image = makeImage() {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.none)
+                .aspectRatio(1, contentMode: .fit)
+                .accessibilityLabel("米游社登录二维码")
+        } else {
+            Image(systemName: "qrcode")
+                .font(.system(size: 48, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("二维码生成失败")
+        }
+    }
+
+    private func makeImage() -> NSImage? {
+        filter.message = Data(payload.utf8)
+        filter.correctionLevel = "M"
+        guard let outputImage = filter.outputImage else {
+            return nil
+        }
+
+        let scaledImage = outputImage.transformed(by: CGAffineTransform(scaleX: 8, y: 8))
+        guard let cgImage = context.createCGImage(scaledImage, from: scaledImage.extent) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: 256, height: 256))
+    }
+}
+
 #Preview {
     ContentView(
         connectedDevice: H200DeviceIdentity(
@@ -817,6 +1018,7 @@ private struct DeckKeyRenderedImage: View, Equatable {
         ),
         brightnessPercent: DeckBrightnessConfiguration.defaultPercent,
         interactionState: DeckGridInteractionState(layout: .h200Prototype),
+        mihoyoLoginState: .notLoggedIn,
         onKeySelection: { _ in },
         onKeyFunctionDeletion: { _ in },
         onFunctionSelection: { _ in },
@@ -828,6 +1030,8 @@ private struct DeckKeyRenderedImage: View, Equatable {
         onSub2APIBaseURLChange: { _ in },
         onSub2APITargetGroupIDChange: { _ in },
         onSub2APIRefreshIntervalChange: { _ in },
-        onSub2APIBearerKeyChange: { _ in }
+        onSub2APIBearerKeyChange: { _ in },
+        onMihoyoQRCodeLoginRequest: {},
+        onMihoyoGameStatusRefresh: {}
     )
 }

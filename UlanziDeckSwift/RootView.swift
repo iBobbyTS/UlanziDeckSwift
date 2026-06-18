@@ -11,7 +11,9 @@ struct RootView: View {
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         folderOpener: FinderFolderOpening? = nil,
         smbServerConnector: SMBServerConnecting? = nil,
-        sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher()
+        sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher(),
+        mihoyoGameService: MihoyoGameServicing = MihoyoGameClient(),
+        mihoyoSessionStore: MihoyoSessionStoring = KeychainMihoyoSessionStore()
     ) {
         _connectionModel = StateObject(wrappedValue: H200ConnectionModel(
             discovery: discovery,
@@ -19,7 +21,9 @@ struct RootView: View {
             configurationStore: configurationStore,
             folderOpener: folderOpener,
             smbServerConnector: smbServerConnector,
-            sub2APIFetcher: sub2APIFetcher
+            sub2APIFetcher: sub2APIFetcher,
+            mihoyoGameService: mihoyoGameService,
+            mihoyoSessionStore: mihoyoSessionStore
         ))
     }
 
@@ -28,6 +32,7 @@ struct RootView: View {
             connectedDevice: connectionModel.connectedDevice,
             brightnessPercent: connectionModel.brightnessPercent,
             interactionState: connectionModel.interactionState,
+            mihoyoLoginState: connectionModel.mihoyoLoginState,
             onKeySelection: { keyID in
                 connectionModel.selectKey(keyID: keyID)
             },
@@ -63,6 +68,12 @@ struct RootView: View {
             },
             onSub2APIBearerKeyChange: { bearerKey in
                 connectionModel.setSelectedSub2APIBearerKey(bearerKey)
+            },
+            onMihoyoQRCodeLoginRequest: {
+                connectionModel.beginMihoyoQRCodeLogin()
+            },
+            onMihoyoGameStatusRefresh: {
+                connectionModel.refreshSelectedMihoyoGameStatus()
             }
         )
             .background {
