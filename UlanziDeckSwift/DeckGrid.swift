@@ -502,21 +502,47 @@ nonisolated enum DeckBrightnessConfiguration {
     }
 }
 
+nonisolated enum DeckKeyMihoyoGameRefreshConfiguration {
+    static let defaultIntervalMinutes = 30
+    static let minimumIntervalMinutes = 1
+    static let maximumIntervalMinutes = 1_440
+
+    nonisolated static func clamped(_ minutes: Int) -> Int {
+        min(maximumIntervalMinutes, max(minimumIntervalMinutes, minutes))
+    }
+}
+
 nonisolated struct DeckKeyMihoyoGameConfiguration: Codable, Equatable {
+    var refreshIntervalMinutes: Int
+
     /// 最近一次查询的结果。不参与持久化，反序列化时使用空值。
     var lastResult: MihoyoGameStatusResult?
 
-    init(lastResult: MihoyoGameStatusResult? = nil) {
+    init(
+        refreshIntervalMinutes: Int = DeckKeyMihoyoGameRefreshConfiguration.defaultIntervalMinutes,
+        lastResult: MihoyoGameStatusResult? = nil
+    ) {
+        self.refreshIntervalMinutes = DeckKeyMihoyoGameRefreshConfiguration.clamped(refreshIntervalMinutes)
         self.lastResult = lastResult
     }
 
-    enum CodingKeys: CodingKey {}
+    enum CodingKeys: CodingKey {
+        case refreshIntervalMinutes
+    }
 
     init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        refreshIntervalMinutes = DeckKeyMihoyoGameRefreshConfiguration.clamped(
+            try container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes)
+                ?? DeckKeyMihoyoGameRefreshConfiguration.defaultIntervalMinutes
+        )
         lastResult = nil
     }
 
-    func encode(to encoder: Encoder) throws {}
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
+    }
 }
 
 nonisolated struct DeckKeyConfiguration: Codable, Equatable {
@@ -698,6 +724,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations[keyID, default: .tallyDefault].function.game
     }
 
+    func mihoyoGameConfiguration(for keyID: Int) -> DeckKeyMihoyoGameConfiguration {
+        configurations[keyID, default: .tallyDefault].mihoyoGame
+    }
+
     @discardableResult
     mutating func setSub2APIBaseURL(_ baseURL: String, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
@@ -771,6 +801,20 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         configurations[keyID, default: .tallyDefault].mihoyoGame.lastResult = result
+        return true
+    }
+
+    @discardableResult
+    mutating func setMihoyoGameRefreshIntervalMinutes(_ minutes: Int, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function.game != nil
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].mihoyoGame.refreshIntervalMinutes =
+            DeckKeyMihoyoGameRefreshConfiguration.clamped(minutes)
         return true
     }
 

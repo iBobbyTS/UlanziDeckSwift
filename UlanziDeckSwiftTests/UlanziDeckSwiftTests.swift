@@ -349,6 +349,32 @@ struct UlanziDeckSwiftTests {
         #expect(store.loadInteractionState(for: .h200Prototype) == nil)
     }
 
+    @Test func mihoyoGameRefreshIntervalDefaultsClampsAndPersists() throws {
+        let legacyData = Data(#"{"function":"genshinStatus"}"#.utf8)
+        let legacyConfiguration = try JSONDecoder().decode(DeckKeyConfiguration.self, from: legacyData)
+        #expect(legacyConfiguration.mihoyoGame.refreshIntervalMinutes == 30)
+
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.genshinStatus, to: 3)
+
+        #expect(state.mihoyoGameConfiguration(for: 3).refreshIntervalMinutes == 30)
+        let didSetMinimumInterval = state.setMihoyoGameRefreshIntervalMinutes(0, for: 3)
+        #expect(didSetMinimumInterval)
+        #expect(state.mihoyoGameConfiguration(for: 3).refreshIntervalMinutes == 1)
+        let didSetMaximumInterval = state.setMihoyoGameRefreshIntervalMinutes(2_000, for: 3)
+        #expect(didSetMaximumInterval)
+        #expect(state.mihoyoGameConfiguration(for: 3).refreshIntervalMinutes == 1_440)
+        let didSetInterval = state.setMihoyoGameRefreshIntervalMinutes(45, for: 3)
+        #expect(didSetInterval)
+
+        let configuration = try #require(state.configuration(for: 3))
+        let data = try JSONEncoder().encode(configuration)
+        let restored = try JSONDecoder().decode(DeckKeyConfiguration.self, from: data)
+        #expect(restored.mihoyoGame.refreshIntervalMinutes == 45)
+        #expect(restored.mihoyoGame.lastResult == nil)
+    }
+
     @Test func h200ProtocolInterfaceMatchesObservedReportShape() {
         let identity = Self.protocolInterfaceIdentity()
 
@@ -1664,12 +1690,14 @@ struct UlanziDeckSwiftTests {
         let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: "deckConfiguration")
         var state = DeckGridInteractionState(layout: layout)
         state.assign(.genshinStatus, to: 3)
+        state.setMihoyoGameRefreshIntervalMinutes(45, for: 3)
         state.setMihoyoGameLastResult(.success(Self.mihoyoStatus(game: .genshin)), for: 3)
 
         store.saveInteractionState(state, for: layout)
 
         let restored = try #require(store.loadInteractionState(for: layout))
         #expect(restored.configuration(for: 3)?.function == .genshinStatus)
+        #expect(restored.configuration(for: 3)?.mihoyoGame.refreshIntervalMinutes == 45)
         #expect(restored.configuration(for: 3)?.mihoyoGame.lastResult == nil)
     }
 
@@ -1703,6 +1731,41 @@ struct UlanziDeckSwiftTests {
         #expect(mihoyoService.fetchRequests.map(\.game) == [.genshin])
         #expect(model.interactionState.configuration(for: 4)?.mihoyoGame.lastResult == .success(status))
         #expect(syncer.partialDisplays.last?.first?.subtitle == "每日委托 4/4")
+    }
+
+    @MainActor
+    @Test func gameRefreshIntervalAutomaticallyRefetchesStatus() async throws {
+        let session = Self.mihoyoSession()
+        let firstStatus = Self.mihoyoStatus(game: .starRail, currentStamina: 94, maxStamina: 300, dailyCurrent: 200, dailyMax: 500)
+        let secondStatus = Self.mihoyoStatus(game: .starRail, currentStamina: 120, maxStamina: 300, dailyCurrent: 500, dailyMax: 500)
+        let mihoyoService = FakeMihoyoGameService(
+            fetchResults: [.success(firstStatus), .success(secondStatus)],
+            defaultFetchResult: .success(secondStatus)
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.starRailStatus, to: 6)
+        loadedState.setMihoyoGameRefreshIntervalMinutes(1, for: 6)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            mihoyoGameService: mihoyoService,
+            mihoyoSessionStore: FakeMihoyoSessionStore(loadedSession: session),
+            mihoyoGameRefreshMinuteDuration: 0.01
+        )
+
+        model.checkOnLaunch()
+
+        try await Self.waitUntil {
+            mihoyoService.fetchRequests.count >= 2
+                && model.interactionState.configuration(for: 6)?.mihoyoGame.lastResult == .success(secondStatus)
+        }
+
+        #expect(Array(mihoyoService.fetchRequests.prefix(2).map(\.game)) == [.starRail, .starRail])
+        #expect(model.interactionState.configuration(for: 6)?.mihoyoGame.lastResult == .success(secondStatus))
+        model.clearKeyFunction(keyID: 6)
+        #expect(model.interactionState.configuration(for: 6)?.mihoyoGame.lastResult == nil)
     }
 
     @MainActor

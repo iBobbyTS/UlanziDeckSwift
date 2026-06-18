@@ -75,6 +75,9 @@ struct RootView: View {
             onMihoyoQRCodeLoginRequest: {
                 connectionModel.beginMihoyoQRCodeLogin()
             },
+            onMihoyoGameRefreshIntervalChange: { minutes in
+                connectionModel.setSelectedMihoyoGameRefreshIntervalMinutes(minutes)
+            },
             onMihoyoGameStatusRefresh: {
                 connectionModel.refreshSelectedMihoyoGameStatus()
             }

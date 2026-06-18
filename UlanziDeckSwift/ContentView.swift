@@ -23,6 +23,7 @@ struct ContentView: View {
     let onSub2APIRefreshIntervalChange: (Int) -> Void
     let onSub2APIBearerKeyChange: (String) -> Void
     let onMihoyoQRCodeLoginRequest: () -> Void
+    let onMihoyoGameRefreshIntervalChange: (Int) -> Void
     let onMihoyoGameStatusRefresh: () -> Void
 
     private let layout = DeckGridLayout.h200Prototype
@@ -620,6 +621,18 @@ private extension ContentView {
         )
     }
 
+    var selectedMihoyoGameRefreshIntervalMinutesBinding: Binding<Int> {
+        Binding(
+            get: {
+                selectedConfiguration?.mihoyoGame.refreshIntervalMinutes
+                    ?? DeckKeyMihoyoGameRefreshConfiguration.defaultIntervalMinutes
+            },
+            set: { minutes in
+                onMihoyoGameRefreshIntervalChange(minutes)
+            }
+        )
+    }
+
     var brightnessPercentSliderBinding: Binding<Double> {
         Binding(
             get: {
@@ -694,6 +707,25 @@ private extension ContentView {
 
                 if let gameStatus = configuration.mihoyoGame.lastResult {
                     mihoyoGameStatusSummary(gameStatus)
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("刷新间隔（分钟）")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 10) {
+                        TextField("刷新间隔", value: selectedMihoyoGameRefreshIntervalMinutesBinding, format: .number)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 96)
+
+                        Stepper(
+                            "刷新间隔",
+                            value: selectedMihoyoGameRefreshIntervalMinutesBinding,
+                            in: DeckKeyMihoyoGameRefreshConfiguration.minimumIntervalMinutes...DeckKeyMihoyoGameRefreshConfiguration.maximumIntervalMinutes
+                        )
+                        .labelsHidden()
+                    }
                 }
             }
             .frame(maxWidth: 360, alignment: .leading)
@@ -1103,6 +1135,7 @@ private struct MihoyoQRCodeView: View {
         onSub2APIRefreshIntervalChange: { _ in },
         onSub2APIBearerKeyChange: { _ in },
         onMihoyoQRCodeLoginRequest: {},
+        onMihoyoGameRefreshIntervalChange: { _ in },
         onMihoyoGameStatusRefresh: {}
     )
 }
