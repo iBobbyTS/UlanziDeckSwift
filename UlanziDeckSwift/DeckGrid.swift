@@ -60,6 +60,8 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let displayMode: DeckKeyDisplayMode
     let title: String
     let subtitle: String
+    let mihoyoGame: MihoyoGame?
+    let mihoyoGameButtonContent: MihoyoGameButtonContent?
     let isSelected: Bool
     let isPressed: Bool
 
@@ -69,11 +71,15 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         column = key.column
         columnSpan = key.columnSpan
         displayMode = key.columnSpan > 1 ? configuration.displayMode : .function
+        let configuredMihoyoGame = configuration.function.game
+        var mihoyoGameButtonContent: MihoyoGameButtonContent?
 
         if key.columnSpan > 1 && configuration.displayMode != .function {
             title = configuration.displayMode.previewTitle
             subtitle = configuration.displayMode.previewSubtitle
+            mihoyoGame = nil
         } else {
+            mihoyoGame = configuredMihoyoGame
             switch configuration.function {
             case .none:
                 title = ""
@@ -111,6 +117,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 if case let .success(status) = configuration.mihoyoGame.lastResult {
                     title = status.buttonTitle
                     subtitle = status.buttonSubtitle
+                    mihoyoGameButtonContent = status.buttonContent
                 } else if case .loginRequired = configuration.mihoyoGame.lastResult {
                     title = configuration.function.game?.shortDisplayName ?? "游戏"
                     subtitle = "未登录"
@@ -129,6 +136,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 }
             }
         }
+        self.mihoyoGameButtonContent = mihoyoGameButtonContent
         self.isSelected = isSelected
         self.isPressed = isPressed
     }
@@ -150,6 +158,8 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             displayMode: displayMode,
             title: title,
             subtitle: subtitle,
+            mihoyoGame: mihoyoGame,
+            mihoyoGameButtonContent: mihoyoGameButtonContent,
             devicePixelSize: devicePixelSize
         )
     }
@@ -163,6 +173,8 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let displayMode: DeckKeyDisplayMode
     let title: String
     let subtitle: String
+    let mihoyoGame: MihoyoGame?
+    let mihoyoGameButtonContent: MihoyoGameButtonContent?
     let devicePixelSize: H200DeviceTarget.PixelSize
 }
 

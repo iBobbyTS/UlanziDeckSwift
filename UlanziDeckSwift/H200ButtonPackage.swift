@@ -241,15 +241,14 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
     }
 
     private func draw(display: DeckKeyDisplay, in rect: NSRect) {
-        Self.buttonBackgroundColor.setFill()
-        rect.fill()
+        drawBackground(for: display, in: rect)
 
         let inset = rect.height * 0.08
         let cardRect = rect.insetBy(dx: inset, dy: inset)
-        let radius = rect.height * 0.12
-        let cardPath = NSBezierPath(roundedRect: cardRect, xRadius: radius, yRadius: radius)
-        Self.buttonBackgroundColor.setFill()
-        cardPath.fill()
+        if let content = display.mihoyoGameButtonContent {
+            drawMihoyoGameContent(content, in: cardRect, buttonRect: rect)
+            return
+        }
 
         drawCenteredText(
             display.title,
@@ -265,15 +264,134 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         )
     }
 
-    private func drawCenteredText(_ text: String, font: NSFont, color: NSColor, rect: NSRect) {
+    private func drawBackground(for display: DeckKeyDisplay, in rect: NSRect) {
+        guard let game = display.mihoyoGame,
+              let image = NSImage(named: NSImage.Name(game.buttonBackgroundAssetName))
+        else {
+            Self.buttonBackgroundColor.setFill()
+            rect.fill()
+            return
+        }
+
+        let imageRect = NSRect(origin: .zero, size: image.size)
+        image.draw(
+            in: rect,
+            from: imageRect,
+            operation: .copy,
+            fraction: 1,
+            respectFlipped: false,
+            hints: [.interpolation: NSImageInterpolation.high]
+        )
+        NSColor(calibratedWhite: 0, alpha: 0.38).setFill()
+        rect.fill()
+    }
+
+    private func drawMihoyoGameContent(
+        _ content: MihoyoGameButtonContent,
+        in rect: NSRect,
+        buttonRect: NSRect
+    ) {
+        let labelFont = NSFont.systemFont(ofSize: buttonRect.height * 0.105, weight: .semibold)
+        let valueFont = NSFont.systemFont(ofSize: buttonRect.height * 0.235, weight: .heavy)
+        let valueSuffixFont = NSFont.systemFont(ofSize: buttonRect.height * 0.145, weight: .heavy)
+        let labelHeight = buttonRect.height * 0.13
+        let valueHeight = buttonRect.height * 0.25
+        let gap = buttonRect.height * 0.035
+        let totalHeight = labelHeight + valueHeight + gap + labelHeight + valueHeight
+        let top = rect.midY + totalHeight / 2
+        let shadow = textShadow()
+
+        drawCenteredText(
+            content.staminaLabel,
+            font: labelFont,
+            color: NSColor(calibratedWhite: 0.88, alpha: 1),
+            rect: NSRect(x: rect.minX, y: top - labelHeight, width: rect.width, height: labelHeight),
+            shadow: shadow
+        )
+        drawCenteredMetricValue(
+            content.staminaValue,
+            currentFont: valueFont,
+            maximumFont: valueSuffixFont,
+            color: .white,
+            rect: NSRect(x: rect.minX, y: top - labelHeight - valueHeight, width: rect.width, height: valueHeight),
+            shadow: shadow
+        )
+        drawCenteredText(
+            content.dailyLabel,
+            font: labelFont,
+            color: NSColor(calibratedWhite: 0.88, alpha: 1),
+            rect: NSRect(
+                x: rect.minX,
+                y: top - labelHeight - valueHeight - gap - labelHeight,
+                width: rect.width,
+                height: labelHeight
+            ),
+            shadow: shadow
+        )
+        drawCenteredMetricValue(
+            content.dailyValue,
+            currentFont: valueFont,
+            maximumFont: valueSuffixFont,
+            color: .white,
+            rect: NSRect(x: rect.minX, y: top - totalHeight, width: rect.width, height: valueHeight),
+            shadow: shadow
+        )
+    }
+
+    private func textShadow() -> NSShadow {
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor(calibratedWhite: 0, alpha: 0.72)
+        shadow.shadowBlurRadius = 3
+        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        return shadow
+    }
+
+    private func drawCenteredText(
+        _ text: String,
+        font: NSFont,
+        color: NSColor,
+        rect: NSRect,
+        shadow: NSShadow? = nil
+    ) {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
-        let attributes: [NSAttributedString.Key: Any] = [
+        var attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color,
             .paragraphStyle: paragraph,
         ]
+        attributes[.shadow] = shadow
         (text as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes)
+    }
+
+    private func drawCenteredMetricValue(
+        _ text: String,
+        currentFont: NSFont,
+        maximumFont: NSFont,
+        color: NSColor,
+        rect: NSRect,
+        shadow: NSShadow? = nil
+    ) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        let value = NSMutableAttributedString(string: text, attributes: [
+            .font: currentFont,
+            .foregroundColor: color,
+            .paragraphStyle: paragraph,
+        ])
+
+        if let slashRange = text.range(of: "/") {
+            let suffixRange = NSRange(slashRange.lowerBound..<text.endIndex, in: text)
+            value.addAttributes([
+                .font: maximumFont,
+                .baselineOffset: (currentFont.pointSize - maximumFont.pointSize) * 0.16,
+            ], range: suffixRange)
+        }
+
+        if let shadow {
+            value.addAttribute(.shadow, value: shadow, range: NSRange(location: 0, length: value.length))
+        }
+        value.draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading])
     }
 }
 

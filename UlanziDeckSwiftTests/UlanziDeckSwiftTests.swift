@@ -1274,20 +1274,66 @@ struct UlanziDeckSwiftTests {
         var state = DeckGridInteractionState(layout: layout)
         state.clearFunction(keyID: 4)
         let display = state.display(for: layout.keys[3])
-        let png = try H200ButtonIconRenderer().pngData(for: display)
-        let image = try #require(NSBitmapImageRep(data: png))
-        let samplePoints = [
-            (x: 1, y: 1),
-            (x: display.devicePixelSize.width / 12, y: display.devicePixelSize.height / 2),
-            (x: display.devicePixelSize.width / 2, y: display.devicePixelSize.height / 2),
+
+        try Self.expectBlackButtonBackground(for: display)
+    }
+
+    @Test func iconRendererUsesBlackBackgroundForEveryNonGameFunction() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.openFolder, to: 1)
+        state.setFolderPath("/Users/ibobby/Documents", for: 1)
+        state.assign(.connectSMBServer, to: 2)
+        state.setSMBServerAddress("server/share", for: 2)
+        state.assign(.sub2API, to: 3)
+        state.setSub2APITargetGroupID(1215, for: 3)
+        state.setSub2APILastResult(.success(item: Sub2APICapacityItem(
+            groupID: 1215,
+            groupName: "PLU",
+            groupPlatform: "claude",
+            concurrencyUsed: 10,
+            concurrencyMax: 3188,
+            sessionsUsed: 0,
+            sessionsMax: 0,
+            rpmUsed: 0,
+            rpmMax: 0
+        )), for: 3)
+        state.setTallyDefaultValue(7, for: 4)
+
+        for key in layout.keys.prefix(4) {
+            try Self.expectBlackButtonBackground(for: state.display(for: key))
+        }
+    }
+
+    @Test func iconRendererUsesMihoyoBlurredBackgrounds() throws {
+        let layout = DeckGridLayout.h200Prototype
+        let cases: [(DeckKeyFunction, MihoyoGame, Int, Int, Int, Int)] = [
+            (.genshinStatus, .genshin, 119, 200, 4, 4),
+            (.starRailStatus, .starRail, 240, 240, 500, 500),
+            (.zenlessZoneStatus, .zenlessZoneZero, 320, 240, 400, 400),
         ]
 
-        for point in samplePoints {
-            let color = try #require(image.colorAt(x: point.x, y: point.y)?.usingColorSpace(.deviceRGB))
+        for (function, game, currentStamina, maxStamina, dailyCurrent, dailyMax) in cases {
+            let status = Self.mihoyoStatus(
+                game: game,
+                currentStamina: currentStamina,
+                maxStamina: maxStamina,
+                dailyCurrent: dailyCurrent,
+                dailyMax: dailyMax
+            )
+            var state = DeckGridInteractionState(layout: layout)
+            state.assign(function, to: 4)
+            state.setMihoyoGameLastResult(.success(status), for: 4)
+            let display = state.display(for: layout.keys[3])
 
-            #expect(color.redComponent < 0.001)
-            #expect(color.greenComponent < 0.001)
-            #expect(color.blueComponent < 0.001)
+            let png = try H200ButtonIconRenderer().pngData(for: display)
+            let image = try #require(NSBitmapImageRep(data: png))
+            let color = try #require(image.colorAt(x: 12, y: 12)?.usingColorSpace(.deviceRGB))
+
+            #expect(display.mihoyoGame == game)
+            #expect(display.mihoyoGameButtonContent?.staminaValue == "\(currentStamina)/\(maxStamina)")
+            #expect(display.mihoyoGameButtonContent?.dailyValue == "\(dailyCurrent)/\(dailyMax)")
+            #expect(color.redComponent + color.greenComponent + color.blueComponent > 0.12)
             #expect(color.alphaComponent > 0.999)
         }
     }
@@ -1540,8 +1586,15 @@ struct UlanziDeckSwiftTests {
         #expect(status.dailyCurrent == 400)
         #expect(status.dailyMax == 400)
         #expect(status.dailyDone == true)
-        #expect(status.buttonTitle == "电量 320")
-        #expect(status.buttonSubtitle == "活跃 400/400")
+        #expect(status.buttonTitle == "电量 320/240")
+        #expect(status.buttonSubtitle == "每日活跃度 400/400")
+        #expect(status.buttonContent == MihoyoGameButtonContent(
+            game: .zenlessZoneZero,
+            staminaLabel: "电量",
+            staminaValue: "320/240",
+            dailyLabel: "每日活跃度",
+            dailyValue: "400/400"
+        ))
     }
 
     @Test func mihoyoJSONParsesNumericRetcodeWithoutTreatingItAsBool() throws {
@@ -1576,12 +1629,22 @@ struct UlanziDeckSwiftTests {
 
         #expect(display.title == "绝区零")
         #expect(display.subtitle == "未查询")
+        #expect(display.mihoyoGame == .zenlessZoneZero)
+        #expect(display.mihoyoGameButtonContent == nil)
 
         state.setMihoyoGameLastResult(.success(status), for: 5)
         display = state.display(for: layout.keys[4])
 
-        #expect(display.title == "电量 320")
-        #expect(display.subtitle == "活跃 400/400")
+        #expect(display.title == "电量 320/240")
+        #expect(display.subtitle == "每日活跃度 400/400")
+        #expect(display.mihoyoGame == .zenlessZoneZero)
+        #expect(display.mihoyoGameButtonContent == MihoyoGameButtonContent(
+            game: .zenlessZoneZero,
+            staminaLabel: "电量",
+            staminaValue: "320/240",
+            dailyLabel: "每日活跃度",
+            dailyValue: "400/400"
+        ))
 
         state.setMihoyoGameLastResult(.loginExpired("登录已失效"), for: 5)
         display = state.display(for: layout.keys[4])
@@ -1633,13 +1696,13 @@ struct UlanziDeckSwiftTests {
         model.assignSelectedFunction(.genshinStatus)
 
         try await Self.waitUntil {
-            syncer.partialDisplays.last?.first?.title == "树脂 180"
+            syncer.partialDisplays.last?.first?.title == "树脂 180/200"
         }
 
         #expect(model.mihoyoLoginState == .loggedIn(accountID: session.accountID))
         #expect(mihoyoService.fetchRequests.map(\.game) == [.genshin])
         #expect(model.interactionState.configuration(for: 4)?.mihoyoGame.lastResult == .success(status))
-        #expect(syncer.partialDisplays.last?.first?.subtitle == "委托 4/4")
+        #expect(syncer.partialDisplays.last?.first?.subtitle == "每日委托 4/4")
     }
 
     @MainActor
@@ -1735,6 +1798,25 @@ struct UlanziDeckSwiftTests {
             | (Int(packet[5]) << 8)
             | (Int(packet[6]) << 16)
             | (Int(packet[7]) << 24)
+    }
+
+    private static func expectBlackButtonBackground(for display: DeckKeyDisplay) throws {
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+        let samplePoints = [
+            (x: 1, y: 1),
+            (x: display.devicePixelSize.width / 12, y: display.devicePixelSize.height / 2),
+            (x: display.devicePixelSize.width / 2, y: display.devicePixelSize.height / 12),
+        ]
+
+        for point in samplePoints {
+            let color = try #require(image.colorAt(x: point.x, y: point.y)?.usingColorSpace(.deviceRGB))
+
+            #expect(color.redComponent < 0.001)
+            #expect(color.greenComponent < 0.001)
+            #expect(color.blueComponent < 0.001)
+            #expect(color.alphaComponent > 0.999)
+        }
     }
 
     private static func inputReport(state: UInt8, index: UInt8, type: UInt8, action: UInt8) -> Data {

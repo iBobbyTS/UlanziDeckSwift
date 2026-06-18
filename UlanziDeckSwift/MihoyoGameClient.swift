@@ -47,7 +47,7 @@ nonisolated enum MihoyoGame: String, Codable, Equatable, CaseIterable, Sendable 
         case .genshin:
             return "树脂"
         case .starRail:
-            return "开拓"
+            return "开拓力"
         case .zenlessZoneZero:
             return "电量"
         }
@@ -56,11 +56,22 @@ nonisolated enum MihoyoGame: String, Codable, Equatable, CaseIterable, Sendable 
     var dailyShortName: String {
         switch self {
         case .genshin:
-            return "委托"
+            return "每日委托"
         case .starRail:
-            return "实训"
+            return "每日实训"
         case .zenlessZoneZero:
-            return "活跃"
+            return "每日活跃度"
+        }
+    }
+
+    var buttonBackgroundAssetName: String {
+        switch self {
+        case .genshin:
+            return "MihoyoGenshinBackground"
+        case .starRail:
+            return "MihoyoStarRailBackground"
+        case .zenlessZoneZero:
+            return "MihoyoZenlessZoneZeroBackground"
         }
     }
 }
@@ -122,11 +133,21 @@ nonisolated struct MihoyoDailyStatus: Equatable, Sendable {
     }
 
     var buttonTitle: String {
-        "\(game.staminaShortName) \(currentStamina.map(String.init) ?? "--")"
+        "\(game.staminaShortName) \(staminaValueText)"
     }
 
     var buttonSubtitle: String {
         "\(game.dailyShortName) \(dailyValueText)"
+    }
+
+    var buttonContent: MihoyoGameButtonContent {
+        MihoyoGameButtonContent(
+            game: game,
+            staminaLabel: game.staminaShortName,
+            staminaValue: staminaValueText,
+            dailyLabel: game.dailyShortName,
+            dailyValue: dailyValueText
+        )
     }
 
     var recoverDescription: String {
@@ -169,6 +190,14 @@ nonisolated struct MihoyoDailyStatus: Equatable, Sendable {
 
         return "\(max(1, minutes))分钟"
     }
+}
+
+nonisolated struct MihoyoGameButtonContent: Equatable, Sendable {
+    let game: MihoyoGame
+    let staminaLabel: String
+    let staminaValue: String
+    let dailyLabel: String
+    let dailyValue: String
 }
 
 nonisolated enum MihoyoGameStatusResult: Equatable, Sendable {

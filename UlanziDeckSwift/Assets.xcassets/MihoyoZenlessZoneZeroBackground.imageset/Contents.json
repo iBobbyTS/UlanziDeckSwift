@@ -1,0 +1,13 @@
+{
+  "images" : [
+    {
+      "filename" : "mihoyo-zenless-zone-zero-background.png",
+      "idiom" : "universal",
+      "scale" : "1x"
+    }
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  }
+}
