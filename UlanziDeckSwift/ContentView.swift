@@ -666,8 +666,10 @@ private extension ContentView {
             return "正在获取号池..."
         case let .success(items):
             return items.isEmpty ? "服务器没有返回号池" : "已获取 \(items.count) 个号池"
+        case .invalidToken:
+            return "Bearer Key 无效"
         case .tokenExpired:
-            return "Bearer Key 已过期或无权限"
+            return "Bearer Key 已过期"
         case let .networkError(message):
             return "获取号池失败：\(message)"
         }
@@ -679,7 +681,7 @@ private extension ContentView {
         }
 
         switch state {
-        case .tokenExpired, .networkError:
+        case .invalidToken, .tokenExpired, .networkError:
             return true
         case .idle, .loading, .success:
             return false

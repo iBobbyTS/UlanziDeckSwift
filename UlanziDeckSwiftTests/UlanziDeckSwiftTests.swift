@@ -207,6 +207,20 @@ struct UlanziDeckSwiftTests {
         #expect(initiallySelectedIdentity != updatedContentIdentity)
     }
 
+    @Test func configuredSub2APIWithoutLoadedResultStillDisplaysUnconfiguredState() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.assign(.sub2API, to: 3)
+        state.setSub2APIBaseURL("api.example.com", for: 3)
+        state.setSub2APIBearerKey("token", for: 3)
+        state.setSub2APITargetGroupID(1215, for: 3)
+        let display = state.display(for: layout.keys[2])
+
+        #expect(display.title == "号池")
+        #expect(display.subtitle == "未配置")
+    }
+
     @Test func clearingFunctionMakesKeyEmptyAndInactive() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
@@ -390,6 +404,23 @@ struct UlanziDeckSwiftTests {
         #expect(response.data?.total.concurrencyMax == 16171)
     }
 
+    @Test func sub2APIStringTokenErrorCodesDecodeAsBusinessErrors() throws {
+        let invalidTokenData = Data(#"{"code":"INVALID_TOKEN","message":"Invalid token"}"#.utf8)
+        let expiredTokenData = Data(#"{"code":"TOKEN_EXPIRED","message":"Token has expired"}"#.utf8)
+
+        let invalidTokenResponse = try JSONDecoder().decode(Sub2APICapacityResponse.self, from: invalidTokenData)
+        let expiredTokenResponse = try JSONDecoder().decode(Sub2APICapacityResponse.self, from: expiredTokenData)
+
+        #expect(invalidTokenResponse.code == .invalidToken)
+        #expect(invalidTokenResponse.indicatesInvalidToken)
+        #expect(!invalidTokenResponse.indicatesTokenExpired)
+        #expect(invalidTokenResponse.data == nil)
+        #expect(expiredTokenResponse.code == .tokenExpired)
+        #expect(expiredTokenResponse.indicatesTokenExpired)
+        #expect(!expiredTokenResponse.indicatesInvalidToken)
+        #expect(expiredTokenResponse.data == nil)
+    }
+
     @MainActor
     @Test func fetchingSub2APIGroupListPopulatesOptionsAndPersistsSelectedIDOnly() async throws {
         let plusPool = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLUS共享号池", availableConcurrency: 3078)
@@ -410,7 +441,6 @@ struct UlanziDeckSwiftTests {
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
         model.setSelectedSub2APIBearerKey("token")
-        model.refreshSelectedSub2APIGroupList()
 
         try await Self.waitUntil {
             fetcher.groupListRequests.count == 1
@@ -440,6 +470,132 @@ struct UlanziDeckSwiftTests {
         #expect(restored.sub2API.targetGroupID == 1215)
         #expect(restored.sub2API.groupListState == .idle)
         #expect(restored.sub2API.lastResult == nil)
+    }
+
+    @MainActor
+    @Test func fetchingSub2APIGroupListDistinguishesInvalidAndExpiredBearerKey() async throws {
+        let fetcher = FakeSub2APIFetcher(groupListResults: [.invalidToken, .tokenExpired])
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.notConnected]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(),
+            sub2APIFetcher: fetcher
+        )
+
+        model.selectKey(keyID: 3)
+        model.assignSelectedFunction(.sub2API)
+        model.setSelectedSub2APIBaseURL("api.example.com")
+        model.setSelectedSub2APIBearerKey("token")
+
+        try await Self.waitUntil {
+            model.interactionState.sub2APIConfiguration(for: 3).groupListState == .invalidToken
+        }
+
+        model.refreshSelectedSub2APIGroupList()
+
+        try await Self.waitUntil {
+            model.interactionState.sub2APIConfiguration(for: 3).groupListState == .tokenExpired
+        }
+
+        #expect(fetcher.groupListRequests == [
+            FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "token"),
+            FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "token"),
+        ])
+    }
+
+    @MainActor
+    @Test func sub2APIBaseURLAndBearerChangesThrottleGroupListFetchWithoutRenderingTokenError() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let fetcher = FakeSub2APIFetcher(groupListResults: [.invalidToken, .tokenExpired])
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            sub2APIFetcher: fetcher,
+            sub2APIGroupListMinimumIntervalNanoseconds: 200_000_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 3)
+        model.assignSelectedFunction(.sub2API)
+        model.setSelectedSub2APIBaseURL("api.example.com")
+        model.setSelectedSub2APIBearerKey("old-token")
+
+        try await Self.waitUntil {
+            fetcher.groupListRequests.count == 1
+                && model.interactionState.sub2APIConfiguration(for: 3).groupListState == .invalidToken
+        }
+
+        model.setSelectedSub2APIBearerKey("token")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(fetcher.groupListRequests.count == 1)
+
+        try await Self.waitUntil {
+            fetcher.groupListRequests.count == 2
+                && model.interactionState.sub2APIConfiguration(for: 3).groupListState == .tokenExpired
+        }
+
+        #expect(fetcher.groupListRequests == [
+            FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "old-token"),
+            FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "token"),
+        ])
+        #expect(!syncer.partialDisplays.flatMap { $0 }.contains { $0.title == "令牌" })
+        let latestKeyDisplay = try #require(syncer.partialDisplays.flatMap { $0 }.last { $0.id == 3 })
+        #expect(latestKeyDisplay.title == "号池")
+        #expect(latestKeyDisplay.subtitle == "未配置")
+    }
+
+    @MainActor
+    @Test func sub2APIRefreshCountdownStartsAfterDisplayPackageFinishes() async throws {
+        let firstItem = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3078)
+        let secondItem = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3060)
+        let syncer = FakeH200DeckSyncer(packageDelayNanoseconds: 200_000_000)
+        let fetcher = FakeSub2APIFetcher(
+            results: [.success(item: firstItem), .success(item: secondItem)],
+            defaultResult: .success(item: secondItem)
+        )
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 0.01,
+            sub2APIGroupListMinimumIntervalNanoseconds: 1_000_000_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 3)
+        model.assignSelectedFunction(.sub2API)
+        model.setSelectedSub2APIBaseURL("api.example.com")
+        model.setSelectedSub2APIBearerKey("token")
+        model.setSelectedSub2APIRefreshInterval(5)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count >= 3
+        }
+
+        model.setSelectedSub2APITargetGroupID(1215)
+
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(fetcher.requests.count == 1)
+
+        try await Self.waitUntil {
+            fetcher.requests.count >= 2
+                && model.interactionState.sub2APIConfiguration(for: 3).lastResult == .success(item: secondItem)
+        }
+
+        #expect(Array(fetcher.requests.prefix(2)) == [
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "token"),
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "token"),
+        ])
     }
 
     @Test func h200ProtocolInterfaceMatchesObservedReportShape() {

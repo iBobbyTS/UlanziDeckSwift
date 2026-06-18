@@ -17,35 +17,53 @@ nonisolated struct Sub2APICapacityResponse: Decodable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
-        let rawCode = try container.decode(Int.self, forKey: .code)
+        let rawCode: Sub2APIResponseCode
+        if let integerCode = try? container.decode(Int.self, forKey: .code) {
+            rawCode = Sub2APIResponseCode(integerValue: integerCode)
+        } else {
+            rawCode = Sub2APIResponseCode(rawValue: try container.decode(String.self, forKey: .code))
+        }
         let message = try container.decode(String.self, forKey: .message)
 
-        if rawCode == 0 {
+        if rawCode == .success {
             code = .success
             data = try container.decodeIfPresent(Sub2APICapacityData.self, forKey: .data)
         } else {
-            code = Sub2APIResponseCode(rawValue: rawCode)
+            code = rawCode
             data = nil
         }
 
         self.message = message
     }
 
+    var indicatesInvalidToken: Bool {
+        code == .invalidToken
+            || message.localizedCaseInsensitiveContains("INVALID_TOKEN")
+            || message.localizedCaseInsensitiveContains("invalid token")
+    }
+
     var indicatesTokenExpired: Bool {
-        message.localizedCaseInsensitiveContains("TOKEN_EXPIRED")
+        code == .tokenExpired
+            || message.localizedCaseInsensitiveContains("TOKEN_EXPIRED")
             || message.localizedCaseInsensitiveContains("expired")
     }
 }
 
-/// API 响应码。业务码 0 表示成功，其余由服务端定义。
+/// API 响应码。业务码 0 表示成功；错误码可能是数字，也可能是字符串。
 nonisolated struct Sub2APIResponseCode: Equatable, RawRepresentable {
-    let rawValue: Int
+    let rawValue: String
 
-    init(rawValue: Int) {
-        self.rawValue = rawValue
+    init(rawValue: String) {
+        self.rawValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    static let success = Sub2APIResponseCode(rawValue: 0)
+    init(integerValue: Int) {
+        self.rawValue = "\(integerValue)"
+    }
+
+    static let success = Sub2APIResponseCode(rawValue: "0")
+    static let invalidToken = Sub2APIResponseCode(rawValue: "INVALID_TOKEN")
+    static let tokenExpired = Sub2APIResponseCode(rawValue: "TOKEN_EXPIRED")
 }
 
 /// 容量摘要数据容器。
@@ -87,6 +105,7 @@ nonisolated struct Sub2APICapacityItem: Decodable, Equatable {
 
 nonisolated enum Sub2APICapacityResult: Equatable {
     case success(item: Sub2APICapacityItem)
+    case invalidToken
     case tokenExpired
     case notFound
     case networkError(String)
@@ -94,6 +113,7 @@ nonisolated enum Sub2APICapacityResult: Equatable {
 
 nonisolated enum Sub2APIGroupListResult: Equatable {
     case success(items: [Sub2APICapacityItem])
+    case invalidToken
     case tokenExpired
     case networkError(String)
 }
@@ -132,6 +152,10 @@ nonisolated struct Sub2APIFetcher: Sub2APIFetching {
         }
 
         guard response.code == .success, let items = response.data?.items else {
+            if response.indicatesInvalidToken {
+                return .invalidToken
+            }
+
             if response.indicatesTokenExpired {
                 return .tokenExpired
             }
@@ -157,6 +181,10 @@ nonisolated struct Sub2APIFetcher: Sub2APIFetching {
         }
 
         guard response.code == .success, let items = response.data?.items else {
+            if response.indicatesInvalidToken {
+                return .invalidToken
+            }
+
             if response.indicatesTokenExpired {
                 return .tokenExpired
             }

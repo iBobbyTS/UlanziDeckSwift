@@ -100,6 +100,9 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 if case let .success(item) = configuration.sub2API.lastResult {
                     title = item.groupName
                     subtitle = "可用 \(item.availableConcurrency)"
+                } else if case .invalidToken = configuration.sub2API.lastResult {
+                    title = "令牌"
+                    subtitle = "无效"
                 } else if case .tokenExpired = configuration.sub2API.lastResult {
                     title = "令牌"
                     subtitle = "已过期"
@@ -111,7 +114,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                     subtitle = "错误"
                 } else {
                     title = "号池"
-                    subtitle = configuration.sub2API.displayName
+                    subtitle = "未配置"
                 }
             case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
                 if case let .success(status) = configuration.mihoyoGame.lastResult {
@@ -463,6 +466,7 @@ nonisolated enum DeckKeySub2APIGroupListState: Equatable {
     case idle
     case loading
     case success(items: [Sub2APICapacityItem])
+    case invalidToken
     case tokenExpired
     case networkError(String)
 
