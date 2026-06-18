@@ -75,6 +75,12 @@ struct RootView: View {
             onSub2APIBearerKeyChange: { bearerKey in
                 connectionModel.setSelectedSub2APIBearerKey(bearerKey)
             },
+            onSub2APIServiceNameChange: { serviceName in
+                connectionModel.setSelectedSub2APIServiceName(serviceName)
+            },
+            onSub2APIGroupNameChange: { groupName in
+                connectionModel.setSelectedSub2APIGroupName(groupName)
+            },
             onMihoyoQRCodeLoginRequest: {
                 connectionModel.beginMihoyoQRCodeLogin()
             },

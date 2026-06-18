@@ -62,6 +62,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let subtitle: String
     let mihoyoGame: MihoyoGame?
     let mihoyoGameButtonContent: MihoyoGameButtonContent?
+    let sub2APIButtonContent: Sub2APIButtonContent?
     let isSelected: Bool
     let isPressed: Bool
 
@@ -73,6 +74,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         displayMode = key.columnSpan > 1 ? configuration.displayMode : .function
         let configuredMihoyoGame = configuration.function.game
         var mihoyoGameButtonContent: MihoyoGameButtonContent?
+        var sub2APIButtonContent: Sub2APIButtonContent?
 
         if key.columnSpan > 1 && configuration.displayMode != .function {
             title = configuration.displayMode.previewTitle
@@ -98,8 +100,14 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 subtitle = ""
             case .sub2API:
                 if case let .success(item) = configuration.sub2API.lastResult {
-                    title = item.groupName
-                    subtitle = "可用 \(item.availableConcurrency)"
+                    let content = Sub2APIButtonContent(
+                        serviceName: configuration.sub2API.serviceDisplayName,
+                        groupName: configuration.sub2API.displayName,
+                        availableConcurrency: item.availableConcurrency
+                    )
+                    title = content.availableConcurrencyText
+                    subtitle = "\(content.serviceName) \(content.groupName)"
+                    sub2APIButtonContent = content
                 } else if case .invalidToken = configuration.sub2API.lastResult {
                     title = "令牌"
                     subtitle = "无效"
@@ -140,6 +148,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             }
         }
         self.mihoyoGameButtonContent = mihoyoGameButtonContent
+        self.sub2APIButtonContent = sub2APIButtonContent
         self.isSelected = isSelected
         self.isPressed = isPressed
     }
@@ -163,6 +172,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             subtitle: subtitle,
             mihoyoGame: mihoyoGame,
             mihoyoGameButtonContent: mihoyoGameButtonContent,
+            sub2APIButtonContent: sub2APIButtonContent,
             devicePixelSize: devicePixelSize
         )
     }
@@ -178,6 +188,7 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let subtitle: String
     let mihoyoGame: MihoyoGame?
     let mihoyoGameButtonContent: MihoyoGameButtonContent?
+    let sub2APIButtonContent: Sub2APIButtonContent?
     let devicePixelSize: H200DeviceTarget.PixelSize
 }
 
@@ -479,11 +490,47 @@ nonisolated enum DeckKeySub2APIGroupListState: Equatable {
     }
 }
 
+nonisolated enum Sub2APIAvailabilityLevel: Equatable {
+    case healthy
+    case warning
+    case critical
+
+    init(availableConcurrency: Int) {
+        if availableConcurrency >= 500 {
+            self = .healthy
+        } else if availableConcurrency >= 50 {
+            self = .warning
+        } else {
+            self = .critical
+        }
+    }
+}
+
+nonisolated struct Sub2APIButtonContent: Equatable {
+    let serviceName: String
+    let groupName: String
+    let availableConcurrency: Int
+    let availabilityLevel: Sub2APIAvailabilityLevel
+
+    init(serviceName: String, groupName: String, availableConcurrency: Int) {
+        self.serviceName = serviceName.isEmpty ? "Sub2API" : serviceName
+        self.groupName = groupName.isEmpty ? "未命名号池" : groupName
+        self.availableConcurrency = availableConcurrency
+        self.availabilityLevel = Sub2APIAvailabilityLevel(availableConcurrency: availableConcurrency)
+    }
+
+    var availableConcurrencyText: String {
+        "\(availableConcurrency)"
+    }
+}
+
 nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     var baseURL: String
     var targetGroupID: Int
     var refreshInterval: Int
     var bearerKey: String
+    var customServiceName: String
+    var customGroupName: String
 
     /// 最近一次成功查询的结果。不参与持久化，反序列化时使用空值。
     var lastResult: Sub2APICapacityResult?
@@ -496,6 +543,8 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         targetGroupID: Int = 0,
         refreshInterval: Int = 30,
         bearerKey: String = "",
+        customServiceName: String = "",
+        customGroupName: String = "",
         lastResult: Sub2APICapacityResult? = nil,
         groupListState: DeckKeySub2APIGroupListState = .idle
     ) {
@@ -503,16 +552,56 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         self.targetGroupID = targetGroupID
         self.refreshInterval = refreshInterval
         self.bearerKey = bearerKey
+        self.customServiceName = customServiceName
+        self.customGroupName = customGroupName
         self.lastResult = lastResult
         self.groupListState = groupListState
     }
 
     var displayName: String {
+        let trimmedCustomGroupName = customGroupName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedCustomGroupName.isEmpty {
+            return trimmedCustomGroupName
+        }
+
+        return automaticGroupDisplayName
+    }
+
+    var automaticGroupDisplayName: String {
         guard targetGroupID > 0 else {
             return "未配置"
         }
 
         return selectedGroupName ?? "分组 \(targetGroupID)"
+    }
+
+    var serviceDisplayName: String {
+        let trimmedCustomServiceName = customServiceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedCustomServiceName.isEmpty {
+            return trimmedCustomServiceName
+        }
+
+        return automaticServiceDisplayName
+    }
+
+    var automaticServiceDisplayName: String {
+        let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBaseURL.isEmpty else {
+            return "Sub2API"
+        }
+
+        let urlString: String
+        if trimmedBaseURL.contains("://") {
+            urlString = trimmedBaseURL
+        } else {
+            urlString = "https://\(trimmedBaseURL)"
+        }
+
+        guard let host = URL(string: urlString)?.host, !host.isEmpty else {
+            return trimmedBaseURL
+        }
+
+        return host
     }
 
     var selectedGroupName: String? {
@@ -532,6 +621,30 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         case targetGroupID
         case refreshInterval
         case bearerKey
+        case customServiceName
+        case customGroupName
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL) ?? ""
+        targetGroupID = try container.decodeIfPresent(Int.self, forKey: .targetGroupID) ?? 0
+        refreshInterval = try container.decodeIfPresent(Int.self, forKey: .refreshInterval) ?? 30
+        bearerKey = try container.decodeIfPresent(String.self, forKey: .bearerKey) ?? ""
+        customServiceName = try container.decodeIfPresent(String.self, forKey: .customServiceName) ?? ""
+        customGroupName = try container.decodeIfPresent(String.self, forKey: .customGroupName) ?? ""
+        lastResult = nil
+        groupListState = .idle
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(baseURL, forKey: .baseURL)
+        try container.encode(targetGroupID, forKey: .targetGroupID)
+        try container.encode(refreshInterval, forKey: .refreshInterval)
+        try container.encode(bearerKey, forKey: .bearerKey)
+        try container.encode(customServiceName, forKey: .customServiceName)
+        try container.encode(customGroupName, forKey: .customGroupName)
     }
 }
 
@@ -830,6 +943,34 @@ nonisolated struct DeckGridInteractionState: Equatable {
             configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
         }
         configurations[keyID, default: .tallyDefault].sub2API.bearerKey = bearerKey
+        return true
+    }
+
+    @discardableResult
+    mutating func setSub2APIServiceName(_ serviceName: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2API
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].sub2API.customServiceName =
+            serviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return true
+    }
+
+    @discardableResult
+    mutating func setSub2APIGroupName(_ groupName: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2API
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].sub2API.customGroupName =
+            groupName.trimmingCharacters(in: .whitespacesAndNewlines)
         return true
     }
 

@@ -249,6 +249,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             drawMihoyoGameContent(content, in: cardRect, buttonRect: rect)
             return
         }
+        if let content = display.sub2APIButtonContent {
+            drawSub2APIContent(content, in: cardRect, buttonRect: rect)
+            return
+        }
 
         drawCenteredText(
             display.title,
@@ -284,6 +288,81 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         )
         NSColor(calibratedWhite: 0, alpha: 0.38).setFill()
         rect.fill()
+    }
+
+    private func drawSub2APIContent(
+        _ content: Sub2APIButtonContent,
+        in rect: NSRect,
+        buttonRect: NSRect
+    ) {
+        let labelFont = NSFont.systemFont(ofSize: buttonRect.height * 0.115, weight: .semibold)
+        let valueFont = fittedMonospacedDigitFont(
+            for: content.availableConcurrencyText,
+            reservingDigitCount: 4,
+            maxSize: buttonRect.height * 0.36,
+            minSize: buttonRect.height * 0.22,
+            maxWidth: rect.width * 0.94,
+            weight: .heavy
+        )
+        let labelHeight = buttonRect.height * 0.13
+        let valueHeight = buttonRect.height * 0.39
+        let gap = buttonRect.height * 0.045
+        let totalHeight = labelHeight + labelHeight + gap + valueHeight
+        let top = rect.midY + totalHeight / 2
+        let shadow = textShadow()
+        let labelColor = NSColor(calibratedWhite: 0.86, alpha: 1)
+
+        drawCenteredSingleLineText(
+            content.serviceName,
+            font: labelFont,
+            color: labelColor,
+            rect: NSRect(x: rect.minX, y: top - labelHeight, width: rect.width, height: labelHeight),
+            shadow: shadow
+        )
+        drawCenteredSingleLineText(
+            content.groupName,
+            font: labelFont,
+            color: labelColor,
+            rect: NSRect(x: rect.minX, y: top - labelHeight * 2, width: rect.width, height: labelHeight),
+            shadow: shadow
+        )
+        drawCenteredText(
+            content.availableConcurrencyText,
+            font: valueFont,
+            color: sub2APIAvailabilityColor(for: content.availabilityLevel),
+            rect: NSRect(x: rect.minX, y: top - totalHeight, width: rect.width, height: valueHeight),
+            shadow: shadow
+        )
+    }
+
+    private func sub2APIAvailabilityColor(for level: Sub2APIAvailabilityLevel) -> NSColor {
+        switch level {
+        case .healthy:
+            return NSColor(calibratedRed: 0.25, green: 0.86, blue: 0.42, alpha: 1)
+        case .warning:
+            return NSColor(calibratedRed: 1.0, green: 0.76, blue: 0.18, alpha: 1)
+        case .critical:
+            return NSColor(calibratedRed: 1.0, green: 0.28, blue: 0.24, alpha: 1)
+        }
+    }
+
+    private func fittedMonospacedDigitFont(
+        for text: String,
+        reservingDigitCount digitCount: Int,
+        maxSize: CGFloat,
+        minSize: CGFloat,
+        maxWidth: CGFloat,
+        weight: NSFont.Weight
+    ) -> NSFont {
+        let sample = text.count <= digitCount ? String(repeating: "0", count: digitCount) : text
+        let maxFont = NSFont.monospacedDigitSystemFont(ofSize: maxSize, weight: weight)
+        let sampleWidth = (sample as NSString).size(withAttributes: [.font: maxFont]).width
+        guard sampleWidth > 0, sampleWidth > maxWidth else {
+            return maxFont
+        }
+
+        let fittedSize = max(minSize, floor(maxSize * maxWidth / sampleWidth))
+        return NSFont.monospacedDigitSystemFont(ofSize: fittedSize, weight: weight)
     }
 
     private func drawMihoyoGameContent(
@@ -362,6 +441,29 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         ]
         attributes[.shadow] = shadow
         (text as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes)
+    }
+
+    private func drawCenteredSingleLineText(
+        _ text: String,
+        font: NSFont,
+        color: NSColor,
+        rect: NSRect,
+        shadow: NSShadow? = nil
+    ) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byTruncatingTail
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: color,
+            .paragraphStyle: paragraph,
+        ]
+        attributes[.shadow] = shadow
+        (text as NSString).draw(
+            with: rect,
+            options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine],
+            attributes: attributes
+        )
     }
 
     private func drawCenteredMetricValue(

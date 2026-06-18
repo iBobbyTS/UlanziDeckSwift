@@ -23,6 +23,8 @@ struct ContentView: View {
     let onSub2APIGroupListRefresh: () -> Void
     let onSub2APIRefreshIntervalChange: (Int) -> Void
     let onSub2APIBearerKeyChange: (String) -> Void
+    let onSub2APIServiceNameChange: (String) -> Void
+    let onSub2APIGroupNameChange: (String) -> Void
     let onMihoyoQRCodeLoginRequest: () -> Void
     let onMihoyoGameRefreshIntervalChange: (Int) -> Void
     let onMihoyoGameStatusRefresh: () -> Void
@@ -537,6 +539,21 @@ struct ContentView: View {
                         TextField("Bearer Key", text: selectedSub2APIBearerKeyBinding)
                             .textFieldStyle(.roundedBorder)
                     }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        sub2APINameParameterRow(
+                            label: "服务名",
+                            placeholder: selectedSub2APIAutomaticServiceName,
+                            text: selectedSub2APIServiceNameBinding
+                        )
+                        sub2APINameParameterRow(
+                            label: "号池名",
+                            placeholder: selectedSub2APIAutomaticGroupName,
+                            text: selectedSub2APIGroupNameBinding
+                        )
+                    }
                 }
                 .frame(maxWidth: 360, alignment: .leading)
 
@@ -690,6 +707,47 @@ private extension ContentView {
 
     func sub2APIGroupOptionTitle(_ item: Sub2APICapacityItem) -> String {
         item.groupName.isEmpty ? "分组 \(item.groupID)" : item.groupName
+    }
+
+    var selectedSub2APIAutomaticServiceName: String {
+        selectedConfiguration?.sub2API.automaticServiceDisplayName ?? "Sub2API"
+    }
+
+    var selectedSub2APIAutomaticGroupName: String {
+        selectedConfiguration?.sub2API.automaticGroupDisplayName ?? "未配置"
+    }
+
+    var selectedSub2APIServiceNameBinding: Binding<String> {
+        Binding(
+            get: {
+                selectedConfiguration?.sub2API.customServiceName ?? ""
+            },
+            set: { serviceName in
+                onSub2APIServiceNameChange(serviceName)
+            }
+        )
+    }
+
+    var selectedSub2APIGroupNameBinding: Binding<String> {
+        Binding(
+            get: {
+                selectedConfiguration?.sub2API.customGroupName ?? ""
+            },
+            set: { groupName in
+                onSub2APIGroupNameChange(groupName)
+            }
+        )
+    }
+
+    func sub2APINameParameterRow(label: String, placeholder: String, text: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            TextField(placeholder, text: text, prompt: Text(placeholder))
+                .textFieldStyle(.roundedBorder)
+        }
     }
 
     var selectedSub2APIRefreshIntervalBinding: Binding<Int> {
@@ -1228,6 +1286,8 @@ private struct MihoyoQRCodeView: View {
         onSub2APIGroupListRefresh: {},
         onSub2APIRefreshIntervalChange: { _ in },
         onSub2APIBearerKeyChange: { _ in },
+        onSub2APIServiceNameChange: { _ in },
+        onSub2APIGroupNameChange: { _ in },
         onMihoyoQRCodeLoginRequest: {},
         onMihoyoGameRefreshIntervalChange: { _ in },
         onMihoyoGameStatusRefresh: {}

@@ -221,6 +221,75 @@ struct UlanziDeckSwiftTests {
         #expect(display.subtitle == "未配置")
     }
 
+    @Test func sub2APISuccessDisplayUsesServiceGroupAndAvailableConcurrency() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.assign(.sub2API, to: 3)
+        state.setSub2APIBaseURL("https://api.example.com/v1", for: 3)
+        state.setSub2APITargetGroupID(1215, for: 3)
+        state.setSub2APILastResult(.success(item: Self.sub2APICapacityItem(
+            groupID: 1215,
+            groupName: "PLUS共享号池",
+            availableConcurrency: 3078
+        )), for: 3)
+
+        let display = state.display(for: layout.keys[2])
+        let content = try #require(display.sub2APIButtonContent)
+
+        #expect(display.title == "3078")
+        #expect(display.subtitle == "api.example.com PLUS共享号池")
+        #expect(content.serviceName == "api.example.com")
+        #expect(content.groupName == "PLUS共享号池")
+        #expect(content.availableConcurrency == 3078)
+        #expect(content.availabilityLevel == .healthy)
+    }
+
+    @Test func sub2APICustomNamesOverrideAutomaticValuesAndPersist() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.assign(.sub2API, to: 3)
+        state.setSub2APIBaseURL("https://api.example.com/v1", for: 3)
+        state.setSub2APITargetGroupID(1215, for: 3)
+        state.setSub2APIServiceName(" 主站 ", for: 3)
+        state.setSub2APIGroupName(" PLUS ", for: 3)
+        state.setSub2APILastResult(.success(item: Self.sub2APICapacityItem(
+            groupID: 1215,
+            groupName: "PLUS共享号池",
+            availableConcurrency: 49
+        )), for: 3)
+
+        var display = state.display(for: layout.keys[2])
+        var content = try #require(display.sub2APIButtonContent)
+        #expect(content.serviceName == "主站")
+        #expect(content.groupName == "PLUS")
+        #expect(content.availableConcurrency == 49)
+        #expect(content.availabilityLevel == .critical)
+
+        let configuration = try #require(state.configuration(for: 3))
+        let data = try JSONEncoder().encode(configuration)
+        let restored = try JSONDecoder().decode(DeckKeyConfiguration.self, from: data)
+        #expect(restored.sub2API.customServiceName == "主站")
+        #expect(restored.sub2API.customGroupName == "PLUS")
+        #expect(restored.sub2API.lastResult == nil)
+        #expect(restored.sub2API.groupListState == .idle)
+
+        state.setSub2APIServiceName("", for: 3)
+        state.setSub2APIGroupName("", for: 3)
+        display = state.display(for: layout.keys[2])
+        content = try #require(display.sub2APIButtonContent)
+        #expect(content.serviceName == "api.example.com")
+        #expect(content.groupName == "PLUS共享号池")
+    }
+
+    @Test func sub2APIAvailabilityLevelUsesRequestedThresholds() {
+        #expect(Sub2APIAvailabilityLevel(availableConcurrency: 500) == .healthy)
+        #expect(Sub2APIAvailabilityLevel(availableConcurrency: 499) == .warning)
+        #expect(Sub2APIAvailabilityLevel(availableConcurrency: 50) == .warning)
+        #expect(Sub2APIAvailabilityLevel(availableConcurrency: 49) == .critical)
+    }
+
     @Test func clearingFunctionMakesKeyEmptyAndInactive() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
@@ -1073,7 +1142,7 @@ struct UlanziDeckSwiftTests {
         try await Self.waitUntil {
             fetcher.requests.count == 1
                 && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .success(item: item)
-                && Self.hasSyncedDisplayTitle("PLU", for: 3, syncer: syncer)
+                && Self.hasSyncedDisplayTitle("3078", for: 3, syncer: syncer)
         }
 
         #expect(fetcher.requests == [

@@ -348,6 +348,28 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    func setSelectedSub2APIServiceName(_ serviceName: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        if interactionState.setSub2APIServiceName(serviceName, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: selectedKeyID)
+        }
+    }
+
+    func setSelectedSub2APIGroupName(_ groupName: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        if interactionState.setSub2APIGroupName(groupName, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: selectedKeyID)
+        }
+    }
+
     func refreshSelectedSub2APIGroupList() {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return
