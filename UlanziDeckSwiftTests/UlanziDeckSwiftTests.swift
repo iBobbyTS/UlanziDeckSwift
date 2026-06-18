@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Darwin
 import Testing
@@ -1266,6 +1267,29 @@ struct UlanziDeckSwiftTests {
 
         #expect(Array(png.prefix(4)) == [0x89, 0x50, 0x4e, 0x47])
         #expect(!png.isEmpty)
+    }
+
+    @Test func iconRendererUsesBlackButtonBackground() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.clearFunction(keyID: 4)
+        let display = state.display(for: layout.keys[3])
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+        let samplePoints = [
+            (x: 1, y: 1),
+            (x: display.devicePixelSize.width / 12, y: display.devicePixelSize.height / 2),
+            (x: display.devicePixelSize.width / 2, y: display.devicePixelSize.height / 2),
+        ]
+
+        for point in samplePoints {
+            let color = try #require(image.colorAt(x: point.x, y: point.y)?.usingColorSpace(.deviceRGB))
+
+            #expect(color.redComponent < 0.001)
+            #expect(color.greenComponent < 0.001)
+            #expect(color.blueComponent < 0.001)
+            #expect(color.alphaComponent > 0.999)
+        }
     }
 
     @Test func iconRendererDoesNotTintSelectedDisplay() throws {

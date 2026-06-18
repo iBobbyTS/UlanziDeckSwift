@@ -186,6 +186,8 @@ nonisolated private struct H200ManifestFont: Encodable, Equatable {
 }
 
 nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
+    private static let buttonBackgroundColor = NSColor(calibratedRed: 0, green: 0, blue: 0, alpha: 1)
+
     nonisolated init() {}
 
     static func transparentPNGData(size: H200DeviceTarget.PixelSize) throws -> Data {
@@ -239,19 +241,15 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
     }
 
     private func draw(display: DeckKeyDisplay, in rect: NSRect) {
-        NSColor(calibratedRed: 0.08, green: 0.09, blue: 0.10, alpha: 1).setFill()
+        Self.buttonBackgroundColor.setFill()
         rect.fill()
 
         let inset = rect.height * 0.08
         let cardRect = rect.insetBy(dx: inset, dy: inset)
         let radius = rect.height * 0.12
         let cardPath = NSBezierPath(roundedRect: cardRect, xRadius: radius, yRadius: radius)
-        NSColor(calibratedRed: 0.14, green: 0.15, blue: 0.17, alpha: 1).setFill()
+        Self.buttonBackgroundColor.setFill()
         cardPath.fill()
-
-        NSColor(calibratedWhite: 0.32, alpha: 1).setStroke()
-        cardPath.lineWidth = max(2, rect.height * 0.012)
-        cardPath.stroke()
 
         drawCenteredText(
             display.title,
