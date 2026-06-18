@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct RootView: View {
+    private let windowContentMinimumSize = CGSize(width: 880, height: 640)
+    private let windowContentMaximumSize = CGSize(width: 1000, height: CGFloat.greatestFiniteMagnitude)
     @StateObject private var connectionModel: H200ConnectionModel
 
     init(
@@ -44,6 +46,12 @@ struct RootView: View {
                 connectionModel.commitBrightnessPercent(percent)
             }
         )
+            .background {
+                WindowSizeConfigurator(
+                    minimumContentSize: windowContentMinimumSize,
+                    maximumContentSize: windowContentMaximumSize
+                )
+            }
             .task {
                 connectionModel.checkOnLaunch()
             }
@@ -65,6 +73,34 @@ struct RootView: View {
                     }
                 )
             }
+    }
+}
+
+private struct WindowSizeConfigurator: NSViewRepresentable {
+    let minimumContentSize: CGSize
+    let maximumContentSize: CGSize
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            configureWindow(for: view)
+        }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async {
+            configureWindow(for: view)
+        }
+    }
+
+    private func configureWindow(for view: NSView) {
+        guard let window = view.window else {
+            return
+        }
+
+        window.contentMinSize = minimumContentSize
+        window.contentMaxSize = maximumContentSize
     }
 }
 

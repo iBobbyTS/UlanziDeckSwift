@@ -18,10 +18,18 @@ struct UlanziDeckSwiftTests {
     @Test func previewGridMetricsKeepsWideKeyRowAligned() {
         let layout = DeckGridLayout.h200Prototype
         let metrics = DeckPreviewGridMetrics.h200
+        let layoutMetrics = DeckPreviewLayoutMetrics.h200
 
         #expect(metrics.slotWidth(columnSpan: 1) == 82)
         #expect(metrics.slotWidth(columnSpan: 2) == 180)
         #expect(layout.rows.map { metrics.rowWidth(for: $0) } == [474, 474, 474])
+        #expect(metrics.gridHeight(rowCount: layout.rows.count) == 278)
+        #expect(layoutMetrics.gridContentWidth(for: layout) == 474)
+        #expect(layoutMetrics.gridContentHeight(for: layout) == 278)
+        #expect(layoutMetrics.deckSurfaceWidth(for: layout) == 530)
+        #expect(layoutMetrics.deckSurfaceHeight(for: layout) == 334)
+        #expect(layoutMetrics.previewAreaMinimumWidth(for: layout) == 586)
+        #expect(layoutMetrics.previewAreaHeight(for: layout) == 434)
     }
 
     @Test func shortPressingAKeyDoesNotChangeUISelectionAndIncrementsTally() {

@@ -16,48 +16,86 @@ struct ContentView: View {
     let onBrightnessPercentCommit: (Int) -> Void
 
     private let layout = DeckGridLayout.h200Prototype
-    private let previewMetrics = DeckPreviewGridMetrics.h200
-    private let previewOuterPadding: CGFloat = 28
-    private let previewInnerPadding: CGFloat = 28
-    private let previewPageSpacing: CGFloat = 18
-    private let pageSelectorHeight: CGFloat = 26
+    private let previewLayoutMetrics = DeckPreviewLayoutMetrics.h200
+    private let minimumWindowWidth: CGFloat = 880
+    private let functionSidebarMinimumWidth: CGFloat = 250
+    private let functionSidebarPreferredWidth: CGFloat = 270
+    private let functionSidebarMaximumWidth: CGFloat = 288
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            workbench
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                header(windowSize: geometry.size)
+                Divider()
+                workbench
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 940, minHeight: 640)
+        .frame(minWidth: minimumWindowWidth, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private var deckPreviewAreaHeight: CGFloat {
-        previewOuterPadding * 2
-            + previewGridContentHeight
-            + previewPageSpacing
-            + pageSelectorHeight
+        CGFloat(previewLayoutMetrics.previewAreaHeight(for: layout))
+    }
+
+    private var deckPreviewAreaMinimumWidth: CGFloat {
+        CGFloat(previewLayoutMetrics.previewAreaMinimumWidth(for: layout))
+    }
+
+    private var previewGridMetrics: DeckPreviewGridMetrics {
+        previewLayoutMetrics.gridMetrics
+    }
+
+    private var previewOuterPadding: CGFloat {
+        CGFloat(previewLayoutMetrics.outerPadding)
+    }
+
+    private var previewInnerPadding: CGFloat {
+        CGFloat(previewLayoutMetrics.innerPadding)
+    }
+
+    private var previewPageSpacing: CGFloat {
+        CGFloat(previewLayoutMetrics.pageSpacing)
+    }
+
+    private var pageSelectorHeight: CGFloat {
+        CGFloat(previewLayoutMetrics.pageSelectorHeight)
+    }
+
+    private var previewGridSpacing: CGFloat {
+        CGFloat(previewGridMetrics.spacing)
+    }
+
+    private var deckSurfaceWidth: CGFloat {
+        CGFloat(previewLayoutMetrics.deckSurfaceWidth(for: layout))
+    }
+
+    private var deckSurfaceHeight: CGFloat {
+        CGFloat(previewLayoutMetrics.deckSurfaceHeight(for: layout))
     }
 
     private var previewGridContentWidth: CGFloat {
-        CGFloat(previewMetrics.rowWidth(for: layout.rows.first ?? []))
+        CGFloat(previewLayoutMetrics.gridContentWidth(for: layout))
     }
 
     private var previewGridContentHeight: CGFloat {
-        let rowCount = CGFloat(layout.rows.count)
-        let cellHeight = CGFloat(previewMetrics.cellLength) * rowCount
-        let spacingHeight = CGFloat(max(0, layout.rows.count - 1)) * CGFloat(previewMetrics.spacing)
-        return cellHeight + spacingHeight
+        CGFloat(previewLayoutMetrics.gridContentHeight(for: layout))
     }
 
-    private var header: some View {
+    private func header(windowSize: CGSize) -> some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Ulanzi Deck H200")
                     .font(.title.bold())
 
-                Text(layout.name)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 12) {
+                    Text(layout.name)
+
+                    Text("宽 \(Int(windowSize.width)) 高 \(Int(windowSize.height))")
+                        .font(.caption.monospacedDigit())
+                }
+                .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -107,12 +145,17 @@ struct ContentView: View {
                 Divider()
                 parameterPanel
             }
+            .frame(minWidth: deckPreviewAreaMinimumWidth)
             .frame(maxHeight: .infinity, alignment: .top)
 
             Divider()
 
             functionSidebar
-                .frame(width: 270)
+                .frame(
+                    minWidth: functionSidebarMinimumWidth,
+                    idealWidth: functionSidebarPreferredWidth,
+                    maxWidth: functionSidebarMaximumWidth
+                )
         }
     }
 
@@ -127,11 +170,11 @@ struct ContentView: View {
     }
 
     private var deckSurface: some View {
-        VStack(spacing: CGFloat(previewMetrics.spacing)) {
+        VStack(spacing: previewGridSpacing) {
             ForEach(Array(layout.rows.enumerated()), id: \.offset) { _, row in
-                HStack(spacing: CGFloat(previewMetrics.spacing)) {
+                HStack(spacing: previewGridSpacing) {
                     ForEach(row) { key in
-                        DeckKeyButton(display: interactionState.display(for: key), metrics: previewMetrics) {
+                        DeckKeyButton(display: interactionState.display(for: key), metrics: previewGridMetrics) {
                             onKeySelection(key.id)
                         } deleteAction: {
                             onKeyFunctionDeletion(key.id)
@@ -142,6 +185,7 @@ struct ContentView: View {
             }
         }
         .padding(previewInnerPadding)
+        .frame(width: deckSurfaceWidth, height: deckSurfaceHeight)
         .background {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .fill(.linearGradient(

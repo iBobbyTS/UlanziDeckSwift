@@ -134,6 +134,62 @@ nonisolated struct DeckPreviewGridMetrics: Equatable {
         let visibleSpacing = Double(max(0, keys.count - 1)) * spacing
         return slotWidth + visibleSpacing
     }
+
+    func gridHeight(rowCount: Int) -> Double {
+        let safeRowCount = max(0, rowCount)
+        guard safeRowCount > 0 else {
+            return 0
+        }
+
+        let rowHeight = Double(safeRowCount) * cellLength
+        let visibleSpacing = Double(safeRowCount - 1) * spacing
+        return rowHeight + visibleSpacing
+    }
+}
+
+nonisolated struct DeckPreviewLayoutMetrics: Equatable {
+    let gridMetrics: DeckPreviewGridMetrics
+    let outerPadding: Double
+    let innerPadding: Double
+    let pageSpacing: Double
+    let pageSelectorHeight: Double
+
+    static let h200 = DeckPreviewLayoutMetrics(
+        gridMetrics: .h200,
+        outerPadding: 28,
+        innerPadding: 28,
+        pageSpacing: 18,
+        pageSelectorHeight: 26
+    )
+
+    func gridContentWidth(for layout: DeckGridLayout) -> Double {
+        layout.rows
+            .map { gridMetrics.rowWidth(for: $0) }
+            .max() ?? 0
+    }
+
+    func gridContentHeight(for layout: DeckGridLayout) -> Double {
+        gridMetrics.gridHeight(rowCount: layout.rows.count)
+    }
+
+    func deckSurfaceWidth(for layout: DeckGridLayout) -> Double {
+        gridContentWidth(for: layout) + innerPadding * 2
+    }
+
+    func deckSurfaceHeight(for layout: DeckGridLayout) -> Double {
+        gridContentHeight(for: layout) + innerPadding * 2
+    }
+
+    func previewAreaMinimumWidth(for layout: DeckGridLayout) -> Double {
+        deckSurfaceWidth(for: layout) + outerPadding * 2
+    }
+
+    func previewAreaHeight(for layout: DeckGridLayout) -> Double {
+        deckSurfaceHeight(for: layout)
+            + pageSpacing
+            + pageSelectorHeight
+            + outerPadding * 2
+    }
 }
 
 nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
