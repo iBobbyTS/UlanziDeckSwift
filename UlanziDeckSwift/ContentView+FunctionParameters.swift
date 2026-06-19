@@ -82,12 +82,27 @@ extension ContentView {
                 }
                 .frame(width: 150, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("文件夹")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("显示名称")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        TextField(
+                            selectedFolderAutomaticDisplayName,
+                            text: selectedFolderNameBinding,
+                            prompt: Text(selectedFolderAutomaticDisplayName)
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .focused($focusedParameterField, equals: .folderName)
+                        .frame(maxWidth: 260, alignment: .leading)
+                    }
 
                     VStack(alignment: .leading, spacing: 4) {
+                        Text("文件夹")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
                         Text(configuration.openFolder.path ?? "未选择文件夹")
                             .font(.callout)
                             .foregroundStyle(configuration.openFolder.path == nil ? Color.secondary : Color.primary)
@@ -136,6 +151,7 @@ extension ContentView {
 
                         TextField("NAS", text: selectedSMBServerNameBinding)
                             .textFieldStyle(.roundedBorder)
+                            .focused($focusedParameterField, equals: .smbServerName)
                             .frame(maxWidth: 260, alignment: .leading)
                     }
 
@@ -321,6 +337,49 @@ extension ContentView {
         )
     }
 
+    var selectedFolderAutomaticDisplayName: String {
+        guard let openFolder = selectedConfiguration?.openFolder else {
+            return "选择文件夹"
+        }
+
+        let automaticConfiguration = DeckKeyOpenFolderConfiguration(
+            path: openFolder.path,
+            bookmarkData: openFolder.bookmarkData
+        )
+        return automaticConfiguration.displayName
+    }
+
+    var selectedFolderNameBinding: Binding<String> {
+        Binding(
+            get: {
+                if focusedParameterField == .folderName,
+                   let draft = folderNameDraft,
+                   draft.keyID == interactionState.selectedKeyID {
+                    return draft.text
+                }
+
+                return selectedConfiguration?.openFolder.name ?? ""
+            },
+            set: { name in
+                guard let selectedKeyID = interactionState.selectedKeyID else {
+                    return
+                }
+
+                let originalName = if folderNameDraft?.keyID == selectedKeyID {
+                    folderNameDraft?.originalNormalizedText ?? ""
+                } else {
+                    selectedConfiguration?.openFolder.name ?? ""
+                }
+                folderNameDraft = ParameterNameDraft(
+                    keyID: selectedKeyID,
+                    originalNormalizedText: originalName,
+                    text: name
+                )
+                onFolderNamePreview(selectedKeyID, name)
+            }
+        )
+    }
+
     var selectedSMBServerAddressBinding: Binding<String> {
         Binding(
             get: {
@@ -335,12 +394,135 @@ extension ContentView {
     var selectedSMBServerNameBinding: Binding<String> {
         Binding(
             get: {
-                selectedConfiguration?.smbServer.name ?? ""
+                if focusedParameterField == .smbServerName,
+                   let draft = smbServerNameDraft,
+                   draft.keyID == interactionState.selectedKeyID {
+                    return draft.text
+                }
+
+                return selectedConfiguration?.smbServer.name ?? ""
             },
             set: { name in
-                onSMBServerNameChange(name)
+                guard let selectedKeyID = interactionState.selectedKeyID else {
+                    return
+                }
+
+                let originalName = if smbServerNameDraft?.keyID == selectedKeyID {
+                    smbServerNameDraft?.originalNormalizedText ?? ""
+                } else {
+                    selectedConfiguration?.smbServer.name ?? ""
+                }
+                smbServerNameDraft = ParameterNameDraft(
+                    keyID: selectedKeyID,
+                    originalNormalizedText: originalName,
+                    text: name
+                )
+                onSMBServerNamePreview(selectedKeyID, name)
             }
         )
+    }
+
+    func parameterFocusChanged(to newFocus: ParameterFocusField?) {
+        let oldFocus = activeParameterFocusField
+        guard oldFocus != newFocus else {
+            return
+        }
+
+        commitParameterNameDraft(for: oldFocus)
+        prepareParameterNameDraft(for: newFocus)
+        activeParameterFocusField = newFocus
+    }
+
+    func selectedKeyChangedDuringParameterEditing() {
+        guard activeParameterFocusField != nil else {
+            return
+        }
+
+        commitParameterNameDraft(for: activeParameterFocusField)
+        activeParameterFocusField = nil
+        focusedParameterField = nil
+    }
+
+    private func prepareParameterNameDraft(for field: ParameterFocusField?) {
+        guard let field,
+              let selectedKeyID = interactionState.selectedKeyID
+        else {
+            return
+        }
+
+        switch field {
+        case .folderName:
+            guard selectedConfiguration?.function == .openFolder else {
+                return
+            }
+            folderNameDraft = ParameterNameDraft(
+                keyID: selectedKeyID,
+                originalNormalizedText: selectedConfiguration?.openFolder.name ?? "",
+                text: selectedConfiguration?.openFolder.name ?? ""
+            )
+        case .smbServerName:
+            guard selectedConfiguration?.function == .connectSMBServer else {
+                return
+            }
+            smbServerNameDraft = ParameterNameDraft(
+                keyID: selectedKeyID,
+                originalNormalizedText: selectedConfiguration?.smbServer.name ?? "",
+                text: selectedConfiguration?.smbServer.name ?? ""
+            )
+        }
+    }
+
+    private func commitParameterNameDraft(for field: ParameterFocusField?) {
+        switch field {
+        case .folderName:
+            commitFolderNameDraft()
+        case .smbServerName:
+            commitSMBServerNameDraft()
+        case nil:
+            return
+        }
+    }
+
+    private func commitFolderNameDraft() {
+        guard let draft = folderNameDraft else {
+            return
+        }
+
+        defer {
+            folderNameDraft = nil
+        }
+
+        guard interactionState.configuration(for: draft.keyID)?.function == .openFolder else {
+            return
+        }
+
+        let normalizedName = DeckKeyOpenFolderConfiguration.normalizedName(draft.text)
+        guard draft.originalNormalizedText != normalizedName else {
+            return
+        }
+
+        onFolderNameChange(draft.keyID, draft.text)
+    }
+
+    private func commitSMBServerNameDraft() {
+        guard let draft = smbServerNameDraft else {
+            return
+        }
+
+        defer {
+            smbServerNameDraft = nil
+        }
+
+        guard interactionState.configuration(for: draft.keyID)?.function == .connectSMBServer else {
+            return
+        }
+
+        let normalizedName = DeckKeySMBServerConfiguration.normalizedName(draft.text)
+        guard draft.originalNormalizedText != normalizedName else {
+            return
+        }
+
+        onSMBServerNameChange(draft.keyID, draft.text)
     }
 
     var selectedSub2APIBaseURLBinding: Binding<String> {
@@ -520,8 +702,20 @@ extension ContentView {
             return
         }
 
+        let folderName: String
+        if focusedParameterField == .folderName,
+           let draft = folderNameDraft,
+           draft.keyID == interactionState.selectedKeyID {
+            folderName = draft.text
+        } else {
+            folderName = selectedConfiguration?.openFolder.name ?? ""
+        }
+
         do {
-            onFolderPathSelection(try DeckKeyOpenFolderConfiguration(folderURL: url))
+            onFolderPathSelection(try DeckKeyOpenFolderConfiguration(
+                folderURL: url,
+                name: folderName
+            ))
         } catch {
             let alert = NSAlert()
             alert.messageText = "无法保存文件夹权限"

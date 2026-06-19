@@ -296,6 +296,27 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    func setSelectedFolderName(_ name: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        setFolderName(name, for: selectedKeyID)
+    }
+
+    func previewFolderName(_ name: String, for keyID: Int) {
+        if interactionState.setFolderName(name, for: keyID, selectsKey: false) {
+            syncKeyDisplay(keyID: keyID)
+        }
+    }
+
+    func setFolderName(_ name: String, for keyID: Int) {
+        if interactionState.setFolderName(name, for: keyID, selectsKey: false) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: keyID)
+        }
+    }
+
     func setSelectedSMBServerAddress(_ address: String) {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return
@@ -312,9 +333,19 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        if interactionState.setSMBServerName(name, for: selectedKeyID) {
+        setSMBServerName(name, for: selectedKeyID)
+    }
+
+    func previewSMBServerName(_ name: String, for keyID: Int) {
+        if interactionState.setSMBServerName(name, for: keyID, selectsKey: false) {
+            syncKeyDisplay(keyID: keyID)
+        }
+    }
+
+    func setSMBServerName(_ name: String, for keyID: Int) {
+        if interactionState.setSMBServerName(name, for: keyID, selectsKey: false) {
             persistCurrentConfiguration()
-            syncKeyDisplay(keyID: selectedKeyID)
+            syncKeyDisplay(keyID: keyID)
         }
     }
 
@@ -618,11 +649,12 @@ final class H200ConnectionModel: ObservableObject {
 
         let result = folderOpener.openFolder(configuration)
         guard case let .opened(refreshedConfiguration) = result,
-              let refreshedConfiguration
+              var refreshedConfiguration
         else {
             return
         }
 
+        refreshedConfiguration.name = configuration.name
         if interactionState.setFolderConfiguration(refreshedConfiguration, for: keyID, selectsKey: false) {
             persistCurrentConfiguration()
         }

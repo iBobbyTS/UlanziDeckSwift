@@ -24,7 +24,7 @@ struct FinderFolderOpener: FinderFolderOpening {
         do {
             url = try URL(
                 resolvingBookmarkData: bookmarkData,
-                options: [.withSecurityScope],
+                options: DeckKeyOpenFolderConfiguration.securityScopedBookmarkResolutionOptions,
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             )

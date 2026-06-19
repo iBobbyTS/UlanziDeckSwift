@@ -190,24 +190,39 @@ nonisolated struct DeckKeyTallyConfiguration: Codable, Equatable {
 }
 
 nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
+    static let securityScopedBookmarkCreationOptions: URL.BookmarkCreationOptions = [
+        .withSecurityScope,
+        .securityScopeAllowOnlyReadAccess,
+    ]
+    static let securityScopedBookmarkResolutionOptions: URL.BookmarkResolutionOptions = [
+        .withSecurityScope,
+    ]
+
     var path: String?
     var bookmarkData: Data?
+    var name: String
 
-    init(path: String? = nil, bookmarkData: Data? = nil) {
+    init(path: String? = nil, bookmarkData: Data? = nil, name: String = "") {
         self.path = Self.normalizedPath(path)
         self.bookmarkData = bookmarkData
+        self.name = Self.normalizedName(name)
     }
 
-    init(folderURL: URL) throws {
+    init(folderURL: URL, name: String = "") throws {
         self.path = Self.normalizedPath(folderURL.path)
         self.bookmarkData = try folderURL.bookmarkData(
-            options: [.withSecurityScope],
+            options: Self.securityScopedBookmarkCreationOptions,
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )
+        self.name = Self.normalizedName(name)
     }
 
     var displayName: String {
+        if !name.isEmpty {
+            return name
+        }
+
         guard let path, !path.isEmpty else {
             return "选择文件夹"
         }
@@ -228,12 +243,36 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
         bookmarkData != nil
     }
 
+    enum CodingKeys: CodingKey {
+        case path
+        case bookmarkData
+        case name
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        path = Self.normalizedPath(try container.decodeIfPresent(String.self, forKey: .path))
+        bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        name = Self.normalizedName(try container.decodeIfPresent(String.self, forKey: .name) ?? "")
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(path, forKey: .path)
+        try container.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
+        try container.encode(name, forKey: .name)
+    }
+
     private static func normalizedPath(_ path: String?) -> String? {
         guard let path, !path.isEmpty else {
             return nil
         }
 
         return path
+    }
+
+    static func normalizedName(_ rawValue: String) -> String {
+        rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

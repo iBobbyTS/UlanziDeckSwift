@@ -399,9 +399,16 @@ struct UlanziDeckSwiftTests {
         state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents/Codex"), for: 5)
         let display = state.display(for: layout.keys[4])
 
-        #expect(display.title == "打开")
-        #expect(display.subtitle == "Codex")
+        #expect(display.title == "Codex")
+        #expect(display.subtitle == "/Users/ibobby/Documents/Codex")
+        #expect(display.folderButtonContent?.displayName == "Codex")
         #expect(state.folderPath(for: 5) == "/Users/ibobby/Documents/Codex")
+
+        state.setFolderName(" 项目 ", for: 5)
+        let namedDisplay = state.display(for: layout.keys[4])
+
+        #expect(namedDisplay.title == "项目")
+        #expect(namedDisplay.folderButtonContent?.displayName == "项目")
     }
 
     @Test func legacyOpenFolderConfigurationRequiresReselection() throws {
@@ -410,20 +417,29 @@ struct UlanziDeckSwiftTests {
 
         #expect(configuration.path == "/Users/ibobby/Documents")
         #expect(configuration.bookmarkData == nil)
+        #expect(configuration.name.isEmpty)
         #expect(configuration.needsReselection)
         #expect(!configuration.canOpen)
         #expect(configuration.displayName == "Documents")
     }
 
+    @Test func openFolderBookmarksUseReadOnlySecurityScope() {
+        #expect(DeckKeyOpenFolderConfiguration.securityScopedBookmarkCreationOptions.contains(.withSecurityScope))
+        #expect(DeckKeyOpenFolderConfiguration.securityScopedBookmarkCreationOptions.contains(.securityScopeAllowOnlyReadAccess))
+        #expect(DeckKeyOpenFolderConfiguration.securityScopedBookmarkResolutionOptions.contains(.withSecurityScope))
+    }
+
     @Test func openFolderConfigurationPersistsBookmarkData() throws {
         let bookmarkData = try #require("bookmark-data".data(using: .utf8))
-        let configuration = Self.folderConfiguration(path: "/Users/ibobby/Documents", bookmarkData: bookmarkData)
+        let configuration = Self.folderConfiguration(path: "/Users/ibobby/Documents", bookmarkData: bookmarkData, name: "下载")
 
         let encoded = try JSONEncoder().encode(configuration)
         let restored = try JSONDecoder().decode(DeckKeyOpenFolderConfiguration.self, from: encoded)
 
         #expect(restored.path == "/Users/ibobby/Documents")
         #expect(restored.bookmarkData == bookmarkData)
+        #expect(restored.name == "下载")
+        #expect(restored.displayName == "下载")
         #expect(!restored.needsReselection)
         #expect(restored.canOpen)
     }
@@ -443,6 +459,24 @@ struct UlanziDeckSwiftTests {
         #expect(state.smbServerAddress(for: 5) == "server.local/share")
         #expect(state.smbServerName(for: 5) == "素材库")
         #expect(state.configuration(for: 5)?.smbServer.fullURLString == "smb://server.local/share")
+    }
+
+    @Test func displayNameCommitCanAvoidChangingCurrentSelection() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.assign(.openFolder, to: 4)
+        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"), for: 4)
+        state.assign(.connectSMBServer, to: 5)
+        state.setSMBServerAddress("nas.local/media", for: 5)
+        state.select(keyID: 2)
+
+        state.setFolderName(" 资料 ", for: 4, selectsKey: false)
+        state.setSMBServerName(" NAS ", for: 5, selectsKey: false)
+
+        #expect(state.selectedKeyID == 2)
+        #expect(state.openFolderConfiguration(for: 4).name == "资料")
+        #expect(state.smbServerName(for: 5) == "NAS")
     }
 
     @Test func legacyBrightnessKeyFunctionIsNormalizedToNoFunction() {
@@ -1001,8 +1035,9 @@ struct UlanziDeckSwiftTests {
         #expect(displays[0].title == "NAS")
         #expect(displays[0].subtitle == "nas.local/media")
         #expect(displays[0].smbServerButtonContent?.displayName == "NAS")
-        #expect(displays[1].title == "打开")
-        #expect(displays[1].subtitle == "Documents")
+        #expect(displays[1].title == "Documents")
+        #expect(displays[1].subtitle == "/Users/ibobby/Documents")
+        #expect(displays[1].folderButtonContent?.displayName == "Documents")
         #expect(model.interactionState.selectedKeyID == 2)
         #expect(store.savedStates.count == 1)
         #expect(store.savedStates.last?.configuration(for: 1)?.function == .connectSMBServer)
@@ -1199,18 +1234,21 @@ struct UlanziDeckSwiftTests {
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.openFolder)
         model.setSelectedFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"))
+        model.setSelectedFolderName("下载")
 
         try await Self.waitUntil {
-            syncer.partialDisplays.count == 2
+            syncer.partialDisplays.count == 3
         }
         #expect(model.interactionState.configuration(for: 4)?.function == DeckKeyFunction.openFolder)
         #expect(model.interactionState.folderPath(for: 4) == "/Users/ibobby/Documents")
         #expect(syncer.sentDisplays.count == 1)
-        #expect(syncer.partialDisplays.count == 2)
+        #expect(syncer.partialDisplays.count == 3)
         #expect(syncer.partialDisplays.last?.map(\.id) == [4])
-        #expect(syncer.partialDisplays.last?.first?.title == "打开")
-        #expect(syncer.partialDisplays.last?.first?.subtitle == "Documents")
+        #expect(syncer.partialDisplays.last?.first?.title == "下载")
+        #expect(syncer.partialDisplays.last?.first?.subtitle == "/Users/ibobby/Documents")
+        #expect(syncer.partialDisplays.last?.first?.folderButtonContent?.displayName == "下载")
         #expect(store.savedStates.last?.folderPath(for: 4) == "/Users/ibobby/Documents")
+        #expect(store.savedStates.last?.openFolderConfiguration(for: 4).name == "下载")
     }
 
     @MainActor
@@ -1247,6 +1285,59 @@ struct UlanziDeckSwiftTests {
         #expect(syncer.partialDisplays.last?.first?.smbServerButtonContent?.displayName == "NAS")
         #expect(store.savedStates.last?.smbServerAddress(for: 4) == "nas.local/media")
         #expect(store.savedStates.last?.smbServerName(for: 4) == "NAS")
+    }
+
+    @MainActor
+    @Test func previewingDisplayNamesSyncsTrimmedDisplayWithoutPersisting() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            folderOpener: FakeFinderFolderOpener(),
+            smbServerConnector: FakeSMBServerConnector()
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openFolder)
+        model.setSelectedFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"))
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 2
+        }
+
+        let folderSavedStateCount = store.savedStates.count
+        let folderPartialDisplayCount = syncer.partialDisplays.count
+        model.previewFolderName(" 资料 ", for: 4)
+
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == folderPartialDisplayCount + 1
+        }
+        #expect(store.savedStates.count == folderSavedStateCount)
+        #expect(model.interactionState.openFolderConfiguration(for: 4).name == "资料")
+        #expect(syncer.partialDisplays.last?.first?.title == "资料")
+
+        model.selectKey(keyID: 5)
+        model.assignSelectedFunction(.connectSMBServer)
+        model.setSelectedSMBServerAddress("nas.local/media")
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == folderPartialDisplayCount + 3
+        }
+
+        let smbSavedStateCount = store.savedStates.count
+        let smbPartialDisplayCount = syncer.partialDisplays.count
+        model.previewSMBServerName(" NAS ", for: 5)
+
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == smbPartialDisplayCount + 1
+        }
+        #expect(store.savedStates.count == smbSavedStateCount)
+        #expect(model.interactionState.smbServerName(for: 5) == "NAS")
+        #expect(syncer.partialDisplays.last?.first?.title == "NAS")
     }
 
     @MainActor
@@ -1875,8 +1966,6 @@ struct UlanziDeckSwiftTests {
     @Test func iconRendererUsesBlackBackgroundForPlainFunctions() throws {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
-        state.assign(.openFolder, to: 1)
-        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"), for: 1)
         state.assign(.sub2API, to: 3)
         state.setSub2APITargetGroupID(1215, for: 3)
         state.setSub2APILastResult(.success(item: Sub2APICapacityItem(
@@ -1895,6 +1984,25 @@ struct UlanziDeckSwiftTests {
         for key in [layout.keys[0], layout.keys[2], layout.keys[3]] {
             try Self.expectBlackButtonBackground(for: state.display(for: key))
         }
+    }
+
+    @Test func iconRendererUsesFolderBackgroundAndCenteredName() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.openFolder, to: 2)
+        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"), for: 2)
+        state.setFolderName("下载", for: 2)
+        let display = state.display(for: layout.keys[1])
+
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+        let color = try #require(image.colorAt(x: 50, y: 50)?.usingColorSpace(.deviceRGB))
+
+        #expect(display.title == "下载")
+        #expect(display.subtitle == "/Users/ibobby/Documents")
+        #expect(display.folderButtonContent?.displayName == "下载")
+        #expect(color.redComponent + color.greenComponent + color.blueComponent > 0.12)
+        #expect(color.alphaComponent > 0.999)
     }
 
     @Test func iconRendererUsesSMBBackgroundAndCenteredName() throws {
@@ -2601,9 +2709,10 @@ struct UlanziDeckSwiftTests {
 
     private static func folderConfiguration(
         path: String,
-        bookmarkData: Data? = Data("bookmark".utf8)
+        bookmarkData: Data? = Data("bookmark".utf8),
+        name: String = ""
     ) -> DeckKeyOpenFolderConfiguration {
-        DeckKeyOpenFolderConfiguration(path: path, bookmarkData: bookmarkData)
+        DeckKeyOpenFolderConfiguration(path: path, bookmarkData: bookmarkData, name: name)
     }
 
     private static func sub2APICapacityItem(

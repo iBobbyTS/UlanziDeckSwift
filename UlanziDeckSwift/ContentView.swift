@@ -5,6 +5,21 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @State private var brightnessDraftPercent: Int?
+    @State var activeParameterFocusField: ParameterFocusField?
+    @State var folderNameDraft: ParameterNameDraft?
+    @State var smbServerNameDraft: ParameterNameDraft?
+    @FocusState var focusedParameterField: ParameterFocusField?
+
+    enum ParameterFocusField: Hashable {
+        case folderName
+        case smbServerName
+    }
+
+    struct ParameterNameDraft: Equatable {
+        let keyID: Int
+        let originalNormalizedText: String
+        var text: String
+    }
 
     let connectedDevice: H200DeviceIdentity?
     let brightnessPercent: Int
@@ -17,8 +32,11 @@ struct ContentView: View {
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
     let onFolderPathSelection: (DeckKeyOpenFolderConfiguration) -> Void
+    let onFolderNamePreview: (Int, String) -> Void
+    let onFolderNameChange: (Int, String) -> Void
     let onSMBServerAddressChange: (String) -> Void
-    let onSMBServerNameChange: (String) -> Void
+    let onSMBServerNamePreview: (Int, String) -> Void
+    let onSMBServerNameChange: (Int, String) -> Void
     let onBrightnessPercentPreview: (Int) -> Void
     let onBrightnessPercentCommit: (Int) -> Void
     let onSub2APIBaseURLChange: (String) -> Void
@@ -50,6 +68,12 @@ struct ContentView: View {
         }
         .frame(minWidth: minimumWindowWidth, minHeight: 674)
         .background(Color(nsColor: .windowBackgroundColor))
+        .onChange(of: focusedParameterField) { _, newFocus in
+            parameterFocusChanged(to: newFocus)
+        }
+        .onChange(of: interactionState.selectedKeyID) { _, _ in
+            selectedKeyChangedDuringParameterEditing()
+        }
     }
 
     private var deckPreviewAreaHeight: CGFloat {
@@ -679,8 +703,11 @@ struct MihoyoQRCodeView: View {
         onFunctionSelection: { _ in },
         onTallyDefaultValueChange: { _ in },
         onFolderPathSelection: { _ in },
+        onFolderNamePreview: { _, _ in },
+        onFolderNameChange: { _, _ in },
         onSMBServerAddressChange: { _ in },
-        onSMBServerNameChange: { _ in },
+        onSMBServerNamePreview: { _, _ in },
+        onSMBServerNameChange: { _, _ in },
         onBrightnessPercentPreview: { _ in },
         onBrightnessPercentCommit: { _ in },
         onSub2APIBaseURLChange: { _ in },

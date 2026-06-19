@@ -329,8 +329,12 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             drawSub2APIContent(content, in: cardRect, buttonRect: rect)
             return
         }
+        if let content = display.folderButtonContent {
+            drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
+            return
+        }
         if let content = display.smbServerButtonContent {
-            drawSMBServerContent(content, in: cardRect, buttonRect: rect)
+            drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
             return
         }
 
@@ -356,6 +360,8 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         let backgroundAssetName: String?
         if let game = display.mihoyoGame {
             backgroundAssetName = game.buttonBackgroundAssetName
+        } else if display.folderButtonContent != nil {
+            backgroundAssetName = FolderButtonContent.backgroundAssetName
         } else if display.smbServerButtonContent != nil {
             backgroundAssetName = SMBServerButtonContent.backgroundAssetName
         } else {
@@ -370,26 +376,58 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             return
         }
 
+        if display.folderButtonContent != nil || display.smbServerButtonContent != nil {
+            drawFittedBackgroundImage(image, in: rect)
+        } else {
+            let imageRect = NSRect(origin: .zero, size: image.size)
+            image.draw(
+                in: rect,
+                from: imageRect,
+                operation: .copy,
+                fraction: 1,
+                respectFlipped: false,
+                hints: [.interpolation: NSImageInterpolation.high]
+            )
+        }
+        NSColor(calibratedWhite: 0, alpha: 0.38).setFill()
+        rect.fill()
+    }
+
+    private func drawFittedBackgroundImage(_ image: NSImage, in rect: NSRect) {
+        Self.buttonBackgroundColor.setFill()
+        rect.fill()
+
         let imageRect = NSRect(origin: .zero, size: image.size)
+        guard imageRect.width > 0, imageRect.height > 0 else {
+            return
+        }
+
+        let scale = min(rect.width / imageRect.width, rect.height / imageRect.height)
+        let drawSize = NSSize(width: imageRect.width * scale, height: imageRect.height * scale)
+        let drawRect = NSRect(
+            x: rect.midX - drawSize.width / 2,
+            y: rect.midY - drawSize.height / 2,
+            width: drawSize.width,
+            height: drawSize.height
+        )
+
         image.draw(
-            in: rect,
+            in: drawRect,
             from: imageRect,
             operation: .copy,
             fraction: 1,
             respectFlipped: false,
             hints: [.interpolation: NSImageInterpolation.high]
         )
-        NSColor(calibratedWhite: 0, alpha: 0.38).setFill()
-        rect.fill()
     }
 
-    private func drawSMBServerContent(
-        _ content: SMBServerButtonContent,
+    private func drawShortcutContent(
+        _ displayName: String,
         in rect: NSRect,
         buttonRect: NSRect
     ) {
         drawCenteredAutoSizedSingleLineText(
-            content.displayName,
+            displayName,
             weight: .heavy,
             maxFontSize: buttonRect.height * 0.32,
             minFontSize: buttonRect.height * 0.12,

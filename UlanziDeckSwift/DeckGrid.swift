@@ -63,6 +63,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let mihoyoGame: MihoyoGame?
     let mihoyoGameButtonContent: MihoyoGameButtonContent?
     let sub2APIButtonContent: Sub2APIButtonContent?
+    let folderButtonContent: FolderButtonContent?
     let smbServerButtonContent: SMBServerButtonContent?
     let isSelected: Bool
     let isPressed: Bool
@@ -76,6 +77,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         let configuredMihoyoGame = configuration.function.game
         var mihoyoGameButtonContent: MihoyoGameButtonContent?
         var sub2APIButtonContent: Sub2APIButtonContent?
+        var folderButtonContent: FolderButtonContent?
         var smbServerButtonContent: SMBServerButtonContent?
 
         if key.columnSpan > 1 && configuration.displayMode != .function {
@@ -92,8 +94,10 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 title = "\(configuration.tally.value)"
                 subtitle = "默认 \(configuration.tally.defaultValue)"
             case .openFolder:
-                title = "打开"
-                subtitle = configuration.openFolder.displayName
+                let content = FolderButtonContent(displayName: configuration.openFolder.displayName)
+                title = content.displayName
+                subtitle = configuration.openFolder.path ?? ""
+                folderButtonContent = content
             case .connectSMBServer:
                 let content = SMBServerButtonContent(displayName: configuration.smbServer.displayName)
                 title = content.displayName
@@ -153,6 +157,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         }
         self.mihoyoGameButtonContent = mihoyoGameButtonContent
         self.sub2APIButtonContent = sub2APIButtonContent
+        self.folderButtonContent = folderButtonContent
         self.smbServerButtonContent = smbServerButtonContent
         self.isSelected = isSelected
         self.isPressed = isPressed
@@ -178,6 +183,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             mihoyoGame: mihoyoGame,
             mihoyoGameButtonContent: mihoyoGameButtonContent,
             sub2APIButtonContent: sub2APIButtonContent,
+            folderButtonContent: folderButtonContent,
             smbServerButtonContent: smbServerButtonContent,
             devicePixelSize: devicePixelSize
         )
@@ -195,8 +201,15 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let mihoyoGame: MihoyoGame?
     let mihoyoGameButtonContent: MihoyoGameButtonContent?
     let sub2APIButtonContent: Sub2APIButtonContent?
+    let folderButtonContent: FolderButtonContent?
     let smbServerButtonContent: SMBServerButtonContent?
     let devicePixelSize: H200DeviceTarget.PixelSize
+}
+
+nonisolated struct FolderButtonContent: Equatable {
+    static let backgroundAssetName = "FolderBackground"
+
+    let displayName: String
 }
 
 nonisolated struct SMBServerButtonContent: Equatable {
@@ -619,6 +632,22 @@ nonisolated struct DeckGridInteractionState: Equatable {
     }
 
     @discardableResult
+    mutating func setFolderName(_ name: String, for keyID: Int, selectsKey: Bool = true) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .openFolder
+        else {
+            return false
+        }
+
+        if selectsKey {
+            selectedKeyID = keyID
+        }
+        configurations[keyID, default: .tallyDefault].openFolder.name =
+            DeckKeyOpenFolderConfiguration.normalizedName(name)
+        return true
+    }
+
+    @discardableResult
     mutating func setSMBServerAddress(_ address: String, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].function == .connectSMBServer
@@ -632,14 +661,16 @@ nonisolated struct DeckGridInteractionState: Equatable {
     }
 
     @discardableResult
-    mutating func setSMBServerName(_ name: String, for keyID: Int) -> Bool {
+    mutating func setSMBServerName(_ name: String, for keyID: Int, selectsKey: Bool = true) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].function == .connectSMBServer
         else {
             return false
         }
 
-        selectedKeyID = keyID
+        if selectsKey {
+            selectedKeyID = keyID
+        }
         configurations[keyID, default: .tallyDefault].smbServer.name = DeckKeySMBServerConfiguration.normalizedName(name)
         return true
     }

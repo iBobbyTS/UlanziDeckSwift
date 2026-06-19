@@ -54,11 +54,20 @@ struct RootView: View {
             onFolderPathSelection: { configuration in
                 connectionModel.setSelectedFolderConfiguration(configuration)
             },
+            onFolderNamePreview: { keyID, name in
+                connectionModel.previewFolderName(name, for: keyID)
+            },
+            onFolderNameChange: { keyID, name in
+                connectionModel.setFolderName(name, for: keyID)
+            },
             onSMBServerAddressChange: { address in
                 connectionModel.setSelectedSMBServerAddress(address)
             },
-            onSMBServerNameChange: { name in
-                connectionModel.setSelectedSMBServerName(name)
+            onSMBServerNamePreview: { keyID, name in
+                connectionModel.previewSMBServerName(name, for: keyID)
+            },
+            onSMBServerNameChange: { keyID, name in
+                connectionModel.setSMBServerName(name, for: keyID)
             },
             onBrightnessPercentPreview: { percent in
                 connectionModel.previewBrightnessPercent(percent)
