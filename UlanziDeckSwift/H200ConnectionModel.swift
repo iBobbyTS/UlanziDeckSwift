@@ -224,21 +224,22 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        switch interactionState.configuration(for: keyID)?.function {
-        case .some(.tally):
+        let runtimeAction = interactionState.configuration(for: keyID)?.function.pressRuntimeAction ?? .none
+        switch runtimeAction {
+        case .incrementTally:
             if interactionState.triggerShortPress(keyID: keyID) {
                 persistCurrentConfiguration()
                 syncKeyDisplay(keyID: keyID)
             }
-        case .some(.openFolder):
+        case .openFolder:
             openFolder(for: keyID)
-        case .some(.connectSMBServer):
+        case .connectSMBServer:
             connectSMBServer(for: keyID)
-        case .some(.sub2API):
+        case .refreshSub2API:
             fetchSub2API(for: keyID)
-        case .some(.genshinStatus), .some(.starRailStatus), .some(.zenlessZoneStatus):
+        case .refreshMihoyoGame:
             fetchMihoyoGameStatus(for: keyID)
-        case .some(.brightness), .some(.none), nil:
+        case .none:
             return
         }
     }
@@ -914,12 +915,12 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func restartRuntime(for keyID: Int) {
-        switch interactionState.configuration(for: keyID)?.function {
+        switch interactionState.configuration(for: keyID)?.function.scheduledRuntime {
         case .some(.sub2API):
             restartSub2APITimer(for: keyID)
-        case .some(.genshinStatus), .some(.starRailStatus), .some(.zenlessZoneStatus):
+        case .some(.mihoyoGame):
             restartMihoyoGameTimer(for: keyID)
-        case .some(.tally), .some(.openFolder), .some(.connectSMBServer), .some(.brightness), .some(.none), nil:
+        case nil:
             return
         }
     }
