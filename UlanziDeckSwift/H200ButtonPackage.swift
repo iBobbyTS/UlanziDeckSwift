@@ -185,6 +185,82 @@ nonisolated private struct H200ManifestFont: Encodable, Equatable {
     )
 }
 
+nonisolated struct AutoSizedSingleLineText {
+    nonisolated enum FontStyle {
+        case system
+        case monospacedDigitSystem
+    }
+
+    let text: String
+    let sampleText: String
+    let fontStyle: FontStyle
+    let weight: NSFont.Weight
+    let maxFontSize: CGFloat
+    let minFontSize: CGFloat
+
+    init(
+        text: String,
+        sampleText: String? = nil,
+        fontStyle: FontStyle = .system,
+        weight: NSFont.Weight,
+        maxFontSize: CGFloat,
+        minFontSize: CGFloat
+    ) {
+        self.text = text
+        self.sampleText = sampleText ?? text
+        self.fontStyle = fontStyle
+        self.weight = weight
+        self.maxFontSize = maxFontSize
+        self.minFontSize = minFontSize
+    }
+
+    /// 返回一个能放进允许区域的单行字体。
+    ///
+    /// - Parameters:
+    ///   - allowedWidth: 允许宽度。宽度通常从实际按钮宽度来，除非一行有多种字体的排版。
+    ///   - allowedHeight: 允许高度。高度根据排版设计决定。
+    ///
+    /// 这个组件只按单行测量，不允许换行。
+    func fittedFont(allowedWidth: CGFloat, allowedHeight: CGFloat) -> NSFont {
+        let safeMaxFontSize = Swift.max(Swift.max(maxFontSize, minFontSize), 1)
+        let safeMinFontSize = Swift.max(Swift.min(minFontSize, safeMaxFontSize), 1)
+        guard allowedWidth > 0, allowedHeight > 0 else {
+            return font(ofSize: safeMinFontSize)
+        }
+
+        let maxFont = font(ofSize: safeMaxFontSize)
+        let measuredWidth = singleLineWidth(font: maxFont)
+        let measuredHeight = singleLineHeight(font: maxFont)
+        guard measuredWidth > 0, measuredHeight > 0 else {
+            return maxFont
+        }
+
+        let widthScale = allowedWidth / measuredWidth
+        let heightScale = allowedHeight / measuredHeight
+        let scale = Swift.min(1, Swift.min(widthScale, heightScale))
+        let fittedSize = Swift.max(safeMinFontSize, floor(safeMaxFontSize * scale))
+        return font(ofSize: fittedSize)
+    }
+
+    private func font(ofSize size: CGFloat) -> NSFont {
+        switch fontStyle {
+        case .system:
+            return NSFont.systemFont(ofSize: size, weight: weight)
+        case .monospacedDigitSystem:
+            return NSFont.monospacedDigitSystemFont(ofSize: size, weight: weight)
+        }
+    }
+
+    private func singleLineWidth(font: NSFont) -> CGFloat {
+        let measurementText = sampleText.isEmpty ? text : sampleText
+        return (measurementText as NSString).size(withAttributes: [.font: font]).width
+    }
+
+    private func singleLineHeight(font: NSFont) -> CGFloat {
+        ceil(font.ascender - font.descender + font.leading)
+    }
+}
+
 nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
     private static let buttonBackgroundColor = NSColor(calibratedRed: 0, green: 0, blue: 0, alpha: 1)
 
@@ -254,15 +330,19 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             return
         }
 
-        drawCenteredText(
+        drawCenteredAutoSizedSingleLineText(
             display.title,
-            font: .systemFont(ofSize: rect.height * 0.43, weight: .bold),
+            weight: .bold,
+            maxFontSize: rect.height * 0.43,
+            minFontSize: rect.height * 0.14,
             color: .white,
             rect: NSRect(x: cardRect.minX, y: cardRect.midY - rect.height * 0.08, width: cardRect.width, height: rect.height * 0.5)
         )
-        drawCenteredText(
+        drawCenteredAutoSizedSingleLineText(
             display.subtitle,
-            font: .systemFont(ofSize: rect.height * 0.13, weight: .semibold),
+            weight: .semibold,
+            maxFontSize: rect.height * 0.15,
+            minFontSize: rect.height * 0.09,
             color: NSColor(calibratedWhite: 0.82, alpha: 1),
             rect: NSRect(x: cardRect.minX, y: cardRect.midY - rect.height * 0.26, width: cardRect.width, height: rect.height * 0.2)
         )
@@ -295,38 +375,47 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         in rect: NSRect,
         buttonRect: NSRect
     ) {
-        let labelFont = NSFont.systemFont(ofSize: buttonRect.height * 0.115, weight: .semibold)
-        let valueFont = fittedMonospacedDigitFont(
-            for: content.availableConcurrencyText,
-            reservingDigitCount: 4,
-            maxSize: buttonRect.height * 0.36,
-            minSize: buttonRect.height * 0.22,
-            maxWidth: rect.width * 0.94,
-            weight: .heavy
-        )
         let labelHeight = buttonRect.height * 0.13
         let valueHeight = buttonRect.height * 0.39
         let gap = buttonRect.height * 0.045
         let totalHeight = labelHeight + labelHeight + gap + valueHeight
         let top = rect.midY + totalHeight / 2
         let shadow = textShadow()
+        let valueFont = AutoSizedSingleLineText(
+            text: content.availableConcurrencyText,
+            sampleText: content.availableConcurrencyText.count <= 4
+                ? String(repeating: "0", count: 4)
+                : content.availableConcurrencyText,
+            fontStyle: .monospacedDigitSystem,
+            weight: .heavy,
+            maxFontSize: buttonRect.height * 0.36,
+            minFontSize: buttonRect.height * 0.22
+        )
+        .fittedFont(
+            allowedWidth: rect.width * 0.94,
+            allowedHeight: valueHeight
+        )
         let labelColor = NSColor(calibratedWhite: 0.86, alpha: 1)
 
-        drawCenteredSingleLineText(
+        drawCenteredAutoSizedSingleLineText(
             content.serviceName,
-            font: labelFont,
+            weight: .semibold,
+            maxFontSize: buttonRect.height * 0.13,
+            minFontSize: buttonRect.height * 0.085,
             color: labelColor,
             rect: NSRect(x: rect.minX, y: top - labelHeight, width: rect.width, height: labelHeight),
             shadow: shadow
         )
-        drawCenteredSingleLineText(
+        drawCenteredAutoSizedSingleLineText(
             content.groupName,
-            font: labelFont,
+            weight: .semibold,
+            maxFontSize: buttonRect.height * 0.13,
+            minFontSize: buttonRect.height * 0.085,
             color: labelColor,
             rect: NSRect(x: rect.minX, y: top - labelHeight * 2, width: rect.width, height: labelHeight),
             shadow: shadow
         )
-        drawCenteredText(
+        drawCenteredSingleLineText(
             content.availableConcurrencyText,
             font: valueFont,
             color: sub2APIAvailabilityColor(for: content.availabilityLevel),
@@ -346,31 +435,11 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         }
     }
 
-    private func fittedMonospacedDigitFont(
-        for text: String,
-        reservingDigitCount digitCount: Int,
-        maxSize: CGFloat,
-        minSize: CGFloat,
-        maxWidth: CGFloat,
-        weight: NSFont.Weight
-    ) -> NSFont {
-        let sample = text.count <= digitCount ? String(repeating: "0", count: digitCount) : text
-        let maxFont = NSFont.monospacedDigitSystemFont(ofSize: maxSize, weight: weight)
-        let sampleWidth = (sample as NSString).size(withAttributes: [.font: maxFont]).width
-        guard sampleWidth > 0, sampleWidth > maxWidth else {
-            return maxFont
-        }
-
-        let fittedSize = max(minSize, floor(maxSize * maxWidth / sampleWidth))
-        return NSFont.monospacedDigitSystemFont(ofSize: fittedSize, weight: weight)
-    }
-
     private func drawMihoyoGameContent(
         _ content: MihoyoGameButtonContent,
         in rect: NSRect,
         buttonRect: NSRect
     ) {
-        let labelFont = NSFont.systemFont(ofSize: buttonRect.height * 0.105, weight: .semibold)
         let valueFont = NSFont.systemFont(ofSize: buttonRect.height * 0.235, weight: .heavy)
         let valueSuffixFont = NSFont.systemFont(ofSize: buttonRect.height * 0.145, weight: .heavy)
         let labelHeight = buttonRect.height * 0.13
@@ -380,9 +449,11 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         let top = rect.midY + totalHeight / 2
         let shadow = textShadow()
 
-        drawCenteredText(
+        drawCenteredAutoSizedSingleLineText(
             content.staminaLabel,
-            font: labelFont,
+            weight: .semibold,
+            maxFontSize: buttonRect.height * 0.12,
+            minFontSize: buttonRect.height * 0.08,
             color: NSColor(calibratedWhite: 0.88, alpha: 1),
             rect: NSRect(x: rect.minX, y: top - labelHeight, width: rect.width, height: labelHeight),
             shadow: shadow
@@ -395,9 +466,11 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             rect: NSRect(x: rect.minX, y: top - labelHeight - valueHeight, width: rect.width, height: valueHeight),
             shadow: shadow
         )
-        drawCenteredText(
+        drawCenteredAutoSizedSingleLineText(
             content.dailyLabel,
-            font: labelFont,
+            weight: .semibold,
+            maxFontSize: buttonRect.height * 0.12,
+            minFontSize: buttonRect.height * 0.08,
             color: NSColor(calibratedWhite: 0.88, alpha: 1),
             rect: NSRect(
                 x: rect.minX,
@@ -441,6 +514,31 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         ]
         attributes[.shadow] = shadow
         (text as NSString).draw(with: rect, options: [.usesLineFragmentOrigin, .usesFontLeading], attributes: attributes)
+    }
+
+    private func drawCenteredAutoSizedSingleLineText(
+        _ text: String,
+        weight: NSFont.Weight,
+        maxFontSize: CGFloat,
+        minFontSize: CGFloat,
+        color: NSColor,
+        rect: NSRect,
+        shadow: NSShadow? = nil
+    ) {
+        let font = AutoSizedSingleLineText(
+            text: text,
+            weight: weight,
+            maxFontSize: maxFontSize,
+            minFontSize: minFontSize
+        )
+        .fittedFont(allowedWidth: rect.width, allowedHeight: rect.height)
+        drawCenteredSingleLineText(
+            text,
+            font: font,
+            color: color,
+            rect: rect,
+            shadow: shadow
+        )
     }
 
     private func drawCenteredSingleLineText(

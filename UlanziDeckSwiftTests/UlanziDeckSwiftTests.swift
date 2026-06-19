@@ -1683,6 +1683,43 @@ struct UlanziDeckSwiftTests {
         #expect(!png.isEmpty)
     }
 
+    @Test func autoSizedSingleLineTextFitsAllowedWidthAndHeight() {
+        let text = AutoSizedSingleLineText(
+            text: "8888",
+            fontStyle: .monospacedDigitSystem,
+            weight: .heavy,
+            maxFontSize: 80,
+            minFontSize: 12
+        )
+
+        let generousFont = text.fittedFont(allowedWidth: 500, allowedHeight: 500)
+        let widthLimitedFont = text.fittedFont(allowedWidth: 72, allowedHeight: 500)
+        let heightLimitedFont = text.fittedFont(allowedWidth: 500, allowedHeight: 18)
+
+        #expect(abs(generousFont.pointSize - 80) < 0.001)
+        #expect(widthLimitedFont.pointSize < generousFont.pointSize)
+        #expect(heightLimitedFont.pointSize < generousFont.pointSize)
+        #expect(widthLimitedFont.pointSize >= 12)
+        #expect(heightLimitedFont.pointSize >= 12)
+    }
+
+    @Test func autoSizedSingleLineTextUsesSampleTextForReservedWidth() {
+        let maxFont = NSFont.monospacedDigitSystemFont(ofSize: 80, weight: .heavy)
+        let threeDigitWidth = ("000" as NSString).size(withAttributes: [.font: maxFont]).width
+        let text = AutoSizedSingleLineText(
+            text: "7",
+            sampleText: "0000",
+            fontStyle: .monospacedDigitSystem,
+            weight: .heavy,
+            maxFontSize: 80,
+            minFontSize: 12
+        )
+
+        let fittedFont = text.fittedFont(allowedWidth: threeDigitWidth, allowedHeight: 500)
+
+        #expect(fittedFont.pointSize < 80)
+    }
+
     @Test func iconRendererUsesBlackButtonBackground() throws {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
