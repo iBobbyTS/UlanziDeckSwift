@@ -195,6 +195,88 @@ struct UlanziDeckSwiftTests {
         #expect(!didRejectSameKey)
     }
 
+    @Test func pageFolderCreatesNestedPageWithBackKeyAndDepthLimit() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        #expect(state.canAssignPageFolder(to: 2))
+        let didAssignRootPageFolder = state.assign(.pageFolder, to: 2)
+        #expect(didAssignRootPageFolder)
+        let firstPageID = try #require(state.pageID(for: 2))
+        let rootDisplay = state.display(for: layout.keys[1])
+        #expect(rootDisplay.pageFolderButtonContent?.displayName == "文件夹")
+        #expect(rootDisplay.title == "文件夹")
+
+        let didEnterFirstPage = state.enterPageFolder(keyID: 2)
+        #expect(didEnterFirstPage)
+        #expect(state.currentPageID == firstPageID)
+        #expect(state.currentPageDepth == 1)
+        #expect(state.navigationPathTitles == ["主页", "文件夹"])
+        #expect(state.configuration(for: 1)?.function == .pageBack)
+        #expect(state.configurations.filter { $0.key != 1 }.values.allSatisfy { $0.function == DeckKeyFunction.none })
+
+        let didAssignSecondLevelPageFolder = state.assign(.pageFolder, to: 2)
+        #expect(didAssignSecondLevelPageFolder)
+        let didEnterSecondPage = state.enterPageFolder(keyID: 2)
+        #expect(didEnterSecondPage)
+        #expect(state.currentPageDepth == 2)
+
+        let didAssignThirdLevelPageFolder = state.assign(.pageFolder, to: 3)
+        #expect(didAssignThirdLevelPageFolder)
+        let didEnterThirdPage = state.enterPageFolder(keyID: 3)
+        #expect(didEnterThirdPage)
+        #expect(state.currentPageDepth == 3)
+        #expect(!state.canAssignPageFolder(to: 4))
+        let didRejectFourthLevelPageFolder = state.assign(.pageFolder, to: 4)
+        #expect(!didRejectFourthLevelPageFolder)
+    }
+
+    @Test func pageBackCannotBeDeletedOrReassignedButCanMoveWithinSquareKeys() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.assign(.pageFolder, to: 2)
+        state.enterPageFolder(keyID: 2)
+
+        #expect(state.configuration(for: 1)?.function == .pageBack)
+        #expect(!state.canDeleteFunction(keyID: 1))
+        let didClearBackKey = state.clearFunction(keyID: 1)
+        #expect(!didClearBackKey)
+        let didReassignBackKey = state.assign(.tally, to: 1)
+        #expect(!didReassignBackKey)
+
+        let didSwapBackKey = state.swapSquareConfigurations(sourceKeyID: 1, targetKeyID: 3)
+        #expect(didSwapBackKey)
+        #expect(state.configuration(for: 1)?.function == DeckKeyFunction.none)
+        #expect(state.configuration(for: 3)?.function == .pageBack)
+        let didClearMovedBackKey = state.clearFunction(keyID: 3)
+        #expect(!didClearMovedBackKey)
+        let didGoBack = state.goBackPage()
+        #expect(didGoBack)
+        #expect(state.currentPageID == DeckGridInteractionState.rootPageID)
+    }
+
+    @Test func clearingPageFolderDeletesNestedPageSubtree() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.assign(.pageFolder, to: 2)
+        let firstPageID = try #require(state.pageID(for: 2))
+        state.enterPageFolder(keyID: 2)
+        state.assign(.pageFolder, to: 3)
+        let secondPageID = try #require(state.pageID(for: 3))
+        state.goToRootPage()
+
+        #expect(state.persistedPages.map(\.id).contains(firstPageID))
+        #expect(state.persistedPages.map(\.id).contains(secondPageID))
+        let didClearPageFolder = state.clearFunction(keyID: 2)
+        #expect(didClearPageFolder)
+        #expect(!state.persistedPages.map(\.id).contains(firstPageID))
+        #expect(!state.persistedPages.map(\.id).contains(secondPageID))
+        let didEnterClearedPageFolder = state.enterPageFolder(keyID: 2)
+        #expect(!didEnterClearedPageFolder)
+    }
+
     @Test func wideKeyDisplayModeChangesPreviewAndDisablesFunctionPresses() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
@@ -637,6 +719,71 @@ struct UlanziDeckSwiftTests {
         #expect(store.loadButtonBackgroundDimmingEnabled() == false)
         #expect(restored.pressedKeyIDs.isEmpty)
         #expect(restored.selectedKeyID == 1)
+    }
+
+    @Test func userDefaultsStoreMigratesLegacyFlatConfigurationToRootPage() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let storageKey = "deckConfiguration"
+        let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: storageKey)
+        let legacyData = Data("""
+        {
+          "version": 1,
+          "layoutIdentifier": "h200Prototype",
+          "keys": [
+            {
+              "id": 3,
+              "configuration": {
+                "function": "openFolder",
+                "openFolder": {
+                  "path": "/Users/ibobby/Documents",
+                  "bookmarkData": "Ym9va21hcms=",
+                  "name": "文档"
+                }
+              }
+            }
+          ]
+        }
+        """.utf8)
+        defaults.set(legacyData, forKey: storageKey)
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        #expect(restored.currentPageID == DeckGridInteractionState.rootPageID)
+        #expect(restored.navigationPathTitles == ["主页"])
+        #expect(restored.configuration(for: 3)?.function == .openFolder)
+        #expect(restored.openFolderConfiguration(for: 3).name == "文档")
+    }
+
+    @Test func userDefaultsStorePersistsPageTreeAndRestoresToRootPage() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let layout = DeckGridLayout.h200Prototype
+        let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: "deckConfiguration")
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.pageFolder, to: 2)
+        state.enterPageFolder(keyID: 2)
+        state.assign(.openFolder, to: 4)
+        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents/Nested"), for: 4)
+
+        store.saveInteractionState(state, for: layout)
+        var restored = try #require(store.loadInteractionState(for: layout))
+
+        #expect(restored.currentPageID == DeckGridInteractionState.rootPageID)
+        #expect(restored.navigationPathTitles == ["主页"])
+        #expect(restored.configuration(for: 2)?.function == .pageFolder)
+        let didEnterRestoredPage = restored.enterPageFolder(keyID: 2)
+        #expect(didEnterRestoredPage)
+        #expect(restored.configuration(for: 1)?.function == .pageBack)
+        #expect(restored.configuration(for: 4)?.function == .openFolder)
+        #expect(restored.folderPath(for: 4) == "/Users/ibobby/Documents/Nested")
     }
 
     @Test func userDefaultsStoreIgnoresBrokenConfigurationData() throws {
@@ -1732,6 +1879,73 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func physicalButtonPageFolderNavigatesAndSendsFullPagePackage() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 2)
+        model.assignSelectedFunction(.pageFolder)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 1
+        }
+
+        syncer.emitInput(H200InputEvent(state: 1, index: 1, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 1, type: .button, action: .release))
+
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 2
+        }
+        #expect(model.interactionState.currentPageDepth == 1)
+        #expect(model.interactionState.configuration(for: 1)?.function == .pageBack)
+        #expect(syncer.sentDisplays.last?.count == 14)
+        #expect(syncer.sentDisplays.last?.first?.pageBackButtonContent?.displayName == "返回")
+        #expect(store.savedStates.last?.currentPageID == DeckGridInteractionState.rootPageID)
+    }
+
+    @MainActor
+    @Test func physicalButtonPageBackReturnsAndSendsFullPagePackage() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 2)
+        model.assignSelectedFunction(.pageFolder)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 1
+        }
+        model.navigateKey(keyID: 2)
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 2
+        }
+
+        syncer.emitInput(H200InputEvent(state: 1, index: 0, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 0, type: .button, action: .release))
+
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 3
+        }
+        #expect(model.interactionState.currentPageID == DeckGridInteractionState.rootPageID)
+        #expect(syncer.sentDisplays.last?.count == 14)
+        #expect(syncer.sentDisplays.last?[1].pageFolderButtonContent?.displayName == "文件夹")
+    }
+
+    @MainActor
     @Test func physicalButtonShortPressIncrementsTallyWithoutChangingUISelection() async throws {
         let connectedIdentity = Self.protocolInterfaceIdentity()
         let syncer = FakeH200DeckSyncer()
@@ -2374,6 +2588,38 @@ struct UlanziDeckSwiftTests {
         #expect(display.folderButtonContent?.displayName == "下载")
         #expect(color.redComponent + color.greenComponent + color.blueComponent > 0.12)
         #expect(color.alphaComponent > 0.999)
+    }
+
+    @Test func iconRendererUsesPageFolderBackgroundWithoutShortcutText() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.pageFolder, to: 2)
+        let display = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: false)
+
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+        let centerColor = try #require(image.colorAt(x: image.pixelsWide / 2, y: image.pixelsHigh / 2)?.usingColorSpace(.deviceRGB))
+        let cornerColor = try #require(image.colorAt(x: 1, y: 1)?.usingColorSpace(.deviceRGB))
+
+        #expect(display.pageFolderButtonContent?.displayName == "文件夹")
+        #expect(centerColor.redComponent + centerColor.greenComponent + centerColor.blueComponent > 2.2)
+        #expect(cornerColor.redComponent + cornerColor.greenComponent + cornerColor.blueComponent < 0.01)
+    }
+
+    @Test func iconRendererUsesBackTextForPageBackKey() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.pageFolder, to: 2)
+        state.enterPageFolder(keyID: 2)
+        let display = state.display(for: layout.keys[0])
+
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+        let textBounds = try #require(Self.brightPixelBounds(in: image))
+
+        #expect(display.pageBackButtonContent?.displayName == "返回")
+        #expect(textBounds.width > 20)
+        #expect(textBounds.height > 10)
     }
 
     @Test func iconRendererUsesFileNameContentOnBlackBackground() throws {

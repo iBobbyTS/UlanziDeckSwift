@@ -66,9 +66,13 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let folderButtonContent: FolderButtonContent?
     let fileButtonContent: FileButtonContent?
     let smbServerButtonContent: SMBServerButtonContent?
+    let pageFolderButtonContent: PageFolderButtonContent?
+    let pageBackButtonContent: PageBackButtonContent?
     let buttonBackgroundDimmingEnabled: Bool
     let isSelected: Bool
     let isPressed: Bool
+    let canDelete: Bool
+    let canDrag: Bool
 
     init(
         key: DeckGridLayout.Key,
@@ -88,6 +92,8 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         var folderButtonContent: FolderButtonContent?
         var fileButtonContent: FileButtonContent?
         var smbServerButtonContent: SMBServerButtonContent?
+        var pageFolderButtonContent: PageFolderButtonContent?
+        var pageBackButtonContent: PageBackButtonContent?
 
         if key.columnSpan > 1 && configuration.displayMode != .function {
             title = configuration.displayMode.previewTitle
@@ -120,6 +126,16 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 title = content.displayName
                 subtitle = configuration.smbServer.address
                 smbServerButtonContent = content
+            case .pageFolder:
+                let content = PageFolderButtonContent(displayName: configuration.pageFolder.displayName)
+                title = content.displayName
+                subtitle = ""
+                pageFolderButtonContent = content
+            case .pageBack:
+                let content = PageBackButtonContent(displayName: "返回")
+                title = content.displayName
+                subtitle = "上一级"
+                pageBackButtonContent = content
             case .brightness:
                 title = ""
                 subtitle = ""
@@ -177,9 +193,13 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         self.folderButtonContent = folderButtonContent
         self.fileButtonContent = fileButtonContent
         self.smbServerButtonContent = smbServerButtonContent
+        self.pageFolderButtonContent = pageFolderButtonContent
+        self.pageBackButtonContent = pageBackButtonContent
         self.buttonBackgroundDimmingEnabled = buttonBackgroundDimmingEnabled
         self.isSelected = isSelected
         self.isPressed = isPressed
+        canDelete = configuration.function != .pageBack
+        canDrag = key.columnSpan == 1
     }
 
     var isWide: Bool {
@@ -205,6 +225,8 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             folderButtonContent: folderButtonContent,
             fileButtonContent: fileButtonContent,
             smbServerButtonContent: smbServerButtonContent,
+            pageFolderButtonContent: pageFolderButtonContent,
+            pageBackButtonContent: pageBackButtonContent,
             buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled,
             devicePixelSize: devicePixelSize
         )
@@ -225,6 +247,8 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let folderButtonContent: FolderButtonContent?
     let fileButtonContent: FileButtonContent?
     let smbServerButtonContent: SMBServerButtonContent?
+    let pageFolderButtonContent: PageFolderButtonContent?
+    let pageBackButtonContent: PageBackButtonContent?
     let buttonBackgroundDimmingEnabled: Bool
     let devicePixelSize: H200DeviceTarget.PixelSize
 }
@@ -243,6 +267,16 @@ nonisolated struct FileButtonContent: Equatable {
 nonisolated struct SMBServerButtonContent: Equatable {
     static let backgroundAssetName = "SMBServerBackground"
 
+    let displayName: String
+}
+
+nonisolated struct PageFolderButtonContent: Equatable {
+    static let backgroundAssetName = "PageFolderBackground"
+
+    let displayName: String
+}
+
+nonisolated struct PageBackButtonContent: Equatable {
     let displayName: String
 }
 
@@ -330,41 +364,189 @@ nonisolated struct DeckPreviewLayoutMetrics: Equatable {
     }
 }
 
+nonisolated struct DeckGridPage: Equatable {
+    let id: String
+    var parentID: String?
+    var configurations: [Int: DeckKeyConfiguration]
+}
+
 nonisolated struct DeckGridInteractionState: Equatable {
+    static let rootPageID = "root"
+    static let maximumNestedPageDepth = 3
+
     private(set) var selectedKeyID: Int?
-    private(set) var configurations: [Int: DeckKeyConfiguration]
+    private(set) var currentPageID: String
+    private var pages: [String: DeckGridPage]
     private(set) var pressedKeyIDs: Set<Int>
+    private let layout: DeckGridLayout
     private let validKeyIDs: Set<Int>
     private let wideKeyIDs: Set<Int>
 
+    var configurations: [Int: DeckKeyConfiguration] {
+        get {
+            pages[currentPageID]?.configurations ?? [:]
+        }
+        set {
+            if pages[currentPageID] == nil {
+                pages[currentPageID] = DeckGridPage(id: currentPageID, parentID: nil, configurations: [:])
+            }
+            pages[currentPageID]?.configurations = newValue
+        }
+    }
+
+    var persistedPages: [DeckGridPage] {
+        pages.values.sorted { first, second in
+            if first.id == Self.rootPageID {
+                return true
+            }
+            if second.id == Self.rootPageID {
+                return false
+            }
+            return first.id < second.id
+        }
+    }
+
+    var currentPageDepth: Int {
+        pageDepth(pageID: currentPageID)
+    }
+
+    var navigationPathTitles: [String] {
+        navigationPathPageIDs().map { pageID in
+            pageID == Self.rootPageID ? "主页" : "文件夹"
+        }
+    }
+
     init(layout: DeckGridLayout) {
         selectedKeyID = layout.keys.first?.id
-        configurations = Dictionary(uniqueKeysWithValues: layout.keys.map { ($0.id, .tallyDefault) })
+        currentPageID = Self.rootPageID
+        self.layout = layout
+        pages = [
+            Self.rootPageID: DeckGridPage(
+                id: Self.rootPageID,
+                parentID: nil,
+                configurations: Self.rootConfigurations(for: layout)
+            ),
+        ]
         pressedKeyIDs = []
         validKeyIDs = Set(layout.keys.map(\.id))
         wideKeyIDs = Set(layout.keys.filter { $0.columnSpan > 1 }.map(\.id))
     }
 
     init(layout: DeckGridLayout, configurations storedConfigurations: [Int: DeckKeyConfiguration]) {
-        let validKeyIDs = Set(layout.keys.map(\.id))
-        let wideKeyIDs = Set(layout.keys.filter { $0.columnSpan > 1 }.map(\.id))
-
-        selectedKeyID = layout.keys.first?.id
-        configurations = Dictionary(uniqueKeysWithValues: layout.keys.map { ($0.id, .tallyDefault) })
-        pressedKeyIDs = []
-        self.validKeyIDs = validKeyIDs
-        self.wideKeyIDs = wideKeyIDs
-
-        for keyID in validKeyIDs {
-            if let configuration = storedConfigurations[keyID] {
-                configurations[keyID] = Self.normalized(configuration, isWide: wideKeyIDs.contains(keyID))
-            }
-        }
+        self.init(layout: layout, pages: [
+            DeckGridPage(
+                id: Self.rootPageID,
+                parentID: nil,
+                configurations: storedConfigurations
+            ),
+        ])
     }
 
-    private static func normalized(_ configuration: DeckKeyConfiguration, isWide: Bool) -> DeckKeyConfiguration {
+    init(layout: DeckGridLayout, pages storedPages: [DeckGridPage]) {
+        let validKeyIDs = Set(layout.keys.map(\.id))
+        let wideKeyIDs = Set(layout.keys.filter { $0.columnSpan > 1 }.map(\.id))
+        self.layout = layout
+        self.validKeyIDs = validKeyIDs
+        self.wideKeyIDs = wideKeyIDs
+        selectedKeyID = layout.keys.first?.id
+        currentPageID = Self.rootPageID
+        pressedKeyIDs = []
+
+        var normalizedPages: [String: DeckGridPage] = [:]
+        for page in storedPages where !page.id.isEmpty {
+            let isRootPage = page.id == Self.rootPageID
+            let defaultConfigurations = isRootPage
+                ? Self.rootConfigurations(for: layout)
+                : Self.childPageConfigurations(for: layout)
+            normalizedPages[page.id] = DeckGridPage(
+                id: page.id,
+                parentID: isRootPage ? nil : page.parentID,
+                configurations: Self.normalizedConfigurations(
+                    page.configurations,
+                    defaultConfigurations: defaultConfigurations,
+                    allowsPageBack: !isRootPage,
+                    wideKeyIDs: wideKeyIDs
+                )
+            )
+        }
+
+        if normalizedPages[Self.rootPageID] == nil {
+            normalizedPages[Self.rootPageID] = DeckGridPage(
+                id: Self.rootPageID,
+                parentID: nil,
+                configurations: Self.rootConfigurations(for: layout)
+            )
+        }
+        for pageID in Array(normalizedPages.keys) where pageID != Self.rootPageID {
+            let configurations = normalizedPages[pageID]?.configurations ?? [:]
+            normalizedPages[pageID]?.configurations = Self.ensureBackKey(
+                in: configurations,
+                layout: layout
+            )
+        }
+        pages = normalizedPages
+    }
+
+    private static func rootConfigurations(for layout: DeckGridLayout) -> [Int: DeckKeyConfiguration] {
+        Dictionary(uniqueKeysWithValues: layout.keys.map { ($0.id, .tallyDefault) })
+    }
+
+    private static func childPageConfigurations(for layout: DeckGridLayout) -> [Int: DeckKeyConfiguration] {
+        let emptyConfigurations = Dictionary(uniqueKeysWithValues: layout.keys.map { ($0.id, DeckKeyConfiguration.empty) })
+        return ensureBackKey(in: emptyConfigurations, layout: layout)
+    }
+
+    private static func ensureBackKey(
+        in configurations: [Int: DeckKeyConfiguration],
+        layout: DeckGridLayout
+    ) -> [Int: DeckKeyConfiguration] {
+        if configurations.values.contains(where: { $0.function == .pageBack }) {
+            return configurations
+        }
+
+        guard let key = layout.keys.first(where: { $0.columnSpan == 1 }) else {
+            return configurations
+        }
+
+        var updatedConfigurations = configurations
+        updatedConfigurations[key.id] = .pageBack
+        return updatedConfigurations
+    }
+
+    private static func normalizedConfigurations(
+        _ storedConfigurations: [Int: DeckKeyConfiguration],
+        defaultConfigurations: [Int: DeckKeyConfiguration],
+        allowsPageBack: Bool,
+        wideKeyIDs: Set<Int>
+    ) -> [Int: DeckKeyConfiguration] {
+        var normalizedConfigurations = defaultConfigurations
+        for keyID in normalizedConfigurations.keys {
+            if let configuration = storedConfigurations[keyID] {
+                normalizedConfigurations[keyID] = Self.normalized(
+                    configuration,
+                    isWide: wideKeyIDs.contains(keyID),
+                    allowsPageBack: allowsPageBack
+                )
+            }
+        }
+        return normalizedConfigurations
+    }
+
+    private static func normalized(
+        _ configuration: DeckKeyConfiguration,
+        isWide: Bool,
+        allowsPageBack: Bool
+    ) -> DeckKeyConfiguration {
         var normalizedConfiguration = configuration
         if normalizedConfiguration.function == .brightness {
+            normalizedConfiguration = .empty
+        }
+
+        if normalizedConfiguration.function == .pageBack, (!allowsPageBack || isWide) {
+            normalizedConfiguration = .empty
+        }
+
+        if normalizedConfiguration.function == .pageFolder, isWide {
             normalizedConfiguration = .empty
         }
 
@@ -415,7 +597,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
     mutating func beginPress(keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].displayMode == .function,
-              DeckKeyFunction.assignableCases.contains(configurations[keyID, default: .tallyDefault].function),
+              configurations[keyID, default: .tallyDefault].function.pressRuntimeAction != .none,
               !pressedKeyIDs.contains(keyID)
         else {
             return false
@@ -476,6 +658,66 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     func mihoyoGameConfiguration(for keyID: Int) -> DeckKeyMihoyoGameConfiguration {
         configurations[keyID, default: .tallyDefault].mihoyoGame
+    }
+
+    func canAssignPageFolder(to keyID: Int) -> Bool {
+        validKeyIDs.contains(keyID)
+            && !wideKeyIDs.contains(keyID)
+            && currentPageDepth < Self.maximumNestedPageDepth
+            && configurations[keyID, default: .tallyDefault].function != .pageBack
+    }
+
+    func canDeleteFunction(keyID: Int) -> Bool {
+        validKeyIDs.contains(keyID)
+            && configurations[keyID, default: .tallyDefault].function != .pageBack
+    }
+
+    func pageID(for keyID: Int) -> String? {
+        guard configurations[keyID, default: .tallyDefault].function == .pageFolder else {
+            return nil
+        }
+
+        return configurations[keyID, default: .tallyDefault].pageFolder.pageID
+    }
+
+    @discardableResult
+    mutating func enterPageFolder(keyID: Int) -> Bool {
+        guard let pageID = pageID(for: keyID),
+              pages[pageID] != nil
+        else {
+            return false
+        }
+
+        currentPageID = pageID
+        selectedKeyID = firstSelectableKeyID()
+        pressedKeyIDs.removeAll()
+        return true
+    }
+
+    @discardableResult
+    mutating func goBackPage() -> Bool {
+        guard let parentID = pages[currentPageID]?.parentID,
+              pages[parentID] != nil
+        else {
+            return false
+        }
+
+        currentPageID = parentID
+        selectedKeyID = firstSelectableKeyID()
+        pressedKeyIDs.removeAll()
+        return true
+    }
+
+    @discardableResult
+    mutating func goToRootPage() -> Bool {
+        guard currentPageID != Self.rootPageID else {
+            return false
+        }
+
+        currentPageID = Self.rootPageID
+        selectedKeyID = firstSelectableKeyID()
+        pressedKeyIDs.removeAll()
+        return true
     }
 
     @discardableResult
@@ -765,11 +1007,33 @@ nonisolated struct DeckGridInteractionState: Equatable {
     @discardableResult
     mutating func assign(_ function: DeckKeyFunction, to keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
-              DeckKeyFunction.assignableCases.contains(function)
+              DeckKeyFunction.assignableCases.contains(function),
+              configurations[keyID, default: .tallyDefault].function != .pageBack
         else {
             return false
         }
 
+        if function == .pageFolder {
+            guard canAssignPageFolder(to: keyID) else {
+                return false
+            }
+
+            removeChildPageIfNeeded(for: keyID)
+            let childPageID = makeChildPageID()
+            pages[childPageID] = DeckGridPage(
+                id: childPageID,
+                parentID: currentPageID,
+                configurations: Self.childPageConfigurations(for: layout)
+            )
+            selectedKeyID = keyID
+            configurations[keyID] = DeckKeyConfiguration(
+                function: .pageFolder,
+                pageFolder: DeckKeyPageFolderConfiguration(pageID: childPageID)
+            )
+            return true
+        }
+
+        removeChildPageIfNeeded(for: keyID)
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].displayMode = .function
         configurations[keyID, default: .tallyDefault].function = function
@@ -795,11 +1059,12 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     @discardableResult
     mutating func clearFunction(keyID: Int) -> Bool {
-        guard validKeyIDs.contains(keyID) else {
+        guard canDeleteFunction(keyID: keyID) else {
             return false
         }
 
         selectedKeyID = keyID
+        removeChildPageIfNeeded(for: keyID)
         pressedKeyIDs.remove(keyID)
         configurations[keyID] = .empty
         return true
@@ -819,6 +1084,77 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     func isPressed(keyID: Int) -> Bool {
         pressedKeyIDs.contains(keyID)
+    }
+
+    private func firstSelectableKeyID() -> Int? {
+        layout.keys.first?.id
+    }
+
+    private func navigationPathPageIDs() -> [String] {
+        var path: [String] = []
+        var nextPageID: String? = currentPageID
+        var visitedPageIDs: Set<String> = []
+
+        while let pageID = nextPageID,
+              !visitedPageIDs.contains(pageID) {
+            visitedPageIDs.insert(pageID)
+            path.append(pageID)
+
+            if pageID == Self.rootPageID {
+                break
+            }
+
+            nextPageID = pages[pageID]?.parentID
+        }
+
+        if path.last != Self.rootPageID {
+            path.append(Self.rootPageID)
+        }
+
+        return path.reversed()
+    }
+
+    private func pageDepth(pageID: String) -> Int {
+        var depth = 0
+        var nextPageID = pages[pageID]?.parentID
+        var visitedPageIDs: Set<String> = [pageID]
+
+        while let pageID = nextPageID,
+              pageID != Self.rootPageID,
+              !visitedPageIDs.contains(pageID) {
+            visitedPageIDs.insert(pageID)
+            depth += 1
+            nextPageID = pages[pageID]?.parentID
+        }
+
+        return nextPageID == Self.rootPageID ? depth + 1 : depth
+    }
+
+    private func makeChildPageID() -> String {
+        var pageID: String
+        repeat {
+            pageID = "page-\(UUID().uuidString)"
+        } while pages[pageID] != nil
+
+        return pageID
+    }
+
+    private mutating func removeChildPageIfNeeded(for keyID: Int) {
+        guard let pageID = pageID(for: keyID) else {
+            return
+        }
+
+        removePageSubtree(pageID)
+    }
+
+    private mutating func removePageSubtree(_ pageID: String) {
+        let childPageIDs = pages.values
+            .filter { $0.parentID == pageID }
+            .map(\.id)
+        for childPageID in childPageIDs {
+            removePageSubtree(childPageID)
+        }
+        pages[pageID] = nil
     }
 
     func display(for key: DeckGridLayout.Key, buttonBackgroundDimmingEnabled: Bool = true) -> DeckKeyDisplay {

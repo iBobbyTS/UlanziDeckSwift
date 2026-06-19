@@ -43,30 +43,48 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
     func loadInteractionState(for layout: DeckGridLayout) -> DeckGridInteractionState? {
         guard let data = defaults.data(forKey: storageKey),
               let stored = try? decoder.decode(StoredDeckConfiguration.self, from: data),
-              stored.version == StoredDeckConfiguration.currentVersion,
               stored.layoutIdentifier == layout.identifier
         else {
             return nil
         }
 
-        var configurations: [Int: DeckKeyConfiguration] = [:]
-        for key in stored.keys {
-            configurations[key.id] = key.configuration
-        }
+        switch stored.version {
+        case 1:
+            var configurations: [Int: DeckKeyConfiguration] = [:]
+            for key in stored.keys {
+                configurations[key.id] = key.configuration
+            }
+            return DeckGridInteractionState(layout: layout, configurations: configurations)
 
-        return DeckGridInteractionState(layout: layout, configurations: configurations)
+        case StoredDeckConfiguration.currentVersion:
+            let pages = stored.pages.map { page in
+                DeckGridPage(
+                    id: page.id,
+                    parentID: page.parentID,
+                    configurations: Dictionary(uniqueKeysWithValues: page.keys.map { ($0.id, $0.configuration) })
+                )
+            }
+            return DeckGridInteractionState(layout: layout, pages: pages)
+
+        default:
+            return nil
+        }
     }
 
     func saveInteractionState(_ state: DeckGridInteractionState, for layout: DeckGridLayout) {
-        let keys = layout.keys.compactMap { key -> StoredDeckKeyConfiguration? in
-            guard let configuration = state.configuration(for: key.id) else {
-                return nil
+        let pages = state.persistedPages.map { page in
+            let keys = layout.keys.compactMap { key -> StoredDeckKeyConfiguration? in
+                guard let configuration = page.configurations[key.id] else {
+                    return nil
+                }
+
+                return StoredDeckKeyConfiguration(id: key.id, configuration: configuration)
             }
 
-            return StoredDeckKeyConfiguration(id: key.id, configuration: configuration)
+            return StoredDeckPage(id: page.id, parentID: page.parentID, keys: keys)
         }
 
-        let stored = StoredDeckConfiguration(layoutIdentifier: layout.identifier, keys: keys)
+        let stored = StoredDeckConfiguration(layoutIdentifier: layout.identifier, pages: pages)
         guard let data = try? encoder.encode(stored) else {
             return
         }
@@ -100,20 +118,43 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
 }
 
 nonisolated private struct StoredDeckConfiguration: Codable, Equatable {
-    static let currentVersion = 1
+    static let currentVersion = 2
 
     let version: Int
     let layoutIdentifier: String
     let keys: [StoredDeckKeyConfiguration]
+    let pages: [StoredDeckPage]
 
-    init(layoutIdentifier: String, keys: [StoredDeckKeyConfiguration]) {
+    init(layoutIdentifier: String, pages: [StoredDeckPage]) {
         version = Self.currentVersion
         self.layoutIdentifier = layoutIdentifier
-        self.keys = keys
+        keys = []
+        self.pages = pages
+    }
+
+    enum CodingKeys: CodingKey {
+        case version
+        case layoutIdentifier
+        case keys
+        case pages
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        layoutIdentifier = try container.decode(String.self, forKey: .layoutIdentifier)
+        keys = try container.decodeIfPresent([StoredDeckKeyConfiguration].self, forKey: .keys) ?? []
+        pages = try container.decodeIfPresent([StoredDeckPage].self, forKey: .pages) ?? []
     }
 }
 
 nonisolated private struct StoredDeckKeyConfiguration: Codable, Equatable {
     let id: Int
     let configuration: DeckKeyConfiguration
+}
+
+nonisolated private struct StoredDeckPage: Codable, Equatable {
+    let id: String
+    let parentID: String?
+    let keys: [StoredDeckKeyConfiguration]
 }

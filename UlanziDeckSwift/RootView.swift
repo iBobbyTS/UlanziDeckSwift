@@ -39,6 +39,9 @@ struct RootView: View {
             onKeySelection: { keyID in
                 connectionModel.selectKey(keyID: keyID)
             },
+            onKeyNavigation: { keyID in
+                connectionModel.navigateKey(keyID: keyID)
+            },
             onKeyFunctionDeletion: { keyID in
                 connectionModel.clearKeyFunction(keyID: keyID)
             },

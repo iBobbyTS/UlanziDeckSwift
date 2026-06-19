@@ -29,6 +29,7 @@ struct ContentView: View {
     let mihoyoLoginState: MihoyoLoginState
     let buttonBackgroundDimmingEnabled: Bool
     let onKeySelection: (Int) -> Void
+    let onKeyNavigation: (Int) -> Void
     let onKeyFunctionDeletion: (Int) -> Void
     let onKeyDisplayModeSelection: (Int, DeckKeyDisplayMode) -> Void
     let onKeySwap: (Int, Int) -> Void
@@ -285,6 +286,8 @@ struct ContentView: View {
                             metrics: previewGridMetrics
                         ) {
                             onKeySelection(key.id)
+                        } navigationAction: {
+                            onKeyNavigation(key.id)
                         } deleteAction: {
                             onKeyFunctionDeletion(key.id)
                         } displayModeSelectionAction: { displayMode in
@@ -318,22 +321,21 @@ struct ContentView: View {
     }
 
     private var pageSelector: some View {
-        HStack(spacing: 0) {
-            Text("1")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
-                .frame(width: 34, height: 22)
-                .background(Color.accentColor, in: Capsule())
+        HStack(spacing: 6) {
+            ForEach(Array(interactionState.navigationPathTitles.enumerated()), id: \.offset) { index, title in
+                if index > 0 {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
 
-            Text("2")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 34, height: 22)
-
-            Image(systemName: "plus")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(width: 34, height: 22)
+                Text(title)
+                    .font(.caption.weight(index == interactionState.navigationPathTitles.count - 1 ? .bold : .semibold))
+                    .foregroundStyle(index == interactionState.navigationPathTitles.count - 1 ? Color.white : Color.secondary)
+                    .padding(.horizontal, 9)
+                    .frame(height: 22)
+                    .background(index == interactionState.navigationPathTitles.count - 1 ? Color.accentColor : Color.clear, in: Capsule())
+            }
         }
         .padding(2)
         .frame(height: pageSelectorHeight)
@@ -347,6 +349,7 @@ struct ContentView: View {
                     FunctionSectionCard(
                         section: section,
                         selectedFunction: selectedConfiguration?.function,
+                        isFunctionDisabled: isFunctionDisabled,
                         onFunctionSelection: onFunctionSelection
                     )
                 }
@@ -357,6 +360,24 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func isFunctionDisabled(_ function: DeckKeyFunction) -> Bool {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              selectedConfiguration?.function != .pageBack
+        else {
+            return true
+        }
+
+        if selectedConfiguration?.function == function {
+            return false
+        }
+
+        if function == .pageFolder {
+            return !interactionState.canAssignPageFolder(to: selectedKeyID)
+        }
+
+        return false
     }
 
     private var parameterPanel: some View {
@@ -408,6 +429,7 @@ struct FunctionSection: Identifiable {
 private struct FunctionSectionCard: View {
     let section: FunctionSection
     let selectedFunction: DeckKeyFunction?
+    let isFunctionDisabled: (DeckKeyFunction) -> Bool
     let onFunctionSelection: (DeckKeyFunction) -> Void
 
     var body: some View {
@@ -427,7 +449,8 @@ private struct FunctionSectionCard: View {
                 ForEach(section.functions, id: \.self) { function in
                     FunctionRow(
                         function: function,
-                        isSelected: selectedFunction == function
+                        isSelected: selectedFunction == function,
+                        isDisabled: isFunctionDisabled(function)
                     ) {
                         onFunctionSelection(function)
                     }
@@ -447,6 +470,7 @@ private struct FunctionSectionCard: View {
 private struct FunctionRow: View {
     let function: DeckKeyFunction
     let isSelected: Bool
+    let isDisabled: Bool
     let action: () -> Void
 
     @State private var isHovered = false
@@ -468,7 +492,7 @@ private struct FunctionRow: View {
                         .font(.caption.weight(.bold))
                 }
             }
-            .foregroundStyle(isSelected ? Color.accentColor : Color.primary)
+            .foregroundStyle(rowForegroundStyle)
             .padding(.horizontal, 12)
             .padding(.vertical, 11)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -480,11 +504,20 @@ private struct FunctionRow: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(isDisabled)
         .onHover { hovering in
             isHovered = hovering
         }
         .accessibilityLabel(function.title)
-        .accessibilityValue(isSelected ? "已选中" : "未选中")
+        .accessibilityValue(isDisabled ? "不可用" : (isSelected ? "已选中" : "未选中"))
+    }
+
+    private var rowForegroundStyle: Color {
+        if isDisabled {
+            return .secondary
+        }
+
+        return isSelected ? .accentColor : .primary
     }
 }
 
@@ -492,6 +525,7 @@ private struct DeckKeyButton: View {
     let display: DeckKeyDisplay
     let metrics: DeckPreviewGridMetrics
     let action: () -> Void
+    let navigationAction: () -> Void
     let deleteAction: () -> Void
     let displayModeSelectionAction: (DeckKeyDisplayMode) -> Void
     let swapAction: (Int, Int) -> Void
@@ -512,6 +546,9 @@ private struct DeckKeyButton: View {
             }
             .buttonStyle(.plain)
             .focusable(false)
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                navigationAction()
+            })
 
             if display.isWide && display.displayMode != .function {
                 displayModeBadge
@@ -529,15 +566,17 @@ private struct DeckKeyButton: View {
             isHovered = hovering
         }
         .contextMenu {
-            Button(role: .destructive, action: deleteAction) {
-                Label("删除", systemImage: "trash")
+            if display.canDelete {
+                Button(role: .destructive, action: deleteAction) {
+                    Label("删除", systemImage: "trash")
+                }
             }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("设备按键 \(display.id)")
         .accessibilityValue(accessibilityValue)
         .modifier(SquareKeyDragSwapModifier(
-            isEnabled: !display.isWide,
+            isEnabled: display.canDrag,
             keyID: display.id,
             swapAction: swapAction
         ))
@@ -730,6 +769,7 @@ struct MihoyoQRCodeView: View {
         mihoyoLoginState: .notLoggedIn,
         buttonBackgroundDimmingEnabled: true,
         onKeySelection: { _ in },
+        onKeyNavigation: { _ in },
         onKeyFunctionDeletion: { _ in },
         onKeyDisplayModeSelection: { _, _ in },
         onKeySwap: { _, _ in },

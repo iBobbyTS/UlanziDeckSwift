@@ -11,6 +11,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case genshinStatus
     case starRailStatus
     case zenlessZoneStatus
+    case pageFolder
+    case pageBack
 
     static let assignableCases: [DeckKeyFunction] = [
         .tally,
@@ -21,6 +23,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
         .genshinStatus,
         .starRailStatus,
         .zenlessZoneStatus,
+        .pageFolder,
     ]
 
     var title: String {
@@ -45,6 +48,10 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "星铁状态"
         case .zenlessZoneStatus:
             return "绝区零状态"
+        case .pageFolder:
+            return "文件夹"
+        case .pageBack:
+            return "返回"
         }
     }
 
@@ -70,6 +77,10 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "tram"
         case .zenlessZoneStatus:
             return "bolt"
+        case .pageFolder:
+            return "folder.badge.plus"
+        case .pageBack:
+            return "arrow.uturn.left"
         }
     }
 
@@ -81,7 +92,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return .starRail
         case .zenlessZoneStatus:
             return .zenlessZoneZero
-        case .none, .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API:
+        case .none, .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API, .pageFolder, .pageBack:
             return nil
         }
     }
@@ -95,6 +106,8 @@ nonisolated enum DeckKeyPressRuntimeAction: Equatable {
     case connectSMBServer
     case refreshSub2API
     case refreshMihoyoGame
+    case enterPage
+    case goBackPage
 }
 
 nonisolated enum DeckKeyScheduledRuntime: Equatable {
@@ -103,7 +116,7 @@ nonisolated enum DeckKeyScheduledRuntime: Equatable {
 }
 
 extension DeckKeyFunction {
-    var pressRuntimeAction: DeckKeyPressRuntimeAction {
+    nonisolated var pressRuntimeAction: DeckKeyPressRuntimeAction {
         switch self {
         case .tally:
             return .incrementTally
@@ -117,18 +130,22 @@ extension DeckKeyFunction {
             return .refreshSub2API
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .refreshMihoyoGame
+        case .pageFolder:
+            return .enterPage
+        case .pageBack:
+            return .goBackPage
         case .brightness, .none:
             return .none
         }
     }
 
-    var scheduledRuntime: DeckKeyScheduledRuntime? {
+    nonisolated var scheduledRuntime: DeckKeyScheduledRuntime? {
         switch self {
         case .sub2API:
             return .sub2API
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .mihoyoGame
-        case .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .none:
+        case .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .none, .pageFolder, .pageBack:
             return nil
         }
     }
@@ -694,6 +711,18 @@ nonisolated struct DeckKeyMihoyoGameConfiguration: Codable, Equatable {
     }
 }
 
+nonisolated struct DeckKeyPageFolderConfiguration: Codable, Equatable {
+    var pageID: String?
+
+    init(pageID: String? = nil) {
+        self.pageID = pageID
+    }
+
+    var displayName: String {
+        "文件夹"
+    }
+}
+
 nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var function: DeckKeyFunction
     var displayMode: DeckKeyDisplayMode
@@ -703,6 +732,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var smbServer: DeckKeySMBServerConfiguration
     var sub2API: DeckKeySub2APIConfiguration
     var mihoyoGame: DeckKeyMihoyoGameConfiguration
+    var pageFolder: DeckKeyPageFolderConfiguration
 
     static let empty = DeckKeyConfiguration(
         function: .none,
@@ -712,7 +742,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openFile: DeckKeyOpenFileConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
-        mihoyoGame: DeckKeyMihoyoGameConfiguration()
+        mihoyoGame: DeckKeyMihoyoGameConfiguration(),
+        pageFolder: DeckKeyPageFolderConfiguration()
     )
 
     static let tallyDefault = DeckKeyConfiguration(
@@ -723,7 +754,20 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openFile: DeckKeyOpenFileConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
-        mihoyoGame: DeckKeyMihoyoGameConfiguration()
+        mihoyoGame: DeckKeyMihoyoGameConfiguration(),
+        pageFolder: DeckKeyPageFolderConfiguration()
+    )
+
+    static let pageBack = DeckKeyConfiguration(
+        function: .pageBack,
+        displayMode: .function,
+        tally: DeckKeyTallyConfiguration(),
+        openFolder: DeckKeyOpenFolderConfiguration(),
+        openFile: DeckKeyOpenFileConfiguration(),
+        smbServer: DeckKeySMBServerConfiguration(),
+        sub2API: DeckKeySub2APIConfiguration(),
+        mihoyoGame: DeckKeyMihoyoGameConfiguration(),
+        pageFolder: DeckKeyPageFolderConfiguration()
     )
 
     init(
@@ -734,7 +778,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openFile: DeckKeyOpenFileConfiguration = DeckKeyOpenFileConfiguration(),
         smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration = DeckKeySub2APIConfiguration(),
-        mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration()
+        mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration(),
+        pageFolder: DeckKeyPageFolderConfiguration = DeckKeyPageFolderConfiguration()
     ) {
         self.function = function
         self.displayMode = displayMode
@@ -744,6 +789,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         self.smbServer = smbServer
         self.sub2API = sub2API
         self.mihoyoGame = mihoyoGame
+        self.pageFolder = pageFolder
     }
 
     enum CodingKeys: CodingKey {
@@ -755,6 +801,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case smbServer
         case sub2API
         case mihoyoGame
+        case pageFolder
     }
 
     init(from decoder: Decoder) throws {
@@ -767,6 +814,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         smbServer = try container.decodeIfPresent(DeckKeySMBServerConfiguration.self, forKey: .smbServer) ?? DeckKeySMBServerConfiguration()
         sub2API = try container.decodeIfPresent(DeckKeySub2APIConfiguration.self, forKey: .sub2API) ?? DeckKeySub2APIConfiguration()
         mihoyoGame = try container.decodeIfPresent(DeckKeyMihoyoGameConfiguration.self, forKey: .mihoyoGame) ?? DeckKeyMihoyoGameConfiguration()
+        pageFolder = try container.decodeIfPresent(DeckKeyPageFolderConfiguration.self, forKey: .pageFolder) ?? DeckKeyPageFolderConfiguration()
     }
 
     func encode(to encoder: Encoder) throws {
@@ -779,5 +827,6 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         try container.encode(smbServer, forKey: .smbServer)
         try container.encode(sub2API, forKey: .sub2API)
         try container.encode(mihoyoGame, forKey: .mihoyoGame)
+        try container.encode(pageFolder, forKey: .pageFolder)
     }
 }

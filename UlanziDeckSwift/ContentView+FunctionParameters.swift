@@ -5,7 +5,7 @@ extension ContentView {
     @ViewBuilder
     func parameterContent(for configuration: DeckKeyConfiguration) -> some View {
         switch configuration.function {
-        case .none, .brightness:
+        case .none, .brightness, .pageFolder:
             HStack(alignment: .top, spacing: 28) {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("功能")
@@ -23,6 +23,31 @@ extension ContentView {
                         .foregroundStyle(.secondary)
 
                     Text("无可配置参数")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+            }
+
+        case .pageBack:
+            HStack(alignment: .top, spacing: 28) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("功能")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
+                        .font(.callout.weight(.medium))
+                }
+                .frame(width: 150, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("参数")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text("返回上一级页面，不可删除")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -376,6 +401,11 @@ extension ContentView {
                 title: "访达",
                 systemImageName: "folder",
                 functions: [.openFolder, .openFile, .connectSMBServer]
+            ),
+            FunctionSection(
+                title: "页面",
+                systemImageName: "square.grid.2x2",
+                functions: [.pageFolder]
             ),
             FunctionSection(
                 title: "网站",

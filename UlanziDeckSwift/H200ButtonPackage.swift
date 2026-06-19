@@ -359,6 +359,13 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
             return
         }
+        if display.pageFolderButtonContent != nil {
+            return
+        }
+        if let content = display.pageBackButtonContent {
+            drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
+            return
+        }
 
         drawCenteredAutoSizedSingleLineText(
             display.title,
@@ -396,6 +403,8 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             backgroundAssetName = FolderButtonContent.backgroundAssetName
         } else if display.smbServerButtonContent != nil {
             backgroundAssetName = SMBServerButtonContent.backgroundAssetName
+        } else if display.pageFolderButtonContent != nil {
+            backgroundAssetName = PageFolderButtonContent.backgroundAssetName
         } else {
             backgroundAssetName = nil
         }
@@ -408,7 +417,7 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             return
         }
 
-        if display.folderButtonContent != nil || display.smbServerButtonContent != nil {
+        if display.folderButtonContent != nil || display.smbServerButtonContent != nil || display.pageFolderButtonContent != nil {
             drawFittedBackgroundImage(image, in: rect)
         } else {
             let imageRect = NSRect(origin: .zero, size: image.size)
