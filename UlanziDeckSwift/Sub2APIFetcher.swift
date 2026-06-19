@@ -122,6 +122,71 @@ private nonisolated struct Sub2APIFetchError: Error {
     let message: String
 }
 
+nonisolated enum Sub2APIBaseURLError: Error {
+    case invalid
+}
+
+nonisolated struct Sub2APIBaseURL: Equatable {
+    private static let capacitySummaryPathComponents = [
+        "api",
+        "v1",
+        "channel-monitors",
+        "capacity-summary",
+    ]
+
+    let url: URL
+    let host: String
+
+    init(_ rawValue: String) throws {
+        let trimmedValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedValue.isEmpty else {
+            throw Sub2APIBaseURLError.invalid
+        }
+
+        let urlString = trimmedValue.contains("://") ? trimmedValue : "https://\(trimmedValue)"
+        guard var components = URLComponents(string: urlString),
+              components.scheme?.lowercased() == "https",
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              let host = components.host,
+              !host.isEmpty
+        else {
+            throw Sub2APIBaseURLError.invalid
+        }
+
+        components.scheme = "https"
+        components.path = Self.normalizedPath(components.path)
+
+        guard let url = components.url else {
+            throw Sub2APIBaseURLError.invalid
+        }
+
+        self.url = url
+        self.host = host
+    }
+
+    var capacitySummaryURL: URL {
+        Self.capacitySummaryPathComponents.reduce(url) { partialURL, pathComponent in
+            partialURL.appendingPathComponent(pathComponent)
+        }
+    }
+
+    private static func normalizedPath(_ path: String) -> String {
+        guard path != "/" else {
+            return ""
+        }
+
+        var normalizedPath = path
+        while normalizedPath.hasSuffix("/") {
+            normalizedPath.removeLast()
+        }
+
+        return normalizedPath
+    }
+}
+
 // MARK: - 网络服务协议与实现
 
 nonisolated protocol Sub2APIFetching: Sendable {
@@ -196,10 +261,10 @@ nonisolated struct Sub2APIFetcher: Sub2APIFetching {
     }
 
     private func fetchCapacityResponse(baseURL: String, bearerKey: String) async -> Result<Sub2APICapacityResponse, Sub2APIFetchError> {
-        let normalizedBaseURL = baseURL.trimmingCharacters(in: .init(charactersIn: "/"))
-        guard !normalizedBaseURL.isEmpty,
-              let url = URL(string: "https://\(normalizedBaseURL)/api/v1/channel-monitors/capacity-summary")
-        else {
+        let url: URL
+        do {
+            url = try Sub2APIBaseURL(baseURL).capacitySummaryURL
+        } catch {
             return .failure(Sub2APIFetchError(message: "无效的 Base URL"))
         }
 

@@ -173,7 +173,7 @@ struct UlanziDeckSwiftTests {
         let rowsBefore = layout.rows
 
         state.assign(.openFolder, to: 1)
-        state.setFolderPath("/Users/ibobby/Documents", for: 1)
+        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"), for: 1)
         state.assign(.connectSMBServer, to: 2)
         state.setSMBServerAddress("nas.local/media", for: 2)
         state.setSMBServerName("NAS", for: 2)
@@ -311,6 +311,33 @@ struct UlanziDeckSwiftTests {
         #expect(content.groupName == "PLUS共享号池")
     }
 
+    @Test func sub2APIBaseURLNormalizationBuildsCapacitySummaryURL() throws {
+        let hostOnly = try Sub2APIBaseURL("api.example.com")
+        let schemeQualified = try Sub2APIBaseURL("https://api.example.com")
+        let pathPrefixed = try Sub2APIBaseURL("https://api.example.com/base/")
+        let hostPathPrefixed = try Sub2APIBaseURL("api.example.com/base/")
+
+        #expect(hostOnly.host == "api.example.com")
+        #expect(hostOnly.capacitySummaryURL.absoluteString == "https://api.example.com/api/v1/channel-monitors/capacity-summary")
+        #expect(schemeQualified.capacitySummaryURL.absoluteString == "https://api.example.com/api/v1/channel-monitors/capacity-summary")
+        #expect(pathPrefixed.capacitySummaryURL.absoluteString == "https://api.example.com/base/api/v1/channel-monitors/capacity-summary")
+        #expect(hostPathPrefixed.capacitySummaryURL.absoluteString == "https://api.example.com/base/api/v1/channel-monitors/capacity-summary")
+    }
+
+    @Test func sub2APIBaseURLNormalizationRejectsUnsupportedURLs() {
+        for value in ["", "http://api.example.com", "https://api.example.com?debug=1", "https:///missing-host"] {
+            var didThrow = false
+            do {
+                _ = try Sub2APIBaseURL(value)
+            } catch {
+                didThrow = true
+                #expect(error is Sub2APIBaseURLError)
+            }
+
+            #expect(didThrow)
+        }
+    }
+
     @Test func sub2APIAvailabilityLevelUsesRequestedThresholds() {
         #expect(Sub2APIAvailabilityLevel(availableConcurrency: 500) == .healthy)
         #expect(Sub2APIAvailabilityLevel(availableConcurrency: 499) == .warning)
@@ -369,12 +396,36 @@ struct UlanziDeckSwiftTests {
         var state = DeckGridInteractionState(layout: layout)
 
         state.assign(.openFolder, to: 5)
-        state.setFolderPath("/Users/ibobby/Documents/Codex", for: 5)
+        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents/Codex"), for: 5)
         let display = state.display(for: layout.keys[4])
 
         #expect(display.title == "打开")
         #expect(display.subtitle == "Codex")
         #expect(state.folderPath(for: 5) == "/Users/ibobby/Documents/Codex")
+    }
+
+    @Test func legacyOpenFolderConfigurationRequiresReselection() throws {
+        let data = try #require(#"{"path":"/Users/ibobby/Documents"}"#.data(using: .utf8))
+        let configuration = try JSONDecoder().decode(DeckKeyOpenFolderConfiguration.self, from: data)
+
+        #expect(configuration.path == "/Users/ibobby/Documents")
+        #expect(configuration.bookmarkData == nil)
+        #expect(configuration.needsReselection)
+        #expect(!configuration.canOpen)
+        #expect(configuration.displayName == "Documents")
+    }
+
+    @Test func openFolderConfigurationPersistsBookmarkData() throws {
+        let bookmarkData = try #require("bookmark-data".data(using: .utf8))
+        let configuration = Self.folderConfiguration(path: "/Users/ibobby/Documents", bookmarkData: bookmarkData)
+
+        let encoded = try JSONEncoder().encode(configuration)
+        let restored = try JSONDecoder().decode(DeckKeyOpenFolderConfiguration.self, from: encoded)
+
+        #expect(restored.path == "/Users/ibobby/Documents")
+        #expect(restored.bookmarkData == bookmarkData)
+        #expect(!restored.needsReselection)
+        #expect(restored.canOpen)
     }
 
     @Test func connectSMBServerFunctionDisplaysNameAndPersistsNormalizedAddress() {
@@ -429,7 +480,7 @@ struct UlanziDeckSwiftTests {
         state.triggerShortPress(keyID: 3)
         state.clearFunction(keyID: 8)
         state.assign(.openFolder, to: 9)
-        state.setFolderPath("/Users/ibobby/Documents", for: 9)
+        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"), for: 9)
         state.assign(.connectSMBServer, to: 10)
         state.setSMBServerAddress("smb://nas.local/media", for: 10)
         state.setSMBServerName("NAS", for: 10)
@@ -443,6 +494,7 @@ struct UlanziDeckSwiftTests {
         #expect(restored.configuration(for: 8)?.function == DeckKeyFunction.none)
         #expect(restored.configuration(for: 9)?.function == DeckKeyFunction.openFolder)
         #expect(restored.folderPath(for: 9) == "/Users/ibobby/Documents")
+        #expect(restored.openFolderConfiguration(for: 9).bookmarkData == Data("bookmark".utf8))
         #expect(restored.configuration(for: 10)?.function == DeckKeyFunction.connectSMBServer)
         #expect(restored.smbServerAddress(for: 10) == "nas.local/media")
         #expect(restored.smbServerName(for: 10) == "NAS")
@@ -921,7 +973,7 @@ struct UlanziDeckSwiftTests {
         let layout = DeckGridLayout.h200Prototype
         var loadedState = DeckGridInteractionState(layout: layout)
         loadedState.assign(.openFolder, to: 1)
-        loadedState.setFolderPath("/Users/ibobby/Documents", for: 1)
+        loadedState.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"), for: 1)
         loadedState.assign(.connectSMBServer, to: 2)
         loadedState.setSMBServerAddress("nas.local/media", for: 2)
         loadedState.setSMBServerName("NAS", for: 2)
@@ -1146,7 +1198,7 @@ struct UlanziDeckSwiftTests {
         }
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.openFolder)
-        model.setSelectedFolderPath("/Users/ibobby/Documents")
+        model.setSelectedFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"))
 
         try await Self.waitUntil {
             syncer.partialDisplays.count == 2
@@ -1431,7 +1483,7 @@ struct UlanziDeckSwiftTests {
         }
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.openFolder)
-        model.setSelectedFolderPath("/Users/ibobby/Documents")
+        model.setSelectedFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"))
         let sentDisplayCount = syncer.sentDisplays.count
         syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -1440,6 +1492,53 @@ struct UlanziDeckSwiftTests {
 
         #expect(opener.openedPaths == ["/Users/ibobby/Documents"])
         #expect(syncer.sentDisplays.count == sentDisplayCount)
+        #expect(model.interactionState.selectedKeyID == 4)
+    }
+
+    @MainActor
+    @Test func physicalButtonOpenFolderPersistsRefreshedBookmarkWithoutSyncingDisplay() async throws {
+        let opener = FakeFinderFolderOpener()
+        let refreshedBookmarkData = try #require("refreshed-bookmark".data(using: .utf8))
+        opener.result = .opened(refreshedConfiguration: Self.folderConfiguration(
+            path: "/Users/ibobby/Documents",
+            bookmarkData: refreshedBookmarkData
+        ))
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            folderOpener: opener
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openFolder)
+        model.setSelectedFolderConfiguration(Self.folderConfiguration(
+            path: "/Users/ibobby/Documents",
+            bookmarkData: Data("old-bookmark".utf8)
+        ))
+        try await Self.waitUntil {
+            syncer.partialDisplays.count >= 2
+        }
+        let sentDisplayCount = syncer.sentDisplays.count
+        let partialDisplayCount = syncer.partialDisplays.count
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+
+        try await Self.waitUntil {
+            store.savedStates.last?.openFolderConfiguration(for: 4).bookmarkData == refreshedBookmarkData
+        }
+
+        #expect(opener.openedPaths == ["/Users/ibobby/Documents"])
+        #expect(model.interactionState.openFolderConfiguration(for: 4).bookmarkData == refreshedBookmarkData)
+        #expect(syncer.sentDisplays.count == sentDisplayCount)
+        #expect(syncer.partialDisplays.count == partialDisplayCount)
         #expect(model.interactionState.selectedKeyID == 4)
     }
 
@@ -1466,6 +1565,36 @@ struct UlanziDeckSwiftTests {
         try await Task.sleep(nanoseconds: 50_000_000)
 
         #expect(opener.openedPaths.isEmpty)
+    }
+
+    @MainActor
+    @Test func physicalButtonOpenFolderWithLegacyPathOnlyConfigurationDoesNothing() async throws {
+        let opener = FakeFinderFolderOpener()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            folderOpener: opener
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openFolder)
+        model.setSelectedFolderConfiguration(Self.folderConfiguration(
+            path: "/Users/ibobby/Documents",
+            bookmarkData: nil
+        ))
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(opener.openedPaths.isEmpty)
+        #expect(opener.openedConfigurations.isEmpty)
     }
 
     @MainActor
@@ -1541,7 +1670,7 @@ struct UlanziDeckSwiftTests {
         }
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.openFolder)
-        model.setSelectedFolderPath("/Users/ibobby/Documents")
+        model.setSelectedFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"))
         syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
         try await Task.sleep(nanoseconds: 30_000_000)
         syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
@@ -1747,7 +1876,7 @@ struct UlanziDeckSwiftTests {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
         state.assign(.openFolder, to: 1)
-        state.setFolderPath("/Users/ibobby/Documents", for: 1)
+        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"), for: 1)
         state.assign(.sub2API, to: 3)
         state.setSub2APITargetGroupID(1215, for: 3)
         state.setSub2APILastResult(.success(item: Sub2APICapacityItem(
@@ -2293,6 +2422,101 @@ struct UlanziDeckSwiftTests {
         #expect(mihoyoService.fetchRequests.map(\.game) == [.starRail])
     }
 
+    @MainActor
+    @Test func qrLoginIgnoresStaleGameFetchFromPreviousSession() async throws {
+        let oldSession = Self.mihoyoSession(accountID: "100001")
+        let newSession = Self.mihoyoSession(accountID: "100002")
+        let qrSession = MihoyoQRLoginSession(ticket: "ticket", url: "https://example.com/login", deviceID: "device")
+        let status = Self.mihoyoStatus(game: .starRail, currentStamina: 120, maxStamina: 300, dailyCurrent: 500, dailyMax: 500)
+        let mihoyoService = FakeMihoyoGameService(
+            createdQRCode: qrSession,
+            qrResults: [.confirmed(newSession)],
+            fetchResultsByAccountID: [
+                oldSession.accountID: .loginExpired("旧会话已失效"),
+                newSession.accountID: .success(status),
+            ],
+            fetchDelayNanoseconds: 80_000_000
+        )
+        let sessionStore = FakeMihoyoSessionStore(loadedSession: oldSession)
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.starRailStatus, to: 6)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            mihoyoGameService: mihoyoService,
+            mihoyoSessionStore: sessionStore,
+            mihoyoLoginPollNanoseconds: 1_000_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 6)
+        model.refreshSelectedMihoyoGameStatus()
+        try await Self.waitUntil {
+            mihoyoService.fetchRequests.count == 1
+        }
+        model.beginMihoyoQRCodeLogin()
+
+        try await Self.waitUntil {
+            model.mihoyoLoginState == .loggedIn(accountID: newSession.accountID)
+                && model.interactionState.configuration(for: 6)?.mihoyoGame.lastResult == .success(status)
+        }
+        try await Task.sleep(nanoseconds: 120_000_000)
+
+        #expect(model.mihoyoLoginState == .loggedIn(accountID: newSession.accountID))
+        #expect(model.interactionState.configuration(for: 6)?.mihoyoGame.lastResult == .success(status))
+        #expect(sessionStore.savedSessions == [newSession])
+        #expect(mihoyoService.fetchRequests.first?.session == oldSession)
+        #expect(mihoyoService.fetchRequests.contains { $0.session == newSession })
+    }
+
+    @MainActor
+    @Test func staleGameFetchIsIgnoredAfterKeySwitchesGame() async throws {
+        let session = Self.mihoyoSession()
+        let genshinStatus = Self.mihoyoStatus(game: .genshin, currentStamina: 160, maxStamina: 200)
+        let starRailStatus = Self.mihoyoStatus(game: .starRail, currentStamina: 240, maxStamina: 300)
+        let mihoyoService = FakeMihoyoGameService(
+            fetchResults: [
+                .success(genshinStatus),
+                .success(starRailStatus),
+            ],
+            fetchDelayNanoseconds: 80_000_000
+        )
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            mihoyoGameService: mihoyoService,
+            mihoyoSessionStore: FakeMihoyoSessionStore(loadedSession: session)
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.genshinStatus)
+        try await Self.waitUntil {
+            mihoyoService.fetchRequests.count == 1
+        }
+        model.assignSelectedFunction(.starRailStatus)
+
+        try await Self.waitUntil {
+            model.interactionState.configuration(for: 4)?.mihoyoGame.lastResult == .success(starRailStatus)
+        }
+        try await Task.sleep(nanoseconds: 120_000_000)
+
+        #expect(model.interactionState.mihoyoGame(for: 4) == .starRail)
+        #expect(model.interactionState.configuration(for: 4)?.mihoyoGame.lastResult == .success(starRailStatus))
+        #expect(mihoyoService.fetchRequests.map(\.game) == [.genshin, .starRail])
+    }
+
     private static func protocolInterfaceIdentity() -> H200DeviceIdentity {
         H200DeviceIdentity(
             vendorID: H200DeviceTarget.vendorID,
@@ -2373,6 +2597,13 @@ struct UlanziDeckSwiftTests {
         }
 
         return sentDisplayMatches || partialDisplayMatches
+    }
+
+    private static func folderConfiguration(
+        path: String,
+        bookmarkData: Data? = Data("bookmark".utf8)
+    ) -> DeckKeyOpenFolderConfiguration {
+        DeckKeyOpenFolderConfiguration(path: path, bookmarkData: bookmarkData)
     }
 
     private static func sub2APICapacityItem(
@@ -2739,6 +2970,8 @@ private final class FakeMihoyoGameService: MihoyoGameServicing, @unchecked Senda
     private var qrResults: [MihoyoQRCodeStatusResult]
     private var fetchResults: [MihoyoGameStatusResult]
     private let defaultFetchResult: MihoyoGameStatusResult
+    private let fetchResultsByAccountID: [String: MihoyoGameStatusResult]
+    private let fetchDelayNanoseconds: UInt64?
     private var storedQueryRequests: [MihoyoQRLoginSession] = []
     private var storedFetchRequests: [FetchRequest] = []
 
@@ -2754,12 +2987,16 @@ private final class FakeMihoyoGameService: MihoyoGameServicing, @unchecked Senda
         createdQRCode: MihoyoQRLoginSession = MihoyoQRLoginSession(ticket: "ticket", url: "https://example.com/login", deviceID: "device"),
         qrResults: [MihoyoQRCodeStatusResult] = [],
         fetchResults: [MihoyoGameStatusResult] = [],
-        defaultFetchResult: MihoyoGameStatusResult = .networkError("未配置响应")
+        defaultFetchResult: MihoyoGameStatusResult = .networkError("未配置响应"),
+        fetchResultsByAccountID: [String: MihoyoGameStatusResult] = [:],
+        fetchDelayNanoseconds: UInt64? = nil
     ) {
         self.createdQRCode = createdQRCode
         self.qrResults = qrResults
         self.fetchResults = fetchResults
         self.defaultFetchResult = defaultFetchResult
+        self.fetchResultsByAccountID = fetchResultsByAccountID
+        self.fetchDelayNanoseconds = fetchDelayNanoseconds
     }
 
     func createQRCodeLogin() async throws -> MihoyoQRLoginSession {
@@ -2778,14 +3015,24 @@ private final class FakeMihoyoGameService: MihoyoGameServicing, @unchecked Senda
     }
 
     func fetchDailyStatus(game: MihoyoGame, session: MihoyoLoginSession) async -> MihoyoGameStatusResult {
-        locked {
+        let result = locked {
             storedFetchRequests.append(FetchRequest(game: game, session: session))
+            if let result = fetchResultsByAccountID[session.accountID] {
+                return result
+            }
+
             guard !fetchResults.isEmpty else {
                 return defaultFetchResult
             }
 
             return fetchResults.removeFirst()
         }
+
+        if let fetchDelayNanoseconds {
+            try? await Task.sleep(nanoseconds: fetchDelayNanoseconds)
+        }
+
+        return result
     }
 
     private func locked<Value>(_ body: () -> Value) -> Value {
@@ -2874,10 +3121,15 @@ private final class FakeBrightnessAdjuster: BrightnessAdjusting {
 @MainActor
 private final class FakeFinderFolderOpener: FinderFolderOpening {
     private(set) var openedPaths: [String] = []
+    private(set) var openedConfigurations: [DeckKeyOpenFolderConfiguration] = []
+    var result: FinderFolderOpenResult = .opened(refreshedConfiguration: nil)
 
-    func openFolder(at path: String) -> Bool {
-        openedPaths.append(path)
-        return true
+    func openFolder(_ configuration: DeckKeyOpenFolderConfiguration) -> FinderFolderOpenResult {
+        openedConfigurations.append(configuration)
+        if let path = configuration.path {
+            openedPaths.append(path)
+        }
+        return result
     }
 }
 

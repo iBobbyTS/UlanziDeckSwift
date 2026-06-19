@@ -436,9 +436,20 @@ nonisolated struct DeckKeyTallyConfiguration: Codable, Equatable {
 
 nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
     var path: String?
+    var bookmarkData: Data?
 
-    init(path: String? = nil) {
-        self.path = path
+    init(path: String? = nil, bookmarkData: Data? = nil) {
+        self.path = Self.normalizedPath(path)
+        self.bookmarkData = bookmarkData
+    }
+
+    init(folderURL: URL) throws {
+        self.path = Self.normalizedPath(folderURL.path)
+        self.bookmarkData = try folderURL.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
     }
 
     var displayName: String {
@@ -448,6 +459,26 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
 
         let name = URL(fileURLWithPath: path, isDirectory: true).lastPathComponent
         return name.isEmpty ? path : name
+    }
+
+    var needsReselection: Bool {
+        guard let path, !path.isEmpty else {
+            return false
+        }
+
+        return bookmarkData == nil
+    }
+
+    var canOpen: Bool {
+        bookmarkData != nil
+    }
+
+    private static func normalizedPath(_ path: String?) -> String? {
+        guard let path, !path.isEmpty else {
+            return nil
+        }
+
+        return path
     }
 }
 
@@ -634,18 +665,11 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
             return "Sub2API"
         }
 
-        let urlString: String
-        if trimmedBaseURL.contains("://") {
-            urlString = trimmedBaseURL
-        } else {
-            urlString = "https://\(trimmedBaseURL)"
-        }
-
-        guard let host = URL(string: urlString)?.host, !host.isEmpty else {
+        guard let parsedBaseURL = try? Sub2APIBaseURL(trimmedBaseURL) else {
             return trimmedBaseURL
         }
 
-        return host
+        return parsedBaseURL.host
     }
 
     var selectedGroupName: String? {
@@ -939,6 +963,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations[keyID, default: .tallyDefault].openFolder.path
     }
 
+    func openFolderConfiguration(for keyID: Int) -> DeckKeyOpenFolderConfiguration {
+        configurations[keyID, default: .tallyDefault].openFolder
+    }
+
     func smbServerAddress(for keyID: Int) -> String {
         configurations[keyID, default: .tallyDefault].smbServer.address
     }
@@ -1130,15 +1158,21 @@ nonisolated struct DeckGridInteractionState: Equatable {
     }
 
     @discardableResult
-    mutating func setFolderPath(_ path: String, for keyID: Int) -> Bool {
+    mutating func setFolderConfiguration(
+        _ configuration: DeckKeyOpenFolderConfiguration,
+        for keyID: Int,
+        selectsKey: Bool = true
+    ) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].function == .openFolder
         else {
             return false
         }
 
-        selectedKeyID = keyID
-        configurations[keyID, default: .tallyDefault].openFolder.path = path
+        if selectsKey {
+            selectedKeyID = keyID
+        }
+        configurations[keyID, default: .tallyDefault].openFolder = configuration
         return true
     }
 

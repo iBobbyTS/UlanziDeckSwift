@@ -16,7 +16,7 @@ struct ContentView: View {
     let onKeySwap: (Int, Int) -> Void
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
-    let onFolderPathSelection: (String) -> Void
+    let onFolderPathSelection: (DeckKeyOpenFolderConfiguration) -> Void
     let onSMBServerAddressChange: (String) -> Void
     let onSMBServerNameChange: (String) -> Void
     let onBrightnessPercentPreview: (Int) -> Void
@@ -405,18 +405,29 @@ struct ContentView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    Text(configuration.openFolder.path ?? "未选择文件夹")
-                        .font(.callout)
-                        .foregroundStyle(configuration.openFolder.path == nil ? Color.secondary : Color.primary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(configuration.openFolder.path ?? "未选择文件夹")
+                            .font(.callout)
+                            .foregroundStyle(configuration.openFolder.path == nil ? Color.secondary : Color.primary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if configuration.openFolder.needsReselection {
+                            Text("需要重新选择")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
                 }
 
                 Button {
                     chooseFolder()
                 } label: {
-                    Label("选择文件夹", systemImage: "folder.badge.plus")
+                    Label(
+                        configuration.openFolder.needsReselection ? "重新选择文件夹" : "选择文件夹",
+                        systemImage: "folder.badge.plus"
+                    )
                 }
                 .buttonStyle(.bordered)
 
@@ -844,7 +855,15 @@ private extension ContentView {
             return
         }
 
-        onFolderPathSelection(url.path)
+        do {
+            onFolderPathSelection(try DeckKeyOpenFolderConfiguration(folderURL: url))
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "无法保存文件夹权限"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
     }
 
     func mihoyoGameParameterContent(for configuration: DeckKeyConfiguration) -> some View {

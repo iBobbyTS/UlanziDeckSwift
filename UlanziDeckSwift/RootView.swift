@@ -51,8 +51,8 @@ struct RootView: View {
             onTallyDefaultValueChange: { value in
                 connectionModel.setSelectedTallyDefaultValue(value)
             },
-            onFolderPathSelection: { path in
-                connectionModel.setSelectedFolderPath(path)
+            onFolderPathSelection: { configuration in
+                connectionModel.setSelectedFolderConfiguration(configuration)
             },
             onSMBServerAddressChange: { address in
                 connectionModel.setSelectedSMBServerAddress(address)

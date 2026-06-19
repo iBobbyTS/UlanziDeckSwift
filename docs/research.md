@@ -124,7 +124,6 @@
 
 | 项目 | 语言 | ⭐ | 协议 | 说明 |
 |------|------|----|------|------|
-| **[redphx/strmdck](https://github.com/redphx/strmdck)** | Python | 22 | MIT | 最早逆向 D200 USB 协议，完整通信帧解析 |
 | **[jcalado/companion-surface-d200](https://github.com/jcalado/companion-surface-d200)** | TypeScript | 3 | MIT | Bitfocus Companion 面板插件，完整实现了按键接收 + 图标推送 + 小窗显示 |
 | **[brendanwelsh/ulanzi-d100h-homebrew](https://github.com/brendanwelsh/ulanzi-d100h-homebrew)** | JS/doc | 1 | MIT | D100H 旋钮控制器逆向笔记，含 HID 协议、Studio 配置格式、SDK 踩坑记录 |
 
@@ -134,8 +133,7 @@
 
 逆向方法:
 1. 使用 USBPcap 在 Windows 上抓取 Ulanzi Studio 与 D200 的 USB 通信
-2. 结合 [redphx/strmdck](https://github.com/redphx/strmdck) 的 Python 实现作为参考
-3. 验证并修正了 ZIP 包格式、固件 Bug 等细节
+2. 在 Companion 插件中验证并修正了 ZIP 包格式、固件 Bug 等细节
 
 已知问题:
 - D200 内部有两个 USB 设备: `18d1:d002`（废弃/启动加载器）和 `2207:0019`（真正的 HID 设备）
@@ -250,7 +248,6 @@ action:
 
 | 项目 | 命令码 | 载荷格式 | 实现状态 |
 |------|--------|----------|----------|
-| **strmdck** (Python) | `0x000a` | 纯文本数字 (如 `"50"`) | ✅ 已实现 |
 | **companion-surface-d200** (TypeScript) | `0x000a` | 纯文本数字 (如 `"50"`) | ✅ 已实现 |
 
 **协议细节:**
@@ -274,18 +271,6 @@ export function encodeBrightness(percent: number): Buffer {
 }
 ```
 
-```python
-# strmdck/src/strmdck/devices/ulanzi_d200.py
-def set_brightness(self, brightness: int, force=False):
-    ...
-    packet = PacketStruct.build(dict(
-        command_protocol=CommandProtocol.OUT_SET_BRIGHTNESS.value,
-        length=None,
-        data=str(brightness).encode('utf-8'),
-    ))
-    self._write_packet(packet)
-```
-
 **调用示例:**
 
 ```typescript
@@ -295,7 +280,7 @@ async setBrightness(percent: number): Promise<void> {
 }
 ```
 
-**注意:** companion-surface-d200 在 config 面板中**没有**暴露亮度调节给用户（缺少对应的 UI 配置项），但 device 层的 `setBrightness()` 方法已经完整实现，可直接调用。strmdck 的 `DeckDevice` 基类也将 `set_brightness` 定义为抽象方法，所有设备子类都必须实现。
+**注意:** companion-surface-d200 在 config 面板中**没有**暴露亮度调节给用户（缺少对应的 UI 配置项），但 device 层的 `setBrightness()` 方法已经完整实现，可直接调用。
 
 ### 5.8 各型号协议差异
 
@@ -315,7 +300,7 @@ async setBrightness(percent: number): Promise<void> {
 
 > ✅ **完全可行。**
 
-社区已完整逆向 D200 的 USB HID 通信协议，且有两个开源参考实现（Python + TypeScript）。
+社区已完整逆向 D200 的 USB HID 通信协议，当前保留 TypeScript 实现和 JS/doc 逆向笔记作为参考。
 
 ### 6.2 推荐架构
 
@@ -369,7 +354,6 @@ async setBrightness(percent: number): Promise<void> {
 | `companion-surface-d200/src/device.ts` | TypeScript | 用 `IOHIDDevice` API 替代 |
 | `companion-surface-d200/src/zip-builder.ts` | TypeScript | 用 `ZIPFoundation` 替代 |
 | `companion-surface-d200/src/instance.ts` | TypeScript | SwiftUI ViewModel 层 |
-| `strmdck/src/strmdck/devices/ulanzi_d200.py` | Python | 协议参考验证 |
 
 ### 6.5 工作量估算
 
@@ -414,7 +398,6 @@ async setBrightness(percent: number): Promise<void> {
 | UlanziDeck Plugin SDK | https://github.com/UlanziTechnology/UlanziDeckPlugin-SDK |
 | plugin-common-node | https://github.com/UlanziTechnology/plugin-common-node |
 | plugin-common-html | https://github.com/UlanziTechnology/plugin-common-html |
-| strmdck (Python 逆向) | https://github.com/redphx/strmdck |
 | companion-surface-d200 (TS 实现) | https://github.com/jcalado/companion-surface-d200 |
 | ulanzi-d100h-homebrew (逆向笔记) | https://github.com/brendanwelsh/ulanzi-d100h-homebrew |
 

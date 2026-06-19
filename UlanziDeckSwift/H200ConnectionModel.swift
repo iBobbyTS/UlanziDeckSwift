@@ -284,12 +284,12 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
-    func setSelectedFolderPath(_ path: String) {
+    func setSelectedFolderConfiguration(_ configuration: DeckKeyOpenFolderConfiguration) {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return
         }
 
-        if interactionState.setFolderPath(path, for: selectedKeyID) {
+        if interactionState.setFolderConfiguration(configuration, for: selectedKeyID) {
             persistCurrentConfiguration()
             syncKeyDisplay(keyID: selectedKeyID)
         }
@@ -423,6 +423,7 @@ final class H200ConnectionModel: ObservableObject {
         mihoyoSessionStore.clearSession()
         mihoyoLoginState = .creatingQRCode
         cancelAllMihoyoGameTimers()
+        cancelAllMihoyoGameFetchTasks()
         markAllMihoyoKeys(result: .loginRequired)
 
         let service = mihoyoGameService
@@ -609,11 +610,21 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func openFolder(for keyID: Int) {
-        guard let path = interactionState.folderPath(for: keyID), !path.isEmpty else {
+        let configuration = interactionState.openFolderConfiguration(for: keyID)
+        guard configuration.canOpen else {
             return
         }
 
-        _ = folderOpener.openFolder(at: path)
+        let result = folderOpener.openFolder(configuration)
+        guard case let .opened(refreshedConfiguration) = result,
+              let refreshedConfiguration
+        else {
+            return
+        }
+
+        if interactionState.setFolderConfiguration(refreshedConfiguration, for: keyID, selectsKey: false) {
+            persistCurrentConfiguration()
+        }
     }
 
     private func connectSMBServer(for keyID: Int) {
@@ -763,6 +774,12 @@ final class H200ConnectionModel: ObservableObject {
             guard !Task.isCancelled else { return }
 
             guard let self else { return }
+            guard self.mihoyoSession == session,
+                  self.interactionState.mihoyoGame(for: keyID) == game
+            else {
+                return
+            }
+
             self.interactionState.setMihoyoGameLastResult(result, for: keyID)
             switch result {
             case let .loginExpired(message):
