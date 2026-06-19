@@ -40,6 +40,7 @@ struct ContentView: View {
     let onFilePathSelection: (DeckKeyOpenFileConfiguration) -> Void
     let onFileNamePreview: (Int, String) -> Void
     let onFileNameChange: (Int, String) -> Void
+    let onFileIconBlurChange: (Int, Bool) -> Void
     let onSMBServerAddressChange: (String) -> Void
     let onSMBServerNamePreview: (Int, String) -> Void
     let onSMBServerNameChange: (Int, String) -> Void
@@ -740,6 +741,7 @@ struct MihoyoQRCodeView: View {
         onFilePathSelection: { _ in },
         onFileNamePreview: { _, _ in },
         onFileNameChange: { _, _ in },
+        onFileIconBlurChange: { _, _ in },
         onSMBServerAddressChange: { _ in },
         onSMBServerNamePreview: { _, _ in },
         onSMBServerNameChange: { _, _ in },

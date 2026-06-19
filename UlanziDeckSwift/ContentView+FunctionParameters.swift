@@ -82,7 +82,8 @@ extension ContentView {
                 needsReselection: configuration.openFolder.needsReselection,
                 chooseButtonTitle: "选择文件夹",
                 rechooseButtonTitle: "重新选择文件夹",
-                chooseButtonSystemImage: "folder.badge.plus"
+                chooseButtonSystemImage: "folder.badge.plus",
+                extraContent: AnyView(EmptyView())
             ) {
                 chooseFolder()
             }
@@ -99,7 +100,8 @@ extension ContentView {
                 needsReselection: configuration.openFile.needsReselection,
                 chooseButtonTitle: "选择文件",
                 rechooseButtonTitle: "重新选择文件",
-                chooseButtonSystemImage: "doc.badge.plus"
+                chooseButtonSystemImage: "doc.badge.plus",
+                extraContent: AnyView(fileIconBlurButton(for: configuration.openFile))
             ) {
                 chooseFile()
             }
@@ -276,6 +278,7 @@ extension ContentView {
         chooseButtonTitle: String,
         rechooseButtonTitle: String,
         chooseButtonSystemImage: String,
+        extraContent: AnyView,
         chooseAction: @escaping () -> Void
     ) -> some View {
         HStack(alignment: .top, spacing: 28) {
@@ -323,6 +326,8 @@ extension ContentView {
                             .foregroundStyle(.orange)
                     }
                 }
+
+                extraContent
             }
 
             Button {
@@ -337,6 +342,25 @@ extension ContentView {
 
             Spacer()
         }
+    }
+
+    private func fileIconBlurButton(for configuration: DeckKeyOpenFileConfiguration) -> some View {
+        Button {
+            guard let selectedKeyID = interactionState.selectedKeyID else {
+                return
+            }
+
+            onFileIconBlurChange(selectedKeyID, !configuration.usesBlurredIcon)
+        } label: {
+            Label("高斯模糊", systemImage: configuration.usesBlurredIcon ? "checkmark.circle.fill" : "circle")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(configuration.usesBlurredIcon ? .accentColor : .secondary)
+        .disabled(!configuration.canUseIconBlur)
+        .help(configuration.canUseIconBlur ? "切换文件图标背景的高斯模糊版本" : "选择文件并成功获取图标后可用")
+        .accessibilityLabel("高斯模糊")
+        .accessibilityValue(configuration.usesBlurredIcon ? "已开启" : "已关闭")
     }
 }
 
@@ -875,7 +899,8 @@ extension ContentView {
         do {
             onFilePathSelection(try DeckKeyOpenFileConfiguration(
                 fileURL: url,
-                name: fileName
+                name: fileName,
+                iconSnapshot: FileIconSnapshot.snapshotData(for: url)
             ))
         } catch {
             let alert = NSAlert()

@@ -108,7 +108,10 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 subtitle = configuration.openFolder.path ?? ""
                 folderButtonContent = content
             case .openFile:
-                let content = FileButtonContent(displayName: configuration.openFile.displayName)
+                let content = FileButtonContent(
+                    displayName: configuration.openFile.displayName,
+                    backgroundPNGData: configuration.openFile.selectedIconPNGData
+                )
                 title = content.displayName
                 subtitle = configuration.openFile.path ?? ""
                 fileButtonContent = content
@@ -234,6 +237,7 @@ nonisolated struct FolderButtonContent: Equatable {
 
 nonisolated struct FileButtonContent: Equatable {
     let displayName: String
+    let backgroundPNGData: Data?
 }
 
 nonisolated struct SMBServerButtonContent: Equatable {
@@ -711,6 +715,22 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
         configurations[keyID, default: .tallyDefault].openFile.name =
             DeckKeyOpenFileConfiguration.normalizedName(name)
+        return true
+    }
+
+    @discardableResult
+    mutating func setFileIconBlurEnabled(_ enabled: Bool, for keyID: Int, selectsKey: Bool = true) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .openFile,
+              configurations[keyID, default: .tallyDefault].openFile.canUseIconBlur
+        else {
+            return false
+        }
+
+        if selectsKey {
+            selectedKeyID = keyID
+        }
+        configurations[keyID, default: .tallyDefault].openFile.usesBlurredIcon = enabled
         return true
     }
 

@@ -297,14 +297,27 @@ nonisolated struct DeckKeyOpenFileConfiguration: Codable, Equatable {
     var path: String?
     var bookmarkData: Data?
     var name: String
+    var iconPNGData: Data?
+    var blurredIconPNGData: Data?
+    var usesBlurredIcon: Bool
 
-    init(path: String? = nil, bookmarkData: Data? = nil, name: String = "") {
+    init(
+        path: String? = nil,
+        bookmarkData: Data? = nil,
+        name: String = "",
+        iconPNGData: Data? = nil,
+        blurredIconPNGData: Data? = nil,
+        usesBlurredIcon: Bool = false
+    ) {
         self.path = Self.normalizedPath(path)
         self.bookmarkData = bookmarkData
         self.name = Self.normalizedName(name)
+        self.iconPNGData = iconPNGData
+        self.blurredIconPNGData = blurredIconPNGData
+        self.usesBlurredIcon = usesBlurredIcon
     }
 
-    init(fileURL: URL, name: String = "") throws {
+    init(fileURL: URL, name: String = "", iconSnapshot: FileIconSnapshotData? = nil) throws {
         self.path = Self.normalizedPath(fileURL.path)
         self.bookmarkData = try fileURL.bookmarkData(
             options: Self.securityScopedBookmarkCreationOptions,
@@ -312,6 +325,9 @@ nonisolated struct DeckKeyOpenFileConfiguration: Codable, Equatable {
             relativeTo: nil
         )
         self.name = Self.normalizedName(name)
+        self.iconPNGData = iconSnapshot?.iconPNGData
+        self.blurredIconPNGData = iconSnapshot?.blurredIconPNGData
+        self.usesBlurredIcon = false
     }
 
     var displayName: String {
@@ -339,10 +355,25 @@ nonisolated struct DeckKeyOpenFileConfiguration: Codable, Equatable {
         bookmarkData != nil
     }
 
+    var canUseIconBlur: Bool {
+        path != nil && iconPNGData != nil && blurredIconPNGData != nil
+    }
+
+    var selectedIconPNGData: Data? {
+        if usesBlurredIcon {
+            return blurredIconPNGData ?? iconPNGData
+        }
+
+        return iconPNGData
+    }
+
     enum CodingKeys: CodingKey {
         case path
         case bookmarkData
         case name
+        case iconPNGData
+        case blurredIconPNGData
+        case usesBlurredIcon
     }
 
     init(from decoder: Decoder) throws {
@@ -350,6 +381,9 @@ nonisolated struct DeckKeyOpenFileConfiguration: Codable, Equatable {
         path = Self.normalizedPath(try container.decodeIfPresent(String.self, forKey: .path))
         bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
         name = Self.normalizedName(try container.decodeIfPresent(String.self, forKey: .name) ?? "")
+        iconPNGData = try container.decodeIfPresent(Data.self, forKey: .iconPNGData)
+        blurredIconPNGData = try container.decodeIfPresent(Data.self, forKey: .blurredIconPNGData)
+        usesBlurredIcon = try container.decodeIfPresent(Bool.self, forKey: .usesBlurredIcon) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -357,6 +391,9 @@ nonisolated struct DeckKeyOpenFileConfiguration: Codable, Equatable {
         try container.encodeIfPresent(path, forKey: .path)
         try container.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
         try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(iconPNGData, forKey: .iconPNGData)
+        try container.encodeIfPresent(blurredIconPNGData, forKey: .blurredIconPNGData)
+        try container.encode(usesBlurredIcon && canUseIconBlur, forKey: .usesBlurredIcon)
     }
 
     private static func normalizedPath(_ path: String?) -> String? {

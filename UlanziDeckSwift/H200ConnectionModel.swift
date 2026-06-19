@@ -362,6 +362,13 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    func setFileIconBlurEnabled(_ enabled: Bool, for keyID: Int) {
+        if interactionState.setFileIconBlurEnabled(enabled, for: keyID, selectsKey: false) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: keyID)
+        }
+    }
+
     func setSelectedSMBServerAddress(_ address: String) {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return
@@ -722,6 +729,9 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         refreshedConfiguration.name = configuration.name
+        refreshedConfiguration.iconPNGData = configuration.iconPNGData
+        refreshedConfiguration.blurredIconPNGData = configuration.blurredIconPNGData
+        refreshedConfiguration.usesBlurredIcon = configuration.usesBlurredIcon
         if interactionState.setFileConfiguration(refreshedConfiguration, for: keyID, selectsKey: false) {
             persistCurrentConfiguration()
         }

@@ -242,6 +242,20 @@ nonisolated struct AutoSizedSingleLineText {
         return font(ofSize: fittedSize)
     }
 
+    static func verticallyCenteredLineRect(font: NSFont, in rect: NSRect) -> NSRect {
+        guard rect.width > 0, rect.height > 0 else {
+            return rect
+        }
+
+        let lineHeight = Swift.min(singleLineHeight(font: font), rect.height)
+        return NSRect(
+            x: rect.minX,
+            y: rect.midY - lineHeight / 2,
+            width: rect.width,
+            height: lineHeight
+        )
+    }
+
     private func font(ofSize size: CGFloat) -> NSFont {
         switch fontStyle {
         case .system:
@@ -256,8 +270,12 @@ nonisolated struct AutoSizedSingleLineText {
         return (measurementText as NSString).size(withAttributes: [.font: font]).width
     }
 
+    private static func singleLineHeight(font: NSFont) -> CGFloat {
+        Swift.max(1, ceil(font.ascender - font.descender + font.leading))
+    }
+
     private func singleLineHeight(font: NSFont) -> CGFloat {
-        ceil(font.ascender - font.descender + font.leading)
+        Self.singleLineHeight(font: font)
     }
 }
 
@@ -361,6 +379,16 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
     }
 
     private func drawBackground(for display: DeckKeyDisplay, in rect: NSRect) {
+        if let iconPNGData = display.fileButtonContent?.backgroundPNGData,
+           let image = NSImage(data: iconPNGData) {
+            drawFittedBackgroundImage(image, in: rect)
+            if display.buttonBackgroundDimmingEnabled {
+                NSColor(calibratedWhite: 0, alpha: 0.38).setFill()
+                rect.fill()
+            }
+            return
+        }
+
         let backgroundAssetName: String?
         if let game = display.mihoyoGame {
             backgroundAssetName = game.buttonBackgroundAssetName
@@ -624,6 +652,9 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
         paragraph.lineBreakMode = .byTruncatingTail
+        let lineRect = AutoSizedSingleLineText.verticallyCenteredLineRect(font: font, in: rect)
+        paragraph.minimumLineHeight = lineRect.height
+        paragraph.maximumLineHeight = lineRect.height
         var attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color,
@@ -631,7 +662,7 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         ]
         attributes[.shadow] = shadow
         (text as NSString).draw(
-            with: rect,
+            with: lineRect,
             options: [.usesLineFragmentOrigin, .usesFontLeading, .truncatesLastVisibleLine],
             attributes: attributes
         )

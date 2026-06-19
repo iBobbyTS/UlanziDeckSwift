@@ -414,15 +414,28 @@ struct UlanziDeckSwiftTests {
     @Test func openFileFunctionDisplaysSelectedFileName() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
+        let iconPNGData = Self.solidColorIconPNGData(color: .systemRed)
+        let blurredIconPNGData = Self.solidColorIconPNGData(color: .systemBlue)
 
         state.assign(.openFile, to: 5)
-        state.setFileConfiguration(Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf"), for: 5)
+        state.setFileConfiguration(Self.fileConfiguration(
+            path: "/Users/ibobby/Documents/report.pdf",
+            iconPNGData: iconPNGData,
+            blurredIconPNGData: blurredIconPNGData
+        ), for: 5)
         let display = state.display(for: layout.keys[4])
 
         #expect(display.title == "report.pdf")
         #expect(display.subtitle == "/Users/ibobby/Documents/report.pdf")
         #expect(display.fileButtonContent?.displayName == "report.pdf")
+        #expect(display.fileButtonContent?.backgroundPNGData == iconPNGData)
         #expect(state.filePath(for: 5) == "/Users/ibobby/Documents/report.pdf")
+        #expect(state.openFileConfiguration(for: 5).canUseIconBlur)
+
+        state.setFileIconBlurEnabled(true, for: 5)
+        let blurredDisplay = state.display(for: layout.keys[4])
+
+        #expect(blurredDisplay.fileButtonContent?.backgroundPNGData == blurredIconPNGData)
 
         state.setFileName(" 报告 ", for: 5)
         let namedDisplay = state.display(for: layout.keys[4])
@@ -452,6 +465,7 @@ struct UlanziDeckSwiftTests {
         #expect(configuration.name.isEmpty)
         #expect(configuration.needsReselection)
         #expect(!configuration.canOpen)
+        #expect(!configuration.canUseIconBlur)
         #expect(configuration.displayName == "report.pdf")
     }
 
@@ -481,7 +495,16 @@ struct UlanziDeckSwiftTests {
 
     @Test func openFileConfigurationPersistsBookmarkData() throws {
         let bookmarkData = try #require("bookmark-data".data(using: .utf8))
-        let configuration = Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf", bookmarkData: bookmarkData, name: "报告")
+        let iconPNGData = Self.solidColorIconPNGData(color: .systemBlue)
+        let blurredIconPNGData = Self.solidColorIconPNGData(color: .systemRed)
+        let configuration = Self.fileConfiguration(
+            path: "/Users/ibobby/Documents/report.pdf",
+            bookmarkData: bookmarkData,
+            name: "报告",
+            iconPNGData: iconPNGData,
+            blurredIconPNGData: blurredIconPNGData,
+            usesBlurredIcon: true
+        )
 
         let encoded = try JSONEncoder().encode(configuration)
         let restored = try JSONDecoder().decode(DeckKeyOpenFileConfiguration.self, from: encoded)
@@ -489,9 +512,24 @@ struct UlanziDeckSwiftTests {
         #expect(restored.path == "/Users/ibobby/Documents/report.pdf")
         #expect(restored.bookmarkData == bookmarkData)
         #expect(restored.name == "报告")
+        #expect(restored.iconPNGData == iconPNGData)
+        #expect(restored.blurredIconPNGData == blurredIconPNGData)
+        #expect(restored.usesBlurredIcon)
+        #expect(restored.selectedIconPNGData == blurredIconPNGData)
         #expect(restored.displayName == "报告")
         #expect(!restored.needsReselection)
         #expect(restored.canOpen)
+    }
+
+    @Test func fileIconSnapshotStoresDirectAndBlurredLongEdge196Images() throws {
+        let icon = Self.twoToneIconImage()
+        let snapshot = try #require(FileIconSnapshot.snapshotData(for: icon))
+        let directImage = try #require(NSBitmapImageRep(data: snapshot.iconPNGData))
+        let blurredImage = try #require(NSBitmapImageRep(data: snapshot.blurredIconPNGData))
+
+        #expect(max(directImage.pixelsWide, directImage.pixelsHigh) == 196)
+        #expect(max(blurredImage.pixelsWide, blurredImage.pixelsHigh) == 196)
+        #expect(snapshot.iconPNGData != snapshot.blurredIconPNGData)
     }
 
     @Test func connectSMBServerFunctionDisplaysNameAndPersistsNormalizedAddress() {
@@ -1319,6 +1357,8 @@ struct UlanziDeckSwiftTests {
     @Test func selectingOpenFileFunctionSyncsAndPersistsFilePath() async throws {
         let syncer = FakeH200DeckSyncer()
         let store = FakeDeckConfigurationStore()
+        let iconPNGData = Self.solidColorIconPNGData(color: .systemRed)
+        let blurredIconPNGData = Self.solidColorIconPNGData(color: .systemBlue)
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
             syncer: syncer,
@@ -1332,7 +1372,11 @@ struct UlanziDeckSwiftTests {
         }
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.openFile)
-        model.setSelectedFileConfiguration(Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf"))
+        model.setSelectedFileConfiguration(Self.fileConfiguration(
+            path: "/Users/ibobby/Documents/report.pdf",
+            iconPNGData: iconPNGData,
+            blurredIconPNGData: blurredIconPNGData
+        ))
         model.setSelectedFileName("报告")
 
         try await Self.waitUntil {
@@ -1346,8 +1390,19 @@ struct UlanziDeckSwiftTests {
         #expect(syncer.partialDisplays.last?.first?.title == "报告")
         #expect(syncer.partialDisplays.last?.first?.subtitle == "/Users/ibobby/Documents/report.pdf")
         #expect(syncer.partialDisplays.last?.first?.fileButtonContent?.displayName == "报告")
+        #expect(syncer.partialDisplays.last?.first?.fileButtonContent?.backgroundPNGData == iconPNGData)
         #expect(store.savedStates.last?.filePath(for: 4) == "/Users/ibobby/Documents/report.pdf")
         #expect(store.savedStates.last?.openFileConfiguration(for: 4).name == "报告")
+        #expect(store.savedStates.last?.openFileConfiguration(for: 4).iconPNGData == iconPNGData)
+        #expect(store.savedStates.last?.openFileConfiguration(for: 4).blurredIconPNGData == blurredIconPNGData)
+
+        model.setFileIconBlurEnabled(true, for: 4)
+
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 4
+        }
+        #expect(syncer.partialDisplays.last?.first?.fileButtonContent?.backgroundPNGData == blurredIconPNGData)
+        #expect(store.savedStates.last?.openFileConfiguration(for: 4).usesBlurredIcon == true)
     }
 
     @MainActor
@@ -1868,6 +1923,8 @@ struct UlanziDeckSwiftTests {
     @Test func physicalButtonOpenFilePersistsRefreshedBookmarkWithoutSyncingDisplay() async throws {
         let opener = FakeFinderFileOpener()
         let refreshedBookmarkData = try #require("refreshed-bookmark".data(using: .utf8))
+        let iconPNGData = Self.solidColorIconPNGData(color: .systemRed)
+        let blurredIconPNGData = Self.solidColorIconPNGData(color: .systemBlue)
         opener.result = .opened(refreshedConfiguration: Self.fileConfiguration(
             path: "/Users/ibobby/Documents/report.pdf",
             bookmarkData: refreshedBookmarkData
@@ -1889,7 +1946,10 @@ struct UlanziDeckSwiftTests {
         model.assignSelectedFunction(.openFile)
         model.setSelectedFileConfiguration(Self.fileConfiguration(
             path: "/Users/ibobby/Documents/report.pdf",
-            bookmarkData: Data("old-bookmark".utf8)
+            bookmarkData: Data("old-bookmark".utf8),
+            iconPNGData: iconPNGData,
+            blurredIconPNGData: blurredIconPNGData,
+            usesBlurredIcon: true
         ))
         try await Self.waitUntil {
             syncer.partialDisplays.count >= 2
@@ -1906,6 +1966,11 @@ struct UlanziDeckSwiftTests {
 
         #expect(opener.openedPaths == ["/Users/ibobby/Documents/report.pdf"])
         #expect(model.interactionState.openFileConfiguration(for: 4).bookmarkData == refreshedBookmarkData)
+        #expect(model.interactionState.openFileConfiguration(for: 4).iconPNGData == iconPNGData)
+        #expect(model.interactionState.openFileConfiguration(for: 4).blurredIconPNGData == blurredIconPNGData)
+        #expect(model.interactionState.openFileConfiguration(for: 4).usesBlurredIcon)
+        #expect(store.savedStates.last?.openFileConfiguration(for: 4).iconPNGData == iconPNGData)
+        #expect(store.savedStates.last?.openFileConfiguration(for: 4).blurredIconPNGData == blurredIconPNGData)
         #expect(syncer.sentDisplays.count == sentDisplayCount)
         #expect(syncer.partialDisplays.count == partialDisplayCount)
         #expect(model.interactionState.selectedKeyID == 4)
@@ -2232,6 +2297,34 @@ struct UlanziDeckSwiftTests {
         #expect(fittedFont.pointSize < 80)
     }
 
+    @Test func autoSizedSingleLineTextBuildsVerticallyCenteredLineRect() {
+        let font = NSFont.systemFont(ofSize: 42, weight: .heavy)
+        let outerRect = NSRect(x: 12, y: 30, width: 180, height: 92)
+        let lineRect = AutoSizedSingleLineText.verticallyCenteredLineRect(font: font, in: outerRect)
+
+        #expect(lineRect.minX == outerRect.minX)
+        #expect(lineRect.width == outerRect.width)
+        #expect(lineRect.height > 0)
+        #expect(lineRect.height <= outerRect.height)
+        #expect(abs(lineRect.midY - outerRect.midY) < 0.001)
+    }
+
+    @Test func shortcutSingleLineTextRendersNearButtonVerticalCenter() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.openFile, to: 2)
+        state.setFileConfiguration(Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf"), for: 2)
+        state.setFileName("报告", for: 2)
+        let display = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: false)
+
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+        let textBounds = try #require(Self.brightPixelBounds(in: image))
+        let buttonMidY = CGFloat(image.pixelsHigh) / 2
+
+        #expect(abs(textBounds.midY - buttonMidY) < 10)
+    }
+
     @Test func iconRendererUsesBlackButtonBackground() throws {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
@@ -2286,15 +2379,46 @@ struct UlanziDeckSwiftTests {
     @Test func iconRendererUsesFileNameContentOnBlackBackground() throws {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
+        let iconPNGData = Self.solidColorIconPNGData(color: .systemRed)
+        let blurredIconPNGData = Self.solidColorIconPNGData(color: .systemBlue)
         state.assign(.openFile, to: 2)
-        state.setFileConfiguration(Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf"), for: 2)
+        state.setFileConfiguration(Self.fileConfiguration(
+            path: "/Users/ibobby/Documents/report.pdf",
+            iconPNGData: iconPNGData,
+            blurredIconPNGData: blurredIconPNGData
+        ), for: 2)
         state.setFileName("报告", for: 2)
-        let display = state.display(for: layout.keys[1])
+        let display = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: false)
 
         #expect(display.title == "报告")
         #expect(display.subtitle == "/Users/ibobby/Documents/report.pdf")
         #expect(display.fileButtonContent?.displayName == "报告")
-        try Self.expectBlackButtonBackground(for: display)
+        #expect(display.fileButtonContent?.backgroundPNGData == iconPNGData)
+
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+        let brightCornerColor = try #require(image.colorAt(x: 1, y: 1)?.usingColorSpace(.deviceRGB))
+        #expect(brightCornerColor.redComponent > 0.7)
+        #expect(brightCornerColor.redComponent > brightCornerColor.greenComponent + 0.25)
+        #expect(brightCornerColor.redComponent > brightCornerColor.blueComponent + 0.25)
+        #expect(brightCornerColor.alphaComponent > 0.999)
+
+        let dimmedDisplay = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: true)
+        let dimmedPNG = try H200ButtonIconRenderer().pngData(for: dimmedDisplay)
+        let dimmedImage = try #require(NSBitmapImageRep(data: dimmedPNG))
+        let dimmedCornerColor = try #require(dimmedImage.colorAt(x: 1, y: 1)?.usingColorSpace(.deviceRGB))
+        let brightLuma = brightCornerColor.redComponent + brightCornerColor.greenComponent + brightCornerColor.blueComponent
+        let dimmedLuma = dimmedCornerColor.redComponent + dimmedCornerColor.greenComponent + dimmedCornerColor.blueComponent
+        #expect(brightLuma > dimmedLuma)
+
+        state.setFileIconBlurEnabled(true, for: 2)
+        let blurredDisplay = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: false)
+        let blurredPNG = try H200ButtonIconRenderer().pngData(for: blurredDisplay)
+        let blurredImage = try #require(NSBitmapImageRep(data: blurredPNG))
+        let blurredCornerColor = try #require(blurredImage.colorAt(x: 1, y: 1)?.usingColorSpace(.deviceRGB))
+        #expect(blurredDisplay.fileButtonContent?.backgroundPNGData == blurredIconPNGData)
+        #expect(blurredCornerColor.blueComponent > 0.7)
+        #expect(blurredCornerColor.blueComponent > blurredCornerColor.redComponent + 0.25)
     }
 
     @Test func iconRendererCanDisableButtonBackgroundDimming() throws {
@@ -2985,6 +3109,62 @@ struct UlanziDeckSwiftTests {
         }
     }
 
+    private static func bitmapContainsPixel(
+        in image: NSBitmapImageRep,
+        xRange: Range<Int>,
+        yRange: Range<Int>,
+        matching predicate: (NSColor) -> Bool
+    ) -> Bool {
+        for x in xRange where x >= 0 && x < image.pixelsWide {
+            for y in yRange where y >= 0 && y < image.pixelsHigh {
+                guard let color = image.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else {
+                    continue
+                }
+                if predicate(color) {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
+    private static func brightPixelBounds(in image: NSBitmapImageRep) -> NSRect? {
+        var minX = Int.max
+        var minY = Int.max
+        var maxX = Int.min
+        var maxY = Int.min
+
+        for x in 0..<image.pixelsWide {
+            for y in 0..<image.pixelsHigh {
+                guard let color = image.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB),
+                      color.alphaComponent > 0.8,
+                      color.redComponent > 0.72,
+                      color.greenComponent > 0.72,
+                      color.blueComponent > 0.72
+                else {
+                    continue
+                }
+
+                minX = Swift.min(minX, x)
+                minY = Swift.min(minY, y)
+                maxX = Swift.max(maxX, x)
+                maxY = Swift.max(maxY, y)
+            }
+        }
+
+        guard minX <= maxX, minY <= maxY else {
+            return nil
+        }
+
+        return NSRect(
+            x: minX,
+            y: minY,
+            width: maxX - minX + 1,
+            height: maxY - minY + 1
+        )
+    }
+
     private static func inputReport(state: UInt8, index: UInt8, type: UInt8, action: UInt8) -> Data {
         var report = Data()
         report.append(0x7c)
@@ -3033,9 +3213,63 @@ struct UlanziDeckSwiftTests {
     private static func fileConfiguration(
         path: String,
         bookmarkData: Data? = Data("bookmark".utf8),
-        name: String = ""
+        name: String = "",
+        iconPNGData: Data? = nil,
+        blurredIconPNGData: Data? = nil,
+        usesBlurredIcon: Bool = false
     ) -> DeckKeyOpenFileConfiguration {
-        DeckKeyOpenFileConfiguration(path: path, bookmarkData: bookmarkData, name: name)
+        DeckKeyOpenFileConfiguration(
+            path: path,
+            bookmarkData: bookmarkData,
+            name: name,
+            iconPNGData: iconPNGData,
+            blurredIconPNGData: blurredIconPNGData,
+            usesBlurredIcon: usesBlurredIcon
+        )
+    }
+
+    private static func solidColorIconPNGData(color: NSColor) -> Data {
+        let pixelSize = 64
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: pixelSize,
+            pixelsHigh: pixelSize,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            Issue.record("无法创建测试图标位图")
+            return Data()
+        }
+
+        rep.size = NSSize(width: pixelSize, height: pixelSize)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        color.setFill()
+        NSRect(x: 0, y: 0, width: pixelSize, height: pixelSize).fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let pngData = rep.representation(using: .png, properties: [:]) else {
+            Issue.record("无法编码测试图标 PNG")
+            return Data()
+        }
+        return pngData
+    }
+
+    private static func twoToneIconImage() -> NSImage {
+        let size = NSSize(width: 80, height: 40)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.systemRed.setFill()
+        NSRect(x: 0, y: 0, width: 40, height: 40).fill()
+        NSColor.systemBlue.setFill()
+        NSRect(x: 40, y: 0, width: 40, height: 40).fill()
+        image.unlockFocus()
+        return image
     }
 
     private static func sub2APICapacityItem(

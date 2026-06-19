@@ -72,6 +72,9 @@ struct RootView: View {
             onFileNameChange: { keyID, name in
                 connectionModel.setFileName(name, for: keyID)
             },
+            onFileIconBlurChange: { keyID, enabled in
+                connectionModel.setFileIconBlurEnabled(enabled, for: keyID)
+            },
             onSMBServerAddressChange: { address in
                 connectionModel.setSelectedSMBServerAddress(address)
             },
