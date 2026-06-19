@@ -2,18 +2,18 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-private enum FolderBackgroundSelectionMode: Int {
+private enum ButtonBackgroundSelectionMode: Int {
     case image
     case allFiles
 }
 
-private final class FolderBackgroundSelectionAccessory: NSObject {
+private final class ButtonBackgroundSelectionAccessory: NSObject {
     let view: NSView
     private let popupButton: NSPopUpButton
     private weak var panel: NSOpenPanel?
 
-    var mode: FolderBackgroundSelectionMode {
-        FolderBackgroundSelectionMode(rawValue: popupButton.indexOfSelectedItem) ?? .image
+    var mode: ButtonBackgroundSelectionMode {
+        ButtonBackgroundSelectionMode(rawValue: popupButton.indexOfSelectedItem) ?? .image
     }
 
     init(panel: NSOpenPanel) {
@@ -56,17 +56,9 @@ extension ContentView {
     @ViewBuilder
     func parameterContent(for configuration: DeckKeyConfiguration) -> some View {
         switch configuration.function {
-        case .none, .brightness, .pageFolder:
+        case .none, .brightness:
             HStack(alignment: .top, spacing: 28) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("功能")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
-                        .font(.callout.weight(.medium))
-                }
-                .frame(width: 150, alignment: .leading)
+                functionParameterColumn(for: configuration)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("参数")
@@ -83,15 +75,7 @@ extension ContentView {
 
         case .pageBack:
             HStack(alignment: .top, spacing: 28) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("功能")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
-                        .font(.callout.weight(.medium))
-                }
-                .frame(width: 150, alignment: .leading)
+                functionParameterColumn(for: configuration)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("参数")
@@ -108,15 +92,7 @@ extension ContentView {
 
         case .tally:
             HStack(alignment: .top, spacing: 28) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("功能")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
-                        .font(.callout.weight(.medium))
-                }
-                .frame(width: 150, alignment: .leading)
+                functionParameterColumn(for: configuration)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("当前值")
@@ -148,64 +124,37 @@ extension ContentView {
 
         case .openFolder:
             localResourceParameterContent(
-                function: configuration.function,
-                automaticDisplayName: selectedFolderAutomaticDisplayName,
-                name: selectedFolderNameBinding,
-                focusField: .folderName,
+                configuration: configuration,
                 resourceTitle: "文件夹",
                 path: configuration.openFolder.path,
                 emptyPathText: "未选择文件夹",
                 needsReselection: configuration.openFolder.needsReselection,
                 chooseButtonTitle: "选择文件夹",
                 rechooseButtonTitle: "重新选择文件夹",
-                chooseButtonSystemImage: "folder.badge.plus",
-                extraContent: AnyView(folderBackgroundButtons(for: configuration.openFolder))
+                chooseButtonSystemImage: "folder.badge.plus"
             ) {
                 chooseFolder()
             }
 
         case .openFile:
             localResourceParameterContent(
-                function: configuration.function,
-                automaticDisplayName: selectedFileAutomaticDisplayName,
-                name: selectedFileNameBinding,
-                focusField: .fileName,
+                configuration: configuration,
                 resourceTitle: "文件",
                 path: configuration.openFile.path,
                 emptyPathText: "未选择文件",
                 needsReselection: configuration.openFile.needsReselection,
                 chooseButtonTitle: "选择文件",
                 rechooseButtonTitle: "重新选择文件",
-                chooseButtonSystemImage: "doc.badge.plus",
-                extraContent: AnyView(fileIconBlurButton(for: configuration.openFile))
+                chooseButtonSystemImage: "doc.badge.plus"
             ) {
                 chooseFile()
             }
 
         case .connectSMBServer:
             HStack(alignment: .top, spacing: 28) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("功能")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
-                        .font(.callout.weight(.medium))
-                }
-                .frame(width: 150, alignment: .leading)
+                functionParameterColumn(for: configuration)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("显示名称")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        TextField("NAS", text: selectedSMBServerNameBinding)
-                            .textFieldStyle(.roundedBorder)
-                            .focused($focusedParameterField, equals: .smbServerName)
-                            .frame(maxWidth: 260, alignment: .leading)
-                    }
-
                     VStack(alignment: .leading, spacing: 8) {
                         Text("服务器地址")
                             .font(.caption.weight(.semibold))
@@ -224,7 +173,7 @@ extension ContentView {
                         }
                         .frame(maxWidth: 360, alignment: .leading)
 
-                        Text("名称会显示在按钮画面中心；地址只填写服务器和共享名，例如 server.local/share。连接时会使用系统认证窗口。")
+                        Text("地址只填写服务器和共享名，例如 server.local/share。连接时会使用系统认证窗口。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -234,17 +183,26 @@ extension ContentView {
                 Spacer()
             }
 
-        case .sub2API:
+        case .pageFolder:
             HStack(alignment: .top, spacing: 28) {
+                functionParameterColumn(for: configuration)
+
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("功能")
+                    Text("参数")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
-                        .font(.callout.weight(.medium))
+                    Text("无可配置参数")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
-                .frame(width: 150, alignment: .leading)
+
+                Spacer()
+            }
+
+        case .sub2API:
+            HStack(alignment: .top, spacing: 28) {
+                functionParameterColumn(for: configuration)
 
                 VStack(alignment: .leading, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
@@ -342,11 +300,24 @@ extension ContentView {
         }
     }
 
+    private func functionParameterColumn(for configuration: DeckKeyConfiguration) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("功能")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Label(configuration.function.title, systemImage: configuration.function.systemImageName)
+                    .font(.callout.weight(.medium))
+            }
+
+            buttonVisualControls(for: configuration)
+        }
+        .frame(width: 170, alignment: .leading)
+    }
+
     private func localResourceParameterContent(
-        function: DeckKeyFunction,
-        automaticDisplayName: String,
-        name: Binding<String>,
-        focusField: ParameterFocusField,
+        configuration: DeckKeyConfiguration,
         resourceTitle: String,
         path: String?,
         emptyPathText: String,
@@ -354,36 +325,12 @@ extension ContentView {
         chooseButtonTitle: String,
         rechooseButtonTitle: String,
         chooseButtonSystemImage: String,
-        extraContent: AnyView,
         chooseAction: @escaping () -> Void
     ) -> some View {
         HStack(alignment: .top, spacing: 28) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("功能")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                Label(function.title, systemImage: function.systemImageName)
-                    .font(.callout.weight(.medium))
-            }
-            .frame(width: 150, alignment: .leading)
+            functionParameterColumn(for: configuration)
 
             VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("显示名称")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    TextField(
-                        automaticDisplayName,
-                        text: name,
-                        prompt: Text(automaticDisplayName)
-                    )
-                    .textFieldStyle(.roundedBorder)
-                    .focused($focusedParameterField, equals: focusField)
-                    .frame(maxWidth: 260, alignment: .leading)
-                }
-
                 VStack(alignment: .leading, spacing: 4) {
                     Text(resourceTitle)
                         .font(.caption.weight(.semibold))
@@ -402,8 +349,6 @@ extension ContentView {
                             .foregroundStyle(.orange)
                     }
                 }
-
-                extraContent
             }
 
             Button {
@@ -420,47 +365,85 @@ extension ContentView {
         }
     }
 
-    private func fileIconBlurButton(for configuration: DeckKeyOpenFileConfiguration) -> some View {
-        Button {
-            guard let selectedKeyID = interactionState.selectedKeyID else {
-                return
+    private func buttonVisualControls(for configuration: DeckKeyConfiguration) -> some View {
+        let visual = configuration.visual
+
+        return VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("显示名称")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                TextField(
+                    selectedButtonVisualAutomaticDisplayName,
+                    text: selectedButtonVisualNameBinding,
+                    prompt: Text(selectedButtonVisualAutomaticDisplayName)
+                )
+                .textFieldStyle(.roundedBorder)
+                .focused($focusedParameterField, equals: .buttonVisualName)
             }
 
-            onFileIconBlurChange(selectedKeyID, !configuration.usesBlurredIcon)
-        } label: {
-            Label("高斯模糊", systemImage: configuration.usesBlurredIcon ? "checkmark.circle.fill" : "circle")
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .tint(configuration.usesBlurredIcon ? .accentColor : .secondary)
-        .disabled(!configuration.canUseIconBlur)
-        .help(configuration.canUseIconBlur ? "切换文件图标背景的高斯模糊版本" : "选择文件并成功获取图标后可用")
-        .accessibilityLabel("高斯模糊")
-        .accessibilityValue(configuration.usesBlurredIcon ? "已开启" : "已关闭")
-    }
+            VStack(alignment: .leading, spacing: 5) {
+                Text("背景")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
-    private func folderBackgroundButtons(for configuration: DeckKeyOpenFolderConfiguration) -> some View {
-        HStack(spacing: 8) {
-            Button {
-                chooseFolderBackground()
-            } label: {
-                Label(configuration.backgroundPNGData == nil ? "选择背景" : "更换背景", systemImage: "photo.badge.plus")
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-
-            if configuration.backgroundPNGData != nil {
-                Button(role: .destructive) {
-                    guard let selectedKeyID = interactionState.selectedKeyID else {
-                        return
+                HStack(spacing: 6) {
+                    Button {
+                        chooseButtonBackground()
+                    } label: {
+                        Label(visual.hasCustomBackground ? "更换" : "替换", systemImage: "photo.badge.plus")
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
 
-                    onFolderBackgroundChange(selectedKeyID, nil)
+                    if visual.hasCustomBackground {
+                        Button(role: .destructive) {
+                            updateSelectedButtonVisual { updatedVisual in
+                                updatedVisual.backgroundPNGData = nil
+                                updatedVisual.blurredBackgroundPNGData = nil
+                                updatedVisual.usesBlurredBackground = false
+                            }
+                        } label: {
+                            Image(systemName: "xmark.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .help("恢复原来的背景")
+                        .accessibilityLabel("恢复原来的背景")
+                    }
+                }
+            }
+
+            HStack(spacing: 6) {
+                Button {
+                    updateSelectedButtonVisual { updatedVisual in
+                        updatedVisual.usesBlurredBackground.toggle()
+                    }
                 } label: {
-                    Label("清除背景", systemImage: "xmark.circle")
+                    Label("高斯模糊", systemImage: visual.usesBlurredBackground ? "checkmark.circle.fill" : "circle")
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .tint(visual.usesBlurredBackground ? .accentColor : .secondary)
+                .disabled(!configuration.buttonVisualCanUseBlurredBackground)
+                .help(configuration.buttonVisualCanUseBlurredBackground ? "切换背景的高斯模糊版本" : "替换背景或选择带图标的文件后可用")
+                .accessibilityLabel("高斯模糊")
+                .accessibilityValue(visual.usesBlurredBackground ? "已开启" : "已关闭")
+
+                Button {
+                    updateSelectedButtonVisual { updatedVisual in
+                        updatedVisual.dimsBackground.toggle()
+                    }
+                } label: {
+                    Label("变暗", systemImage: visual.dimsBackground ? "circle.lefthalf.filled" : "circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(visual.dimsBackground ? .accentColor : .secondary)
+                .help(visual.dimsBackground ? "按钮背景已降低亮度" : "按钮背景使用原始亮度")
+                .accessibilityLabel("降低按钮背景亮度")
+                .accessibilityValue(visual.dimsBackground ? "已开启" : "已关闭")
             }
         }
     }
@@ -516,88 +499,37 @@ extension ContentView {
         )
     }
 
-    var selectedFolderAutomaticDisplayName: String {
-        guard let openFolder = selectedConfiguration?.openFolder else {
-            return "选择文件夹"
-        }
-
-        let automaticConfiguration = DeckKeyOpenFolderConfiguration(
-            path: openFolder.path,
-            bookmarkData: openFolder.bookmarkData
-        )
-        return automaticConfiguration.displayName
+    var selectedButtonVisualAutomaticDisplayName: String {
+        selectedConfiguration?.automaticButtonDisplayName ?? ""
     }
 
-    var selectedFolderNameBinding: Binding<String> {
+    var selectedButtonVisualNameBinding: Binding<String> {
         Binding(
             get: {
-                if focusedParameterField == .folderName,
-                   let draft = folderNameDraft,
+                if focusedParameterField == .buttonVisualName,
+                   let draft = buttonVisualNameDraft,
                    draft.keyID == interactionState.selectedKeyID {
                     return draft.text
                 }
 
-                return selectedConfiguration?.openFolder.name ?? ""
+                return selectedConfiguration?.buttonVisualConfiguration?.name ?? ""
             },
             set: { name in
                 guard let selectedKeyID = interactionState.selectedKeyID else {
                     return
                 }
 
-                let originalName = if folderNameDraft?.keyID == selectedKeyID {
-                    folderNameDraft?.originalNormalizedText ?? ""
+                let originalName = if buttonVisualNameDraft?.keyID == selectedKeyID {
+                    buttonVisualNameDraft?.originalNormalizedText ?? ""
                 } else {
-                    selectedConfiguration?.openFolder.name ?? ""
+                    selectedConfiguration?.buttonVisualConfiguration?.name ?? ""
                 }
-                folderNameDraft = ParameterNameDraft(
+                buttonVisualNameDraft = ParameterNameDraft(
                     keyID: selectedKeyID,
                     originalNormalizedText: originalName,
                     text: name
                 )
-                onFolderNamePreview(selectedKeyID, name)
-            }
-        )
-    }
-
-    var selectedFileAutomaticDisplayName: String {
-        guard let openFile = selectedConfiguration?.openFile else {
-            return "选择文件"
-        }
-
-        let automaticConfiguration = DeckKeyOpenFileConfiguration(
-            path: openFile.path,
-            bookmarkData: openFile.bookmarkData
-        )
-        return automaticConfiguration.displayName
-    }
-
-    var selectedFileNameBinding: Binding<String> {
-        Binding(
-            get: {
-                if focusedParameterField == .fileName,
-                   let draft = fileNameDraft,
-                   draft.keyID == interactionState.selectedKeyID {
-                    return draft.text
-                }
-
-                return selectedConfiguration?.openFile.name ?? ""
-            },
-            set: { name in
-                guard let selectedKeyID = interactionState.selectedKeyID else {
-                    return
-                }
-
-                let originalName = if fileNameDraft?.keyID == selectedKeyID {
-                    fileNameDraft?.originalNormalizedText ?? ""
-                } else {
-                    selectedConfiguration?.openFile.name ?? ""
-                }
-                fileNameDraft = ParameterNameDraft(
-                    keyID: selectedKeyID,
-                    originalNormalizedText: originalName,
-                    text: name
-                )
-                onFileNamePreview(selectedKeyID, name)
+                onButtonVisualNamePreview(selectedKeyID, name)
             }
         )
     }
@@ -609,37 +541,6 @@ extension ContentView {
             },
             set: { address in
                 onSMBServerAddressChange(address)
-            }
-        )
-    }
-
-    var selectedSMBServerNameBinding: Binding<String> {
-        Binding(
-            get: {
-                if focusedParameterField == .smbServerName,
-                   let draft = smbServerNameDraft,
-                   draft.keyID == interactionState.selectedKeyID {
-                    return draft.text
-                }
-
-                return selectedConfiguration?.smbServer.name ?? ""
-            },
-            set: { name in
-                guard let selectedKeyID = interactionState.selectedKeyID else {
-                    return
-                }
-
-                let originalName = if smbServerNameDraft?.keyID == selectedKeyID {
-                    smbServerNameDraft?.originalNormalizedText ?? ""
-                } else {
-                    selectedConfiguration?.smbServer.name ?? ""
-                }
-                smbServerNameDraft = ParameterNameDraft(
-                    keyID: selectedKeyID,
-                    originalNormalizedText: originalName,
-                    text: name
-                )
-                onSMBServerNamePreview(selectedKeyID, name)
             }
         )
     }
@@ -673,110 +574,46 @@ extension ContentView {
         }
 
         switch field {
-        case .folderName:
-            guard selectedConfiguration?.function == .openFolder else {
+        case .buttonVisualName:
+            guard let visual = selectedConfiguration?.buttonVisualConfiguration else {
                 return
             }
-            folderNameDraft = ParameterNameDraft(
+            buttonVisualNameDraft = ParameterNameDraft(
                 keyID: selectedKeyID,
-                originalNormalizedText: selectedConfiguration?.openFolder.name ?? "",
-                text: selectedConfiguration?.openFolder.name ?? ""
-            )
-        case .fileName:
-            guard selectedConfiguration?.function == .openFile else {
-                return
-            }
-            fileNameDraft = ParameterNameDraft(
-                keyID: selectedKeyID,
-                originalNormalizedText: selectedConfiguration?.openFile.name ?? "",
-                text: selectedConfiguration?.openFile.name ?? ""
-            )
-        case .smbServerName:
-            guard selectedConfiguration?.function == .connectSMBServer else {
-                return
-            }
-            smbServerNameDraft = ParameterNameDraft(
-                keyID: selectedKeyID,
-                originalNormalizedText: selectedConfiguration?.smbServer.name ?? "",
-                text: selectedConfiguration?.smbServer.name ?? ""
+                originalNormalizedText: visual.name,
+                text: visual.name
             )
         }
     }
 
     private func commitParameterNameDraft(for field: ParameterFocusField?) {
         switch field {
-        case .folderName:
-            commitFolderNameDraft()
-        case .fileName:
-            commitFileNameDraft()
-        case .smbServerName:
-            commitSMBServerNameDraft()
+        case .buttonVisualName:
+            commitButtonVisualNameDraft()
         case nil:
             return
         }
     }
 
-    private func commitFolderNameDraft() {
-        guard let draft = folderNameDraft else {
+    private func commitButtonVisualNameDraft() {
+        guard let draft = buttonVisualNameDraft else {
             return
         }
 
         defer {
-            folderNameDraft = nil
+            buttonVisualNameDraft = nil
         }
 
-        guard interactionState.configuration(for: draft.keyID)?.function == .openFolder else {
+        guard interactionState.configuration(for: draft.keyID)?.buttonVisualConfiguration != nil else {
             return
         }
 
-        let normalizedName = DeckKeyOpenFolderConfiguration.normalizedName(draft.text)
+        let normalizedName = DeckKeyVisualConfiguration.normalizedName(draft.text)
         guard draft.originalNormalizedText != normalizedName else {
             return
         }
 
-        onFolderNameChange(draft.keyID, draft.text)
-    }
-
-    private func commitFileNameDraft() {
-        guard let draft = fileNameDraft else {
-            return
-        }
-
-        defer {
-            fileNameDraft = nil
-        }
-
-        guard interactionState.configuration(for: draft.keyID)?.function == .openFile else {
-            return
-        }
-
-        let normalizedName = DeckKeyOpenFileConfiguration.normalizedName(draft.text)
-        guard draft.originalNormalizedText != normalizedName else {
-            return
-        }
-
-        onFileNameChange(draft.keyID, draft.text)
-    }
-
-    private func commitSMBServerNameDraft() {
-        guard let draft = smbServerNameDraft else {
-            return
-        }
-
-        defer {
-            smbServerNameDraft = nil
-        }
-
-        guard interactionState.configuration(for: draft.keyID)?.function == .connectSMBServer else {
-            return
-        }
-
-        let normalizedName = DeckKeySMBServerConfiguration.normalizedName(draft.text)
-        guard draft.originalNormalizedText != normalizedName else {
-            return
-        }
-
-        onSMBServerNameChange(draft.keyID, draft.text)
+        onButtonVisualNameChange(draft.keyID, draft.text)
     }
 
     var selectedSub2APIBaseURLBinding: Binding<String> {
@@ -941,6 +778,22 @@ extension ContentView {
         )
     }
 
+    func updateSelectedButtonVisual(_ update: (inout DeckKeyVisualConfiguration) -> Void) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              var visual = selectedConfiguration?.buttonVisualConfiguration
+        else {
+            return
+        }
+
+        update(&visual)
+        let canUseBlurredBackground = visual.canUseBlurredBackground
+            || selectedConfiguration?.defaultButtonBlurredBackgroundPNGData != nil
+        if !canUseBlurredBackground {
+            visual.usesBlurredBackground = false
+        }
+        onButtonVisualChange(selectedKeyID, visual)
+    }
+
     func chooseFolder() {
         let panel = NSOpenPanel()
         panel.title = "选择文件夹"
@@ -957,19 +810,21 @@ extension ContentView {
         }
 
         let folderName: String
-        if focusedParameterField == .folderName,
-           let draft = folderNameDraft,
+        if focusedParameterField == .buttonVisualName,
+           let draft = buttonVisualNameDraft,
            draft.keyID == interactionState.selectedKeyID {
             folderName = draft.text
         } else {
-            folderName = selectedConfiguration?.openFolder.name ?? ""
+            folderName = selectedConfiguration?.buttonVisualConfiguration?.name ?? ""
         }
+        var visual = selectedConfiguration?.buttonVisualConfiguration
+        visual?.name = DeckKeyVisualConfiguration.normalizedName(folderName)
 
         do {
             onFolderPathSelection(try DeckKeyOpenFolderConfiguration(
                 folderURL: url,
                 name: folderName,
-                backgroundPNGData: selectedConfiguration?.openFolder.backgroundPNGData
+                visual: visual
             ))
         } catch {
             let alert = NSAlert()
@@ -980,8 +835,10 @@ extension ContentView {
         }
     }
 
-    func chooseFolderBackground() {
-        guard let selectedKeyID = interactionState.selectedKeyID else {
+    func chooseButtonBackground() {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              var visual = selectedConfiguration?.buttonVisualConfiguration
+        else {
             return
         }
 
@@ -992,7 +849,7 @@ extension ContentView {
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
-        let accessory = FolderBackgroundSelectionAccessory(panel: panel)
+        let accessory = ButtonBackgroundSelectionAccessory(panel: panel)
         panel.accessoryView = accessory.view
 
         guard panel.runModal() == .OK,
@@ -1001,24 +858,27 @@ extension ContentView {
             return
         }
 
-        let backgroundPNGData: Data?
+        let snapshot: FileIconSnapshotData?
         switch accessory.mode {
         case .image:
             guard let image = NSImage(contentsOf: url) else {
                 showWarningAlert(title: "无法读取背景图像", message: "请选择可读取的图像文件。")
                 return
             }
-            backgroundPNGData = FileIconSnapshot.pngData(for: image)
+            snapshot = FileIconSnapshot.snapshotData(for: image)
         case .allFiles:
-            backgroundPNGData = FileIconSnapshot.snapshotData(for: url)?.iconPNGData
+            snapshot = FileIconSnapshot.snapshotData(for: url)
         }
 
-        guard let backgroundPNGData else {
+        guard let snapshot else {
             showWarningAlert(title: "无法生成背景图像", message: "请选择其他文件后重试。")
             return
         }
 
-        onFolderBackgroundChange(selectedKeyID, backgroundPNGData)
+        visual.backgroundPNGData = snapshot.iconPNGData
+        visual.blurredBackgroundPNGData = snapshot.blurredIconPNGData
+        visual.usesBlurredBackground = false
+        onButtonVisualChange(selectedKeyID, visual)
     }
 
     func chooseFile() {
@@ -1037,12 +897,12 @@ extension ContentView {
         }
 
         let fileName: String
-        if focusedParameterField == .fileName,
-           let draft = fileNameDraft,
+        if focusedParameterField == .buttonVisualName,
+           let draft = buttonVisualNameDraft,
            draft.keyID == interactionState.selectedKeyID {
             fileName = draft.text
         } else {
-            fileName = selectedConfiguration?.openFile.name ?? ""
+            fileName = selectedConfiguration?.buttonVisualConfiguration?.name ?? ""
         }
 
         do {
@@ -1070,15 +930,7 @@ extension ContentView {
 
     func mihoyoGameParameterContent(for configuration: DeckKeyConfiguration) -> some View {
         HStack(alignment: .top, spacing: 28) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("功能")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                Label(configuration.function.title, systemImage: configuration.function.systemImageName)
-                    .font(.callout.weight(.medium))
-            }
-            .frame(width: 150, alignment: .leading)
+            functionParameterColumn(for: configuration)
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {

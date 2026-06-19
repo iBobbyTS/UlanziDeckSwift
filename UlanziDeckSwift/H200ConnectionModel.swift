@@ -8,7 +8,6 @@ final class H200ConnectionModel: ObservableObject {
     @Published private(set) var syncSummary: H200DeckSyncSummary?
     @Published private(set) var interactionState = DeckGridInteractionState(layout: .h200Prototype)
     @Published private(set) var brightnessPercent = DeckBrightnessConfiguration.defaultPercent
-    @Published private(set) var buttonBackgroundDimmingEnabled = true
     @Published private(set) var mihoyoLoginState: MihoyoLoginState = .notLoggedIn
     @Published var alert: H200ConnectionAlert?
 
@@ -85,7 +84,6 @@ final class H200ConnectionModel: ObservableObject {
         let loadedBrightnessPercent = configurationStore.loadBrightnessPercent()
         hasPersistedBrightnessPercent = loadedBrightnessPercent != nil
         brightnessPercent = loadedBrightnessPercent ?? DeckBrightnessConfiguration.defaultPercent
-        buttonBackgroundDimmingEnabled = configurationStore.loadButtonBackgroundDimmingEnabled() ?? true
         mihoyoSession = mihoyoSessionStore.loadSession()
         if let mihoyoSession {
             mihoyoLoginState = .loggedIn(accountID: mihoyoSession.accountID)
@@ -337,12 +335,6 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
-    func toggleButtonBackgroundDimming() {
-        buttonBackgroundDimmingEnabled.toggle()
-        configurationStore.saveButtonBackgroundDimmingEnabled(buttonBackgroundDimmingEnabled)
-        syncCurrentDisplays()
-    }
-
     func setSelectedFolderConfiguration(_ configuration: DeckKeyOpenFolderConfiguration) {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return
@@ -362,24 +354,59 @@ final class H200ConnectionModel: ObservableObject {
         setFolderName(name, for: selectedKeyID)
     }
 
-    func previewFolderName(_ name: String, for keyID: Int) {
-        if interactionState.setFolderName(name, for: keyID, selectsKey: false) {
+    func previewButtonVisualName(_ name: String, for keyID: Int) {
+        if interactionState.setButtonVisualName(name, for: keyID, selectsKey: false) {
             syncKeyDisplay(keyID: keyID)
         }
+    }
+
+    func setButtonVisualName(_ name: String, for keyID: Int) {
+        if interactionState.setButtonVisualName(name, for: keyID, selectsKey: false) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: keyID)
+        }
+    }
+
+    func setButtonVisualConfiguration(_ visual: DeckKeyVisualConfiguration, for keyID: Int) {
+        if interactionState.setButtonVisualConfiguration(visual, for: keyID, selectsKey: false) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: keyID)
+        }
+    }
+
+    func setButtonVisualBlurEnabled(_ enabled: Bool, for keyID: Int) {
+        if interactionState.setButtonVisualBlurEnabled(enabled, for: keyID, selectsKey: false) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: keyID)
+        }
+    }
+
+    func setButtonVisualDimmingEnabled(_ enabled: Bool, for keyID: Int) {
+        if interactionState.setButtonVisualDimmingEnabled(enabled, for: keyID, selectsKey: false) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: keyID)
+        }
+    }
+
+    func previewFolderName(_ name: String, for keyID: Int) {
+        previewButtonVisualName(name, for: keyID)
     }
 
     func setFolderName(_ name: String, for keyID: Int) {
-        if interactionState.setFolderName(name, for: keyID, selectsKey: false) {
-            persistCurrentConfiguration()
-            syncKeyDisplay(keyID: keyID)
-        }
+        setButtonVisualName(name, for: keyID)
     }
 
     func setFolderBackgroundPNGData(_ backgroundPNGData: Data?, for keyID: Int) {
-        if interactionState.setFolderBackgroundPNGData(backgroundPNGData, for: keyID, selectsKey: false) {
-            persistCurrentConfiguration()
-            syncKeyDisplay(keyID: keyID)
+        guard var visual = interactionState.buttonVisualConfiguration(for: keyID) else {
+            return
         }
+
+        visual.backgroundPNGData = backgroundPNGData
+        if backgroundPNGData == nil {
+            visual.blurredBackgroundPNGData = nil
+            visual.usesBlurredBackground = false
+        }
+        setButtonVisualConfiguration(visual, for: keyID)
     }
 
     func setSelectedFileConfiguration(_ configuration: DeckKeyOpenFileConfiguration) {
@@ -402,23 +429,15 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     func previewFileName(_ name: String, for keyID: Int) {
-        if interactionState.setFileName(name, for: keyID, selectsKey: false) {
-            syncKeyDisplay(keyID: keyID)
-        }
+        previewButtonVisualName(name, for: keyID)
     }
 
     func setFileName(_ name: String, for keyID: Int) {
-        if interactionState.setFileName(name, for: keyID, selectsKey: false) {
-            persistCurrentConfiguration()
-            syncKeyDisplay(keyID: keyID)
-        }
+        setButtonVisualName(name, for: keyID)
     }
 
     func setFileIconBlurEnabled(_ enabled: Bool, for keyID: Int) {
-        if interactionState.setFileIconBlurEnabled(enabled, for: keyID, selectsKey: false) {
-            persistCurrentConfiguration()
-            syncKeyDisplay(keyID: keyID)
-        }
+        setButtonVisualBlurEnabled(enabled, for: keyID)
     }
 
     func setSelectedSMBServerAddress(_ address: String) {
@@ -441,16 +460,11 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     func previewSMBServerName(_ name: String, for keyID: Int) {
-        if interactionState.setSMBServerName(name, for: keyID, selectsKey: false) {
-            syncKeyDisplay(keyID: keyID)
-        }
+        previewButtonVisualName(name, for: keyID)
     }
 
     func setSMBServerName(_ name: String, for keyID: Int) {
-        if interactionState.setSMBServerName(name, for: keyID, selectsKey: false) {
-            persistCurrentConfiguration()
-            syncKeyDisplay(keyID: keyID)
-        }
+        setButtonVisualName(name, for: keyID)
     }
 
     func setSelectedSub2APIBaseURL(_ baseURL: String) {
@@ -660,10 +674,7 @@ final class H200ConnectionModel: ObservableObject {
 
         let discovery = discovery
         let syncer = syncer
-        let initialDisplays = interactionState.displays(
-            for: layout,
-            buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled
-        )
+        let initialDisplays = interactionState.displays(for: layout)
         let startupDisplayRevision = displayRevision
         deviceCommandQueue.async { [weak self] in
             syncer.close()
@@ -762,8 +773,7 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        refreshedConfiguration.name = configuration.name
-        refreshedConfiguration.backgroundPNGData = configuration.backgroundPNGData
+        refreshedConfiguration.visual = configuration.visual
         if interactionState.setFolderConfiguration(refreshedConfiguration, for: keyID, selectsKey: false) {
             persistCurrentConfiguration()
         }
@@ -782,10 +792,7 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        refreshedConfiguration.name = configuration.name
-        refreshedConfiguration.iconPNGData = configuration.iconPNGData
-        refreshedConfiguration.blurredIconPNGData = configuration.blurredIconPNGData
-        refreshedConfiguration.usesBlurredIcon = configuration.usesBlurredIcon
+        refreshedConfiguration.visual = configuration.visual
         if interactionState.setFileConfiguration(refreshedConfiguration, for: keyID, selectsKey: false) {
             persistCurrentConfiguration()
         }
@@ -1153,10 +1160,7 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        let displays = interactionState.displays(
-            for: layout,
-            buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled
-        )
+        let displays = interactionState.displays(for: layout)
         let generation = deviceCommandGeneration
         let syncer = syncer
         deviceCommandQueue.async { [weak self] in
@@ -1178,12 +1182,7 @@ final class H200ConnectionModel: ObservableObject {
 
         let displays = layout.keys
             .filter { keyIDs.contains($0.id) }
-            .map {
-                interactionState.display(
-                    for: $0,
-                    buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled
-                )
-            }
+            .map { interactionState.display(for: $0) }
         guard !displays.isEmpty else {
             return
         }
@@ -1216,10 +1215,7 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        let display = interactionState.display(
-            for: key,
-            buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled
-        )
+        let display = interactionState.display(for: key)
         let generation = deviceCommandGeneration
         let syncer = syncer
         deviceCommandQueue.async { [weak self] in

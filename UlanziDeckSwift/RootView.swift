@@ -35,7 +35,6 @@ struct RootView: View {
             brightnessPercent: connectionModel.brightnessPercent,
             interactionState: connectionModel.interactionState,
             mihoyoLoginState: connectionModel.mihoyoLoginState,
-            buttonBackgroundDimmingEnabled: connectionModel.buttonBackgroundDimmingEnabled,
             onKeySelection: { keyID in
                 connectionModel.selectKey(keyID: keyID)
             },
@@ -60,35 +59,20 @@ struct RootView: View {
             onFolderPathSelection: { configuration in
                 connectionModel.setSelectedFolderConfiguration(configuration)
             },
-            onFolderNamePreview: { keyID, name in
-                connectionModel.previewFolderName(name, for: keyID)
-            },
-            onFolderNameChange: { keyID, name in
-                connectionModel.setFolderName(name, for: keyID)
-            },
-            onFolderBackgroundChange: { keyID, backgroundPNGData in
-                connectionModel.setFolderBackgroundPNGData(backgroundPNGData, for: keyID)
-            },
             onFilePathSelection: { configuration in
                 connectionModel.setSelectedFileConfiguration(configuration)
             },
-            onFileNamePreview: { keyID, name in
-                connectionModel.previewFileName(name, for: keyID)
+            onButtonVisualNamePreview: { keyID, name in
+                connectionModel.previewButtonVisualName(name, for: keyID)
             },
-            onFileNameChange: { keyID, name in
-                connectionModel.setFileName(name, for: keyID)
+            onButtonVisualNameChange: { keyID, name in
+                connectionModel.setButtonVisualName(name, for: keyID)
             },
-            onFileIconBlurChange: { keyID, enabled in
-                connectionModel.setFileIconBlurEnabled(enabled, for: keyID)
+            onButtonVisualChange: { keyID, visual in
+                connectionModel.setButtonVisualConfiguration(visual, for: keyID)
             },
             onSMBServerAddressChange: { address in
                 connectionModel.setSelectedSMBServerAddress(address)
-            },
-            onSMBServerNamePreview: { keyID, name in
-                connectionModel.previewSMBServerName(name, for: keyID)
-            },
-            onSMBServerNameChange: { keyID, name in
-                connectionModel.setSMBServerName(name, for: keyID)
             },
             onBrightnessPercentPreview: { percent in
                 connectionModel.previewBrightnessPercent(percent)
@@ -125,9 +109,6 @@ struct RootView: View {
             },
             onMihoyoGameStatusRefresh: {
                 connectionModel.refreshSelectedMihoyoGameStatus()
-            },
-            onButtonBackgroundDimmingToggle: {
-                connectionModel.toggleButtonBackgroundDimming()
             }
         )
             .background {

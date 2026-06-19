@@ -225,38 +225,187 @@ nonisolated enum DeckKeySecurityScopedBookmarkOptions {
     ]
 }
 
+nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
+    var name: String
+    var backgroundPNGData: Data?
+    var blurredBackgroundPNGData: Data?
+    var usesBlurredBackground: Bool
+    var dimsBackground: Bool
+
+    init(
+        name: String = "",
+        backgroundPNGData: Data? = nil,
+        blurredBackgroundPNGData: Data? = nil,
+        usesBlurredBackground: Bool = false,
+        dimsBackground: Bool = true
+    ) {
+        self.name = Self.normalizedName(name)
+        self.backgroundPNGData = backgroundPNGData
+        self.blurredBackgroundPNGData = blurredBackgroundPNGData
+        self.dimsBackground = dimsBackground
+        self.usesBlurredBackground = usesBlurredBackground
+            && backgroundPNGData != nil
+            && blurredBackgroundPNGData != nil
+    }
+
+    var canUseBlurredBackground: Bool {
+        backgroundPNGData != nil && blurredBackgroundPNGData != nil
+    }
+
+    var selectedBackgroundPNGData: Data? {
+        if usesBlurredBackground {
+            return blurredBackgroundPNGData ?? backgroundPNGData
+        }
+
+        return backgroundPNGData
+    }
+
+    var hasCustomBackground: Bool {
+        backgroundPNGData != nil
+    }
+
+    func displayName(fallback: String) -> String {
+        name.isEmpty ? fallback : name
+    }
+
+    enum CodingKeys: CodingKey {
+        case name
+        case backgroundPNGData
+        case blurredBackgroundPNGData
+        case usesBlurredBackground
+        case dimsBackground
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = Self.normalizedName(try container.decodeIfPresent(String.self, forKey: .name) ?? "")
+        backgroundPNGData = try container.decodeIfPresent(Data.self, forKey: .backgroundPNGData)
+        blurredBackgroundPNGData = try container.decodeIfPresent(Data.self, forKey: .blurredBackgroundPNGData)
+        usesBlurredBackground = try container.decodeIfPresent(Bool.self, forKey: .usesBlurredBackground) ?? false
+        dimsBackground = try container.decodeIfPresent(Bool.self, forKey: .dimsBackground) ?? true
+        if !canUseBlurredBackground {
+            usesBlurredBackground = false
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(backgroundPNGData, forKey: .backgroundPNGData)
+        try container.encodeIfPresent(blurredBackgroundPNGData, forKey: .blurredBackgroundPNGData)
+        try container.encode(usesBlurredBackground && canUseBlurredBackground, forKey: .usesBlurredBackground)
+        try container.encode(dimsBackground, forKey: .dimsBackground)
+    }
+
+    static func normalizedName(_ rawValue: String) -> String {
+        rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
     static let securityScopedBookmarkCreationOptions = DeckKeySecurityScopedBookmarkOptions.readOnlyCreation
     static let securityScopedBookmarkResolutionOptions = DeckKeySecurityScopedBookmarkOptions.resolution
 
     var path: String?
     var bookmarkData: Data?
-    var name: String
-    var backgroundPNGData: Data?
+    var visual: DeckKeyVisualConfiguration
 
-    init(path: String? = nil, bookmarkData: Data? = nil, name: String = "", backgroundPNGData: Data? = nil) {
+    init(
+        path: String? = nil,
+        bookmarkData: Data? = nil,
+        name: String = "",
+        backgroundPNGData: Data? = nil,
+        blurredBackgroundPNGData: Data? = nil,
+        usesBlurredBackground: Bool = false,
+        dimsBackground: Bool = true,
+        visual: DeckKeyVisualConfiguration? = nil
+    ) {
         self.path = Self.normalizedPath(path)
         self.bookmarkData = bookmarkData
-        self.name = Self.normalizedName(name)
-        self.backgroundPNGData = backgroundPNGData
+        self.visual = visual ?? DeckKeyVisualConfiguration(
+            name: name,
+            backgroundPNGData: backgroundPNGData,
+            blurredBackgroundPNGData: blurredBackgroundPNGData,
+            usesBlurredBackground: usesBlurredBackground,
+            dimsBackground: dimsBackground
+        )
     }
 
-    init(folderURL: URL, name: String = "", backgroundPNGData: Data? = nil) throws {
+    init(folderURL: URL, name: String = "", visual: DeckKeyVisualConfiguration? = nil) throws {
         self.path = Self.normalizedPath(folderURL.path)
         self.bookmarkData = try folderURL.bookmarkData(
             options: Self.securityScopedBookmarkCreationOptions,
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )
-        self.name = Self.normalizedName(name)
-        self.backgroundPNGData = backgroundPNGData
+        self.visual = visual ?? DeckKeyVisualConfiguration(name: name)
+    }
+
+    var name: String {
+        get {
+            visual.name
+        }
+        set {
+            visual.name = DeckKeyVisualConfiguration.normalizedName(newValue)
+        }
+    }
+
+    var backgroundPNGData: Data? {
+        get {
+            visual.backgroundPNGData
+        }
+        set {
+            visual.backgroundPNGData = newValue
+            if newValue == nil {
+                visual.blurredBackgroundPNGData = nil
+                visual.usesBlurredBackground = false
+            }
+        }
+    }
+
+    var blurredBackgroundPNGData: Data? {
+        get {
+            visual.blurredBackgroundPNGData
+        }
+        set {
+            visual.blurredBackgroundPNGData = newValue
+            if newValue == nil {
+                visual.usesBlurredBackground = false
+            }
+        }
+    }
+
+    var usesBlurredBackground: Bool {
+        get {
+            visual.usesBlurredBackground
+        }
+        set {
+            visual.usesBlurredBackground = newValue && visual.canUseBlurredBackground
+        }
+    }
+
+    var dimsBackground: Bool {
+        get {
+            visual.dimsBackground
+        }
+        set {
+            visual.dimsBackground = newValue
+        }
+    }
+
+    var canUseBlurredBackground: Bool {
+        visual.canUseBlurredBackground
+    }
+
+    var selectedBackgroundPNGData: Data? {
+        visual.selectedBackgroundPNGData
     }
 
     var displayName: String {
-        if !name.isEmpty {
-            return name
-        }
+        visual.displayName(fallback: automaticDisplayName)
+    }
 
+    var automaticDisplayName: String {
         guard let path, !path.isEmpty else {
             return "选择文件夹"
         }
@@ -282,22 +431,34 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
         case bookmarkData
         case name
         case backgroundPNGData
+        case blurredBackgroundPNGData
+        case usesBlurredBackground
+        case dimsBackground
+        case visual
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         path = Self.normalizedPath(try container.decodeIfPresent(String.self, forKey: .path))
         bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
-        name = Self.normalizedName(try container.decodeIfPresent(String.self, forKey: .name) ?? "")
-        backgroundPNGData = try container.decodeIfPresent(Data.self, forKey: .backgroundPNGData)
+        if let visual = try container.decodeIfPresent(DeckKeyVisualConfiguration.self, forKey: .visual) {
+            self.visual = visual
+        } else {
+            visual = DeckKeyVisualConfiguration(
+                name: try container.decodeIfPresent(String.self, forKey: .name) ?? "",
+                backgroundPNGData: try container.decodeIfPresent(Data.self, forKey: .backgroundPNGData),
+                blurredBackgroundPNGData: try container.decodeIfPresent(Data.self, forKey: .blurredBackgroundPNGData),
+                usesBlurredBackground: try container.decodeIfPresent(Bool.self, forKey: .usesBlurredBackground) ?? false,
+                dimsBackground: try container.decodeIfPresent(Bool.self, forKey: .dimsBackground) ?? true
+            )
+        }
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(path, forKey: .path)
         try container.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
-        try container.encode(name, forKey: .name)
-        try container.encodeIfPresent(backgroundPNGData, forKey: .backgroundPNGData)
+        try container.encode(visual, forKey: .visual)
     }
 
     private static func normalizedPath(_ path: String?) -> String? {
@@ -309,7 +470,7 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
     }
 
     static func normalizedName(_ rawValue: String) -> String {
-        rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        DeckKeyVisualConfiguration.normalizedName(rawValue)
     }
 }
 
@@ -319,10 +480,7 @@ nonisolated struct DeckKeyOpenFileConfiguration: Codable, Equatable {
 
     var path: String?
     var bookmarkData: Data?
-    var name: String
-    var iconPNGData: Data?
-    var blurredIconPNGData: Data?
-    var usesBlurredIcon: Bool
+    var visual: DeckKeyVisualConfiguration
 
     init(
         path: String? = nil,
@@ -330,34 +488,101 @@ nonisolated struct DeckKeyOpenFileConfiguration: Codable, Equatable {
         name: String = "",
         iconPNGData: Data? = nil,
         blurredIconPNGData: Data? = nil,
-        usesBlurredIcon: Bool = false
+        usesBlurredIcon: Bool = false,
+        dimsBackground: Bool = true,
+        visual: DeckKeyVisualConfiguration? = nil
     ) {
         self.path = Self.normalizedPath(path)
         self.bookmarkData = bookmarkData
-        self.name = Self.normalizedName(name)
-        self.iconPNGData = iconPNGData
-        self.blurredIconPNGData = blurredIconPNGData
-        self.usesBlurredIcon = usesBlurredIcon
+        self.visual = visual ?? DeckKeyVisualConfiguration(
+            name: name,
+            backgroundPNGData: iconPNGData,
+            blurredBackgroundPNGData: blurredIconPNGData,
+            usesBlurredBackground: usesBlurredIcon,
+            dimsBackground: dimsBackground
+        )
     }
 
-    init(fileURL: URL, name: String = "", iconSnapshot: FileIconSnapshotData? = nil) throws {
+    init(
+        fileURL: URL,
+        name: String = "",
+        iconSnapshot: FileIconSnapshotData? = nil,
+        visual: DeckKeyVisualConfiguration? = nil
+    ) throws {
         self.path = Self.normalizedPath(fileURL.path)
         self.bookmarkData = try fileURL.bookmarkData(
             options: Self.securityScopedBookmarkCreationOptions,
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )
-        self.name = Self.normalizedName(name)
-        self.iconPNGData = iconSnapshot?.iconPNGData
-        self.blurredIconPNGData = iconSnapshot?.blurredIconPNGData
-        self.usesBlurredIcon = false
+        if let visual {
+            self.visual = visual
+        } else {
+            self.visual = DeckKeyVisualConfiguration(
+                name: name,
+                backgroundPNGData: iconSnapshot?.iconPNGData,
+                blurredBackgroundPNGData: iconSnapshot?.blurredIconPNGData
+            )
+        }
+    }
+
+    var name: String {
+        get {
+            visual.name
+        }
+        set {
+            visual.name = DeckKeyVisualConfiguration.normalizedName(newValue)
+        }
+    }
+
+    var iconPNGData: Data? {
+        get {
+            visual.backgroundPNGData
+        }
+        set {
+            visual.backgroundPNGData = newValue
+            if newValue == nil {
+                visual.blurredBackgroundPNGData = nil
+                visual.usesBlurredBackground = false
+            }
+        }
+    }
+
+    var blurredIconPNGData: Data? {
+        get {
+            visual.blurredBackgroundPNGData
+        }
+        set {
+            visual.blurredBackgroundPNGData = newValue
+            if newValue == nil {
+                visual.usesBlurredBackground = false
+            }
+        }
+    }
+
+    var usesBlurredIcon: Bool {
+        get {
+            visual.usesBlurredBackground
+        }
+        set {
+            visual.usesBlurredBackground = newValue && visual.canUseBlurredBackground
+        }
+    }
+
+    var dimsBackground: Bool {
+        get {
+            visual.dimsBackground
+        }
+        set {
+            visual.dimsBackground = newValue
+        }
     }
 
     var displayName: String {
-        if !name.isEmpty {
-            return name
-        }
+        visual.displayName(fallback: automaticDisplayName)
+    }
 
+    var automaticDisplayName: String {
         guard let path, !path.isEmpty else {
             return "选择文件"
         }
@@ -379,15 +604,11 @@ nonisolated struct DeckKeyOpenFileConfiguration: Codable, Equatable {
     }
 
     var canUseIconBlur: Bool {
-        path != nil && iconPNGData != nil && blurredIconPNGData != nil
+        visual.canUseBlurredBackground
     }
 
     var selectedIconPNGData: Data? {
-        if usesBlurredIcon {
-            return blurredIconPNGData ?? iconPNGData
-        }
-
-        return iconPNGData
+        visual.selectedBackgroundPNGData
     }
 
     enum CodingKeys: CodingKey {
@@ -397,26 +618,32 @@ nonisolated struct DeckKeyOpenFileConfiguration: Codable, Equatable {
         case iconPNGData
         case blurredIconPNGData
         case usesBlurredIcon
+        case dimsBackground
+        case visual
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         path = Self.normalizedPath(try container.decodeIfPresent(String.self, forKey: .path))
         bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
-        name = Self.normalizedName(try container.decodeIfPresent(String.self, forKey: .name) ?? "")
-        iconPNGData = try container.decodeIfPresent(Data.self, forKey: .iconPNGData)
-        blurredIconPNGData = try container.decodeIfPresent(Data.self, forKey: .blurredIconPNGData)
-        usesBlurredIcon = try container.decodeIfPresent(Bool.self, forKey: .usesBlurredIcon) ?? false
+        if let visual = try container.decodeIfPresent(DeckKeyVisualConfiguration.self, forKey: .visual) {
+            self.visual = visual
+        } else {
+            visual = DeckKeyVisualConfiguration(
+                name: try container.decodeIfPresent(String.self, forKey: .name) ?? "",
+                backgroundPNGData: try container.decodeIfPresent(Data.self, forKey: .iconPNGData),
+                blurredBackgroundPNGData: try container.decodeIfPresent(Data.self, forKey: .blurredIconPNGData),
+                usesBlurredBackground: try container.decodeIfPresent(Bool.self, forKey: .usesBlurredIcon) ?? false,
+                dimsBackground: try container.decodeIfPresent(Bool.self, forKey: .dimsBackground) ?? true
+            )
+        }
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(path, forKey: .path)
         try container.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
-        try container.encode(name, forKey: .name)
-        try container.encodeIfPresent(iconPNGData, forKey: .iconPNGData)
-        try container.encodeIfPresent(blurredIconPNGData, forKey: .blurredIconPNGData)
-        try container.encode(usesBlurredIcon && canUseIconBlur, forKey: .usesBlurredIcon)
+        try container.encode(visual, forKey: .visual)
     }
 
     private static func normalizedPath(_ path: String?) -> String? {
@@ -428,24 +655,33 @@ nonisolated struct DeckKeyOpenFileConfiguration: Codable, Equatable {
     }
 
     static func normalizedName(_ rawValue: String) -> String {
-        rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        DeckKeyVisualConfiguration.normalizedName(rawValue)
     }
 }
 
 nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
     var address: String
-    var name: String
+    var visual: DeckKeyVisualConfiguration
 
-    init(address: String = "", name: String = "") {
+    init(address: String = "", name: String = "", visual: DeckKeyVisualConfiguration? = nil) {
         self.address = Self.normalizedAddress(address)
-        self.name = Self.normalizedName(name)
+        self.visual = visual ?? DeckKeyVisualConfiguration(name: name)
+    }
+
+    var name: String {
+        get {
+            visual.name
+        }
+        set {
+            visual.name = DeckKeyVisualConfiguration.normalizedName(newValue)
+        }
     }
 
     var displayName: String {
-        if !name.isEmpty {
-            return name
-        }
+        visual.displayName(fallback: automaticDisplayName)
+    }
 
+    var automaticDisplayName: String {
         if !address.isEmpty {
             return address
         }
@@ -464,18 +700,20 @@ nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
     enum CodingKeys: CodingKey {
         case address
         case name
+        case visual
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         address = Self.normalizedAddress(try container.decodeIfPresent(String.self, forKey: .address) ?? "")
-        name = Self.normalizedName(try container.decodeIfPresent(String.self, forKey: .name) ?? "")
+        visual = try container.decodeIfPresent(DeckKeyVisualConfiguration.self, forKey: .visual)
+            ?? DeckKeyVisualConfiguration(name: try container.decodeIfPresent(String.self, forKey: .name) ?? "")
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(address, forKey: .address)
-        try container.encode(name, forKey: .name)
+        try container.encode(visual, forKey: .visual)
     }
 
     static func normalizedAddress(_ rawValue: String) -> String {
@@ -494,7 +732,7 @@ nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
     }
 
     static func normalizedName(_ rawValue: String) -> String {
-        rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        DeckKeyVisualConfiguration.normalizedName(rawValue)
     }
 }
 
@@ -719,13 +957,33 @@ nonisolated struct DeckKeyMihoyoGameConfiguration: Codable, Equatable {
 
 nonisolated struct DeckKeyPageFolderConfiguration: Codable, Equatable {
     var pageID: String?
+    var visual: DeckKeyVisualConfiguration
 
-    init(pageID: String? = nil) {
+    init(pageID: String? = nil, visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration(name: "文件夹")) {
         self.pageID = pageID
+        self.visual = visual
     }
 
     var displayName: String {
-        "文件夹"
+        visual.displayName(fallback: "文件夹")
+    }
+
+    enum CodingKeys: CodingKey {
+        case pageID
+        case visual
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        pageID = try container.decodeIfPresent(String.self, forKey: .pageID)
+        visual = try container.decodeIfPresent(DeckKeyVisualConfiguration.self, forKey: .visual)
+            ?? DeckKeyVisualConfiguration(name: "文件夹")
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(pageID, forKey: .pageID)
+        try container.encode(visual, forKey: .visual)
     }
 }
 
@@ -739,6 +997,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var sub2API: DeckKeySub2APIConfiguration
     var mihoyoGame: DeckKeyMihoyoGameConfiguration
     var pageFolder: DeckKeyPageFolderConfiguration
+    var visual: DeckKeyVisualConfiguration
 
     static let empty = DeckKeyConfiguration(
         function: .none,
@@ -785,7 +1044,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration = DeckKeySub2APIConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration(),
-        pageFolder: DeckKeyPageFolderConfiguration = DeckKeyPageFolderConfiguration()
+        pageFolder: DeckKeyPageFolderConfiguration = DeckKeyPageFolderConfiguration(),
+        visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration()
     ) {
         self.function = function
         self.displayMode = displayMode
@@ -796,6 +1056,32 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         self.sub2API = sub2API
         self.mihoyoGame = mihoyoGame
         self.pageFolder = pageFolder
+        self.visual = visual
+    }
+
+    init(
+        function: DeckKeyFunction,
+        displayMode: DeckKeyDisplayMode = .function,
+        tally: DeckKeyTallyConfiguration = DeckKeyTallyConfiguration(),
+        openFolder: DeckKeyOpenFolderConfiguration = DeckKeyOpenFolderConfiguration(),
+        openFile: DeckKeyOpenFileConfiguration = DeckKeyOpenFileConfiguration(),
+        smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration(),
+        sub2API: DeckKeySub2APIConfiguration = DeckKeySub2APIConfiguration(),
+        mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration(),
+        pageFolder: DeckKeyPageFolderConfiguration = DeckKeyPageFolderConfiguration()
+    ) {
+        self.init(
+            function: function,
+            displayMode: displayMode,
+            tally: tally,
+            openFolder: openFolder,
+            openFile: openFile,
+            smbServer: smbServer,
+            sub2API: sub2API,
+            mihoyoGame: mihoyoGame,
+            pageFolder: pageFolder,
+            visual: DeckKeyVisualConfiguration()
+        )
     }
 
     enum CodingKeys: CodingKey {
@@ -808,6 +1094,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case sub2API
         case mihoyoGame
         case pageFolder
+        case visual
     }
 
     init(from decoder: Decoder) throws {
@@ -821,6 +1108,14 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         sub2API = try container.decodeIfPresent(DeckKeySub2APIConfiguration.self, forKey: .sub2API) ?? DeckKeySub2APIConfiguration()
         mihoyoGame = try container.decodeIfPresent(DeckKeyMihoyoGameConfiguration.self, forKey: .mihoyoGame) ?? DeckKeyMihoyoGameConfiguration()
         pageFolder = try container.decodeIfPresent(DeckKeyPageFolderConfiguration.self, forKey: .pageFolder) ?? DeckKeyPageFolderConfiguration()
+        visual = try container.decodeIfPresent(DeckKeyVisualConfiguration.self, forKey: .visual)
+            ?? Self.migratedButtonVisual(
+                function: function,
+                openFolder: openFolder,
+                openFile: openFile,
+                smbServer: smbServer,
+                pageFolder: pageFolder
+            )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -834,5 +1129,100 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         try container.encode(sub2API, forKey: .sub2API)
         try container.encode(mihoyoGame, forKey: .mihoyoGame)
         try container.encode(pageFolder, forKey: .pageFolder)
+        try container.encode(visual, forKey: .visual)
+    }
+
+    var buttonVisualConfiguration: DeckKeyVisualConfiguration? {
+        visual
+    }
+
+    @discardableResult
+    mutating func setButtonVisualConfiguration(_ visual: DeckKeyVisualConfiguration) -> Bool {
+        self.visual = visual
+        return true
+    }
+
+    var buttonVisualCanUseBlurredBackground: Bool {
+        visual.canUseBlurredBackground || defaultButtonBlurredBackgroundPNGData != nil
+    }
+
+    var selectedButtonBackgroundPNGData: Data? {
+        if visual.hasCustomBackground {
+            return visual.selectedBackgroundPNGData
+        }
+
+        if visual.usesBlurredBackground {
+            return defaultButtonBlurredBackgroundPNGData ?? defaultButtonBackgroundPNGData
+        }
+
+        return defaultButtonBackgroundPNGData
+    }
+
+    var defaultButtonBackgroundPNGData: Data? {
+        switch function {
+        case .openFile:
+            return openFile.visual.backgroundPNGData
+        case .none, .tally, .openFolder, .connectSMBServer, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .pageFolder, .pageBack:
+            return nil
+        }
+    }
+
+    var defaultButtonBlurredBackgroundPNGData: Data? {
+        switch function {
+        case .openFile:
+            return openFile.visual.blurredBackgroundPNGData
+        case .none, .tally, .openFolder, .connectSMBServer, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .pageFolder, .pageBack:
+            return nil
+        }
+    }
+
+    var automaticButtonDisplayName: String {
+        switch function {
+        case .none:
+            return ""
+        case .tally:
+            return "\(tally.value)"
+        case .openFolder:
+            return openFolder.automaticDisplayName
+        case .openFile:
+            return openFile.automaticDisplayName
+        case .connectSMBServer:
+            return smbServer.automaticDisplayName
+        case .brightness:
+            return ""
+        case .sub2API:
+            return sub2API.displayName
+        case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
+            return function.game?.shortDisplayName ?? "游戏"
+        case .pageFolder:
+            return "文件夹"
+        case .pageBack:
+            return "返回"
+        }
+    }
+
+    private static func migratedButtonVisual(
+        function: DeckKeyFunction,
+        openFolder: DeckKeyOpenFolderConfiguration,
+        openFile: DeckKeyOpenFileConfiguration,
+        smbServer: DeckKeySMBServerConfiguration,
+        pageFolder: DeckKeyPageFolderConfiguration
+    ) -> DeckKeyVisualConfiguration {
+        switch function {
+        case .openFolder:
+            return openFolder.visual
+        case .openFile:
+            return DeckKeyVisualConfiguration(
+                name: openFile.visual.name,
+                usesBlurredBackground: openFile.visual.usesBlurredBackground,
+                dimsBackground: openFile.visual.dimsBackground
+            )
+        case .connectSMBServer:
+            return smbServer.visual
+        case .pageFolder:
+            return pageFolder.visual
+        case .none, .tally, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .pageBack:
+            return DeckKeyVisualConfiguration()
+        }
     }
 }

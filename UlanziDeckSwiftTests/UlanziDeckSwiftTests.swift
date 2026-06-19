@@ -188,7 +188,7 @@ struct UlanziDeckSwiftTests {
         #expect(state.selectedKeyID == 2)
         #expect(state.configuration(for: 1)?.function == .connectSMBServer)
         #expect(state.configuration(for: 1)?.smbServer.address == "nas.local/media")
-        #expect(state.configuration(for: 1)?.smbServer.name == "NAS")
+        #expect(state.configuration(for: 1)?.buttonVisualConfiguration?.name == "NAS")
         #expect(state.configuration(for: 2)?.function == .openFolder)
         #expect(state.configuration(for: 2)?.openFolder.path == "/Users/ibobby/Documents")
         #expect(!didRejectWideKey)
@@ -531,6 +531,95 @@ struct UlanziDeckSwiftTests {
         #expect(namedDisplay.fileButtonContent?.displayName == "报告")
     }
 
+    @Test func buttonVisualConfigurationAppliesToAllButtonFunctions() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        let backgroundPNGData = Self.solidColorIconPNGData(color: .systemRed)
+        let blurredBackgroundPNGData = Self.solidColorIconPNGData(color: .systemBlue)
+        let visual = DeckKeyVisualConfiguration(
+            name: " 视觉 ",
+            backgroundPNGData: backgroundPNGData,
+            blurredBackgroundPNGData: blurredBackgroundPNGData,
+            usesBlurredBackground: true,
+            dimsBackground: false
+        )
+
+        state.clearFunction(keyID: 2)
+        state.assign(.tally, to: 3)
+        state.assign(.openFolder, to: 4)
+        state.assign(.openFile, to: 5)
+        state.assign(.connectSMBServer, to: 6)
+        state.assign(.sub2API, to: 7)
+        state.assign(.genshinStatus, to: 8)
+        state.assign(.starRailStatus, to: 9)
+        state.assign(.zenlessZoneStatus, to: 10)
+        state.assign(.pageFolder, to: 11)
+
+        for keyID in 2...11 {
+            state.setButtonVisualConfiguration(visual, for: keyID)
+            let display = state.display(for: layout.keys[keyID - 1])
+            #expect(display.title == "视觉")
+            #expect(display.buttonVisualContent.displayName == "视觉")
+            #expect(display.buttonVisualContent.backgroundPNGData == blurredBackgroundPNGData)
+            #expect(display.buttonVisualContent.dimsBackground == false)
+            #expect(display.buttonVisualContent.hasCustomDisplayName)
+            #expect(display.buttonVisualContent.hasCustomBackground)
+        }
+
+        let didEnterPage = state.enterPageFolder(keyID: 11)
+        #expect(didEnterPage)
+        state.setButtonVisualConfiguration(visual, for: 1)
+        let backDisplay = state.display(for: layout.keys[0])
+        #expect(backDisplay.title == "视觉")
+        #expect(backDisplay.pageBackButtonContent?.displayName == "视觉")
+        #expect(backDisplay.buttonVisualContent.backgroundPNGData == blurredBackgroundPNGData)
+        #expect(backDisplay.buttonVisualContent.dimsBackground == false)
+    }
+
+    @Test func clearingCustomButtonBackgroundFallsBackToOriginalBackground() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        let customBackgroundPNGData = Self.solidColorIconPNGData(color: .systemGreen)
+        let iconPNGData = Self.solidColorIconPNGData(color: .systemRed)
+        let blurredIconPNGData = Self.solidColorIconPNGData(color: .systemBlue)
+
+        state.assign(.openFile, to: 5)
+        state.setFileConfiguration(Self.fileConfiguration(
+            path: "/Users/ibobby/Documents/report.pdf",
+            iconPNGData: iconPNGData,
+            blurredIconPNGData: blurredIconPNGData
+        ), for: 5)
+        state.setButtonVisualConfiguration(DeckKeyVisualConfiguration(backgroundPNGData: customBackgroundPNGData), for: 5)
+
+        #expect(state.display(for: layout.keys[4]).buttonVisualContent.backgroundPNGData == customBackgroundPNGData)
+
+        var fileVisual = state.buttonVisualConfiguration(for: 5) ?? DeckKeyVisualConfiguration()
+        fileVisual.backgroundPNGData = nil
+        fileVisual.blurredBackgroundPNGData = nil
+        fileVisual.usesBlurredBackground = false
+        state.setButtonVisualConfiguration(fileVisual, for: 5)
+
+        let restoredFileDisplay = state.display(for: layout.keys[4])
+        #expect(restoredFileDisplay.fileButtonContent?.backgroundPNGData == iconPNGData)
+        #expect(!restoredFileDisplay.buttonVisualContent.hasCustomBackground)
+        let didEnableFileBlur = state.setButtonVisualBlurEnabled(true, for: 5)
+        #expect(didEnableFileBlur)
+        #expect(state.display(for: layout.keys[4]).fileButtonContent?.backgroundPNGData == blurredIconPNGData)
+
+        state.assign(.openFolder, to: 6)
+        state.setButtonVisualConfiguration(DeckKeyVisualConfiguration(backgroundPNGData: customBackgroundPNGData), for: 6)
+        var folderVisual = state.buttonVisualConfiguration(for: 6) ?? DeckKeyVisualConfiguration()
+        folderVisual.backgroundPNGData = nil
+        folderVisual.blurredBackgroundPNGData = nil
+        folderVisual.usesBlurredBackground = false
+        state.setButtonVisualConfiguration(folderVisual, for: 6)
+
+        let restoredFolderDisplay = state.display(for: layout.keys[5])
+        #expect(restoredFolderDisplay.folderButtonContent?.backgroundPNGData == nil)
+        #expect(restoredFolderDisplay.buttonVisualContent.backgroundAssetName == FolderButtonContent.backgroundAssetName)
+        #expect(!restoredFolderDisplay.buttonVisualContent.hasCustomBackground)
+    }
+
     @Test func legacyOpenFolderConfigurationRequiresReselection() throws {
         let data = try #require(#"{"path":"/Users/ibobby/Documents"}"#.data(using: .utf8))
         let configuration = try JSONDecoder().decode(DeckKeyOpenFolderConfiguration.self, from: data)
@@ -639,7 +728,7 @@ struct UlanziDeckSwiftTests {
         #expect(display.subtitle == "server.local/share")
         #expect(display.smbServerButtonContent?.displayName == "素材库")
         #expect(state.smbServerAddress(for: 5) == "server.local/share")
-        #expect(state.smbServerName(for: 5) == "素材库")
+        #expect(state.configuration(for: 5)?.buttonVisualConfiguration?.name == "素材库")
         #expect(state.configuration(for: 5)?.smbServer.fullURLString == "smb://server.local/share")
     }
 
@@ -660,9 +749,9 @@ struct UlanziDeckSwiftTests {
         state.setFileName(" 报告 ", for: 6, selectsKey: false)
 
         #expect(state.selectedKeyID == 2)
-        #expect(state.openFolderConfiguration(for: 4).name == "资料")
-        #expect(state.smbServerName(for: 5) == "NAS")
-        #expect(state.openFileConfiguration(for: 6).name == "报告")
+        #expect(state.configuration(for: 4)?.buttonVisualConfiguration?.name == "资料")
+        #expect(state.configuration(for: 5)?.buttonVisualConfiguration?.name == "NAS")
+        #expect(state.configuration(for: 6)?.buttonVisualConfiguration?.name == "报告")
     }
 
     @Test func legacyBrightnessKeyFunctionIsNormalizedToNoFunction() {
@@ -693,8 +782,7 @@ struct UlanziDeckSwiftTests {
         let store = UserDefaultsDeckConfigurationStore(
             defaults: defaults,
             storageKey: "deckConfiguration",
-            brightnessStorageKey: "brightness",
-            buttonBackgroundDimmingStorageKey: "buttonBackgroundDimming"
+            brightnessStorageKey: "brightness"
         )
         var state = DeckGridInteractionState(layout: layout)
         state.setTallyDefaultValue(6, for: 3)
@@ -711,7 +799,6 @@ struct UlanziDeckSwiftTests {
 
         store.saveInteractionState(state, for: layout)
         store.saveBrightnessPercent(140)
-        store.saveButtonBackgroundDimmingEnabled(false)
 
         let restored = try #require(store.loadInteractionState(for: layout))
         #expect(restored.tallyDefaultValue(for: 3) == 6)
@@ -722,13 +809,12 @@ struct UlanziDeckSwiftTests {
         #expect(restored.openFolderConfiguration(for: 9).bookmarkData == Data("bookmark".utf8))
         #expect(restored.configuration(for: 10)?.function == DeckKeyFunction.connectSMBServer)
         #expect(restored.smbServerAddress(for: 10) == "nas.local/media")
-        #expect(restored.smbServerName(for: 10) == "NAS")
+        #expect(restored.configuration(for: 10)?.buttonVisualConfiguration?.name == "NAS")
         #expect(restored.configuration(for: 11)?.function == DeckKeyFunction.openFile)
         #expect(restored.filePath(for: 11) == "/Users/ibobby/Documents/report.pdf")
         #expect(restored.openFileConfiguration(for: 11).bookmarkData == Data("bookmark".utf8))
-        #expect(restored.openFileConfiguration(for: 11).name == "报告")
+        #expect(restored.configuration(for: 11)?.buttonVisualConfiguration?.name == "报告")
         #expect(store.loadBrightnessPercent() == 100)
-        #expect(store.loadButtonBackgroundDimmingEnabled() == false)
         #expect(restored.pressedKeyIDs.isEmpty)
         #expect(restored.selectedKeyID == 1)
     }
@@ -768,6 +854,7 @@ struct UlanziDeckSwiftTests {
         #expect(restored.navigationPathTitles == ["主页"])
         #expect(restored.configuration(for: 3)?.function == .openFolder)
         #expect(restored.openFolderConfiguration(for: 3).name == "文档")
+        #expect(restored.configuration(for: 3)?.buttonVisualConfiguration?.name == "文档")
     }
 
     @Test func userDefaultsStorePersistsPageTreeAndRestoresToRootPage() throws {
@@ -1512,8 +1599,8 @@ struct UlanziDeckSwiftTests {
         #expect(syncer.partialDisplays.last?.first?.folderButtonContent?.displayName == "下载")
         #expect(syncer.partialDisplays.last?.first?.folderButtonContent?.backgroundPNGData == backgroundPNGData)
         #expect(store.savedStates.last?.folderPath(for: 4) == "/Users/ibobby/Documents")
-        #expect(store.savedStates.last?.openFolderConfiguration(for: 4).name == "下载")
-        #expect(store.savedStates.last?.openFolderConfiguration(for: 4).backgroundPNGData == backgroundPNGData)
+        #expect(store.savedStates.last?.configuration(for: 4)?.buttonVisualConfiguration?.name == "下载")
+        #expect(store.savedStates.last?.configuration(for: 4)?.buttonVisualConfiguration?.backgroundPNGData == backgroundPNGData)
     }
 
     @MainActor
@@ -1555,7 +1642,7 @@ struct UlanziDeckSwiftTests {
         #expect(syncer.partialDisplays.last?.first?.fileButtonContent?.displayName == "报告")
         #expect(syncer.partialDisplays.last?.first?.fileButtonContent?.backgroundPNGData == iconPNGData)
         #expect(store.savedStates.last?.filePath(for: 4) == "/Users/ibobby/Documents/report.pdf")
-        #expect(store.savedStates.last?.openFileConfiguration(for: 4).name == "报告")
+        #expect(store.savedStates.last?.configuration(for: 4)?.buttonVisualConfiguration?.name == "报告")
         #expect(store.savedStates.last?.openFileConfiguration(for: 4).iconPNGData == iconPNGData)
         #expect(store.savedStates.last?.openFileConfiguration(for: 4).blurredIconPNGData == blurredIconPNGData)
 
@@ -1565,7 +1652,7 @@ struct UlanziDeckSwiftTests {
             syncer.partialDisplays.count == 4
         }
         #expect(syncer.partialDisplays.last?.first?.fileButtonContent?.backgroundPNGData == blurredIconPNGData)
-        #expect(store.savedStates.last?.openFileConfiguration(for: 4).usesBlurredIcon == true)
+        #expect(store.savedStates.last?.configuration(for: 4)?.buttonVisualConfiguration?.usesBlurredBackground == true)
     }
 
     @MainActor
@@ -1593,7 +1680,7 @@ struct UlanziDeckSwiftTests {
         }
         #expect(model.interactionState.configuration(for: 4)?.function == DeckKeyFunction.connectSMBServer)
         #expect(model.interactionState.smbServerAddress(for: 4) == "nas.local/media")
-        #expect(model.interactionState.smbServerName(for: 4) == "NAS")
+        #expect(model.interactionState.configuration(for: 4)?.buttonVisualConfiguration?.name == "NAS")
         #expect(syncer.sentDisplays.count == 1)
         #expect(syncer.partialDisplays.count == 3)
         #expect(syncer.partialDisplays.last?.map(\.id) == [4])
@@ -1601,7 +1688,7 @@ struct UlanziDeckSwiftTests {
         #expect(syncer.partialDisplays.last?.first?.subtitle == "nas.local/media")
         #expect(syncer.partialDisplays.last?.first?.smbServerButtonContent?.displayName == "NAS")
         #expect(store.savedStates.last?.smbServerAddress(for: 4) == "nas.local/media")
-        #expect(store.savedStates.last?.smbServerName(for: 4) == "NAS")
+        #expect(store.savedStates.last?.configuration(for: 4)?.buttonVisualConfiguration?.name == "NAS")
     }
 
     @MainActor
@@ -1636,7 +1723,7 @@ struct UlanziDeckSwiftTests {
             syncer.partialDisplays.count == folderPartialDisplayCount + 1
         }
         #expect(store.savedStates.count == folderSavedStateCount)
-        #expect(model.interactionState.openFolderConfiguration(for: 4).name == "资料")
+        #expect(model.interactionState.configuration(for: 4)?.buttonVisualConfiguration?.name == "资料")
         #expect(syncer.partialDisplays.last?.first?.title == "资料")
 
         model.selectKey(keyID: 6)
@@ -1654,7 +1741,7 @@ struct UlanziDeckSwiftTests {
             syncer.partialDisplays.count == filePartialDisplayCount + 1
         }
         #expect(store.savedStates.count == fileSavedStateCount)
-        #expect(model.interactionState.openFileConfiguration(for: 6).name == "报告")
+        #expect(model.interactionState.configuration(for: 6)?.buttonVisualConfiguration?.name == "报告")
         #expect(syncer.partialDisplays.last?.first?.title == "报告")
 
         model.selectKey(keyID: 5)
@@ -1672,7 +1759,7 @@ struct UlanziDeckSwiftTests {
             syncer.partialDisplays.count == smbPartialDisplayCount + 1
         }
         #expect(store.savedStates.count == smbSavedStateCount)
-        #expect(model.interactionState.smbServerName(for: 5) == "NAS")
+        #expect(model.interactionState.configuration(for: 5)?.buttonVisualConfiguration?.name == "NAS")
         #expect(syncer.partialDisplays.last?.first?.title == "NAS")
     }
 
@@ -1751,9 +1838,13 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func buttonBackgroundDimmingTogglePersistsAndResyncsDisplays() async throws {
+    @Test func buttonVisualDimmingChangePersistsAndResyncsDisplay() async throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.openFolder, to: 2)
+        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"), for: 2)
         let syncer = FakeH200DeckSyncer()
-        let store = FakeDeckConfigurationStore(loadedButtonBackgroundDimmingEnabled: true)
+        let store = FakeDeckConfigurationStore(loadedState: state)
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
             syncer: syncer,
@@ -1761,22 +1852,19 @@ struct UlanziDeckSwiftTests {
             folderOpener: FakeFinderFolderOpener()
         )
 
-        #expect(model.buttonBackgroundDimmingEnabled)
-
         model.checkOnLaunch()
         try await Self.waitUntil {
             syncer.sentDisplays.count == 1 && model.syncSummary != nil
         }
-        #expect(syncer.sentDisplays.last?.allSatisfy(\.buttonBackgroundDimmingEnabled) == true)
+        #expect(syncer.sentDisplays.last?.first(where: { $0.id == 2 })?.folderButtonContent?.dimsBackground == true)
 
-        model.toggleButtonBackgroundDimming()
+        model.setButtonVisualDimmingEnabled(false, for: 2)
 
         try await Self.waitUntil {
-            syncer.sentDisplays.count == 2
+            syncer.partialDisplays.count == 1
         }
-        #expect(!model.buttonBackgroundDimmingEnabled)
-        #expect(store.savedButtonBackgroundDimmingValues == [false])
-        #expect(syncer.sentDisplays.last?.allSatisfy { !$0.buttonBackgroundDimmingEnabled } == true)
+        #expect(store.savedStates.last?.configuration(for: 2)?.buttonVisualConfiguration?.dimsBackground == false)
+        #expect(syncer.partialDisplays.last?.first?.folderButtonContent?.dimsBackground == false)
     }
 
     @MainActor
@@ -2549,7 +2637,7 @@ struct UlanziDeckSwiftTests {
         state.assign(.openFile, to: 2)
         state.setFileConfiguration(Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf"), for: 2)
         state.setFileName("报告", for: 2)
-        let display = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: false)
+        let display = state.display(for: layout.keys[1])
 
         let png = try H200ButtonIconRenderer().pngData(for: display)
         let image = try #require(NSBitmapImageRep(data: png))
@@ -2620,7 +2708,8 @@ struct UlanziDeckSwiftTests {
             backgroundPNGData: backgroundPNGData
         ), for: 2)
         state.setFolderName("下载", for: 2)
-        let display = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: false)
+        state.setButtonVisualDimmingEnabled(false, for: 2)
+        let display = state.display(for: layout.keys[1])
 
         let png = try H200ButtonIconRenderer().pngData(for: display)
         let image = try #require(NSBitmapImageRep(data: png))
@@ -2633,19 +2722,19 @@ struct UlanziDeckSwiftTests {
         #expect(color.alphaComponent > 0.999)
     }
 
-    @Test func iconRendererUsesPageFolderBackgroundWithoutShortcutText() throws {
+    @Test func iconRendererUsesPageFolderBackgroundAndDisplayName() throws {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
         state.assign(.pageFolder, to: 2)
-        let display = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: false)
+        state.setButtonVisualDimmingEnabled(false, for: 2)
+        let display = state.display(for: layout.keys[1])
 
         let png = try H200ButtonIconRenderer().pngData(for: display)
         let image = try #require(NSBitmapImageRep(data: png))
-        let centerColor = try #require(image.colorAt(x: image.pixelsWide / 2, y: image.pixelsHigh / 2)?.usingColorSpace(.deviceRGB))
         let cornerColor = try #require(image.colorAt(x: 1, y: 1)?.usingColorSpace(.deviceRGB))
 
+        #expect(display.title == "文件夹")
         #expect(display.pageFolderButtonContent?.displayName == "文件夹")
-        #expect(centerColor.redComponent + centerColor.greenComponent + centerColor.blueComponent > 2.2)
         #expect(cornerColor.redComponent + cornerColor.greenComponent + cornerColor.blueComponent < 0.01)
     }
 
@@ -2677,7 +2766,8 @@ struct UlanziDeckSwiftTests {
             blurredIconPNGData: blurredIconPNGData
         ), for: 2)
         state.setFileName("报告", for: 2)
-        let display = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: false)
+        state.setButtonVisualDimmingEnabled(false, for: 2)
+        let display = state.display(for: layout.keys[1])
 
         #expect(display.title == "报告")
         #expect(display.subtitle == "/Users/ibobby/Documents/report.pdf")
@@ -2692,7 +2782,8 @@ struct UlanziDeckSwiftTests {
         #expect(brightCornerColor.redComponent > brightCornerColor.blueComponent + 0.25)
         #expect(brightCornerColor.alphaComponent > 0.999)
 
-        let dimmedDisplay = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: true)
+        state.setButtonVisualDimmingEnabled(true, for: 2)
+        let dimmedDisplay = state.display(for: layout.keys[1])
         let dimmedPNG = try H200ButtonIconRenderer().pngData(for: dimmedDisplay)
         let dimmedImage = try #require(NSBitmapImageRep(data: dimmedPNG))
         let dimmedCornerColor = try #require(dimmedImage.colorAt(x: 1, y: 1)?.usingColorSpace(.deviceRGB))
@@ -2700,8 +2791,9 @@ struct UlanziDeckSwiftTests {
         let dimmedLuma = dimmedCornerColor.redComponent + dimmedCornerColor.greenComponent + dimmedCornerColor.blueComponent
         #expect(brightLuma > dimmedLuma)
 
+        state.setButtonVisualDimmingEnabled(false, for: 2)
         state.setFileIconBlurEnabled(true, for: 2)
-        let blurredDisplay = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: false)
+        let blurredDisplay = state.display(for: layout.keys[1])
         let blurredPNG = try H200ButtonIconRenderer().pngData(for: blurredDisplay)
         let blurredImage = try #require(NSBitmapImageRep(data: blurredPNG))
         let blurredCornerColor = try #require(blurredImage.colorAt(x: 1, y: 1)?.usingColorSpace(.deviceRGB))
@@ -2710,14 +2802,15 @@ struct UlanziDeckSwiftTests {
         #expect(blurredCornerColor.blueComponent > blurredCornerColor.redComponent + 0.25)
     }
 
-    @Test func iconRendererCanDisableButtonBackgroundDimming() throws {
+    @Test func iconRendererCanDisableShortcutBackgroundDimmingPerKey() throws {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
         state.assign(.openFolder, to: 2)
         state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"), for: 2)
         state.setFolderName("下载", for: 2)
-        let dimmedDisplay = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: true)
-        let brightDisplay = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: false)
+        let dimmedDisplay = state.display(for: layout.keys[1])
+        state.setButtonVisualDimmingEnabled(false, for: 2)
+        let brightDisplay = state.display(for: layout.keys[1])
         let renderer = H200ButtonIconRenderer()
 
         let dimmedPNG = try renderer.pngData(for: dimmedDisplay)
@@ -3895,19 +3988,15 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
 private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
     private let loadedState: DeckGridInteractionState?
     private let loadedBrightnessPercent: Int?
-    private let loadedButtonBackgroundDimmingEnabled: Bool?
     private(set) var savedStates: [DeckGridInteractionState] = []
     private(set) var savedBrightnessPercents: [Int] = []
-    private(set) var savedButtonBackgroundDimmingValues: [Bool] = []
 
     init(
         loadedState: DeckGridInteractionState? = nil,
-        loadedBrightnessPercent: Int? = nil,
-        loadedButtonBackgroundDimmingEnabled: Bool? = nil
+        loadedBrightnessPercent: Int? = nil
     ) {
         self.loadedState = loadedState
         self.loadedBrightnessPercent = loadedBrightnessPercent
-        self.loadedButtonBackgroundDimmingEnabled = loadedButtonBackgroundDimmingEnabled
     }
 
     func loadInteractionState(for layout: DeckGridLayout) -> DeckGridInteractionState? {
@@ -3924,14 +4013,6 @@ private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
 
     func saveBrightnessPercent(_ percent: Int) {
         savedBrightnessPercents.append(percent)
-    }
-
-    func loadButtonBackgroundDimmingEnabled() -> Bool? {
-        loadedButtonBackgroundDimmingEnabled
-    }
-
-    func saveButtonBackgroundDimmingEnabled(_ enabled: Bool) {
-        savedButtonBackgroundDimmingValues.append(enabled)
     }
 }
 

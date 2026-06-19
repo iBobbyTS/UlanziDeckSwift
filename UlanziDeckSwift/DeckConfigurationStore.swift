@@ -5,39 +5,31 @@ nonisolated protocol DeckConfigurationStoring {
     func saveInteractionState(_ state: DeckGridInteractionState, for layout: DeckGridLayout)
     func loadBrightnessPercent() -> Int?
     func saveBrightnessPercent(_ percent: Int)
-    func loadButtonBackgroundDimmingEnabled() -> Bool?
-    func saveButtonBackgroundDimmingEnabled(_ enabled: Bool)
 }
 
 extension DeckConfigurationStoring {
     nonisolated func loadBrightnessPercent() -> Int? { nil }
     nonisolated func saveBrightnessPercent(_ percent: Int) {}
-    nonisolated func loadButtonBackgroundDimmingEnabled() -> Bool? { nil }
-    nonisolated func saveButtonBackgroundDimmingEnabled(_ enabled: Bool) {}
 }
 
 nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring {
     static let defaultStorageKey = "com.iBobby.UlanziDeckSwift.h200.deckConfiguration.v1"
     static let defaultBrightnessStorageKey = "com.iBobby.UlanziDeckSwift.h200.brightness.v1"
-    static let defaultButtonBackgroundDimmingStorageKey = "com.iBobby.UlanziDeckSwift.h200.buttonBackgroundDimming.v1"
 
     private let defaults: UserDefaults
     private let storageKey: String
     private let brightnessStorageKey: String
-    private let buttonBackgroundDimmingStorageKey: String
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
 
     init(
         defaults: UserDefaults = .standard,
         storageKey: String = Self.defaultStorageKey,
-        brightnessStorageKey: String = Self.defaultBrightnessStorageKey,
-        buttonBackgroundDimmingStorageKey: String = Self.defaultButtonBackgroundDimmingStorageKey
+        brightnessStorageKey: String = Self.defaultBrightnessStorageKey
     ) {
         self.defaults = defaults
         self.storageKey = storageKey
         self.brightnessStorageKey = brightnessStorageKey
-        self.buttonBackgroundDimmingStorageKey = buttonBackgroundDimmingStorageKey
     }
 
     func loadInteractionState(for layout: DeckGridLayout) -> DeckGridInteractionState? {
@@ -102,18 +94,6 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
 
     func saveBrightnessPercent(_ percent: Int) {
         defaults.set(DeckBrightnessConfiguration.clamped(percent), forKey: brightnessStorageKey)
-    }
-
-    func loadButtonBackgroundDimmingEnabled() -> Bool? {
-        guard defaults.object(forKey: buttonBackgroundDimmingStorageKey) != nil else {
-            return nil
-        }
-
-        return defaults.bool(forKey: buttonBackgroundDimmingStorageKey)
-    }
-
-    func saveButtonBackgroundDimmingEnabled(_ enabled: Bool) {
-        defaults.set(enabled, forKey: buttonBackgroundDimmingStorageKey)
     }
 }
 

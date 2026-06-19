@@ -339,6 +339,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
 
         let inset = rect.height * 0.08
         let cardRect = rect.insetBy(dx: inset, dy: inset)
+        if display.buttonVisualContent.hasCustomDisplayName {
+            drawShortcutContent(display.title, in: cardRect, buttonRect: rect)
+            return
+        }
         if let content = display.mihoyoGameButtonContent {
             drawMihoyoGameContent(content, in: cardRect, buttonRect: rect)
             return
@@ -359,7 +363,8 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
             return
         }
-        if display.pageFolderButtonContent != nil {
+        if let content = display.pageFolderButtonContent {
+            drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
             return
         }
         if let content = display.pageBackButtonContent {
@@ -386,51 +391,41 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
     }
 
     private func drawBackground(for display: DeckKeyDisplay, in rect: NSRect) {
-        if let iconPNGData = display.folderButtonContent?.backgroundPNGData ?? display.fileButtonContent?.backgroundPNGData,
-           let image = NSImage(data: iconPNGData) {
+        let visual = display.buttonVisualContent
+        if let backgroundPNGData = visual.backgroundPNGData,
+           let image = NSImage(data: backgroundPNGData) {
             drawFittedBackgroundImage(image, in: rect)
-            if display.buttonBackgroundDimmingEnabled {
-                NSColor(calibratedWhite: 0, alpha: 0.38).setFill()
-                rect.fill()
+            drawDimmingIfNeeded(visual.dimsBackground, in: rect)
+            return
+        }
+
+        if let backgroundAssetName = visual.backgroundAssetName,
+           let image = NSImage(named: NSImage.Name(backgroundAssetName)) {
+            if visual.usesFittedBackgroundImage {
+                drawFittedBackgroundImage(image, in: rect)
+            } else {
+                let imageRect = NSRect(origin: .zero, size: image.size)
+                image.draw(
+                    in: rect,
+                    from: imageRect,
+                    operation: .copy,
+                    fraction: 1,
+                    respectFlipped: false,
+                    hints: [.interpolation: NSImageInterpolation.high]
+                )
             }
+
+            drawDimmingIfNeeded(visual.dimsBackground, in: rect)
             return
         }
 
-        let backgroundAssetName: String?
-        if let game = display.mihoyoGame {
-            backgroundAssetName = game.buttonBackgroundAssetName
-        } else if display.folderButtonContent != nil {
-            backgroundAssetName = FolderButtonContent.backgroundAssetName
-        } else if display.smbServerButtonContent != nil {
-            backgroundAssetName = SMBServerButtonContent.backgroundAssetName
-        } else if display.pageFolderButtonContent != nil {
-            backgroundAssetName = PageFolderButtonContent.backgroundAssetName
-        } else {
-            backgroundAssetName = nil
-        }
+        Self.buttonBackgroundColor.setFill()
+        rect.fill()
+        drawDimmingIfNeeded(visual.dimsBackground, in: rect)
+    }
 
-        guard let backgroundAssetName,
-              let image = NSImage(named: NSImage.Name(backgroundAssetName))
-        else {
-            Self.buttonBackgroundColor.setFill()
-            rect.fill()
-            return
-        }
-
-        if display.folderButtonContent != nil || display.smbServerButtonContent != nil || display.pageFolderButtonContent != nil {
-            drawFittedBackgroundImage(image, in: rect)
-        } else {
-            let imageRect = NSRect(origin: .zero, size: image.size)
-            image.draw(
-                in: rect,
-                from: imageRect,
-                operation: .copy,
-                fraction: 1,
-                respectFlipped: false,
-                hints: [.interpolation: NSImageInterpolation.high]
-            )
-        }
-        if display.buttonBackgroundDimmingEnabled {
+    private func drawDimmingIfNeeded(_ enabled: Bool, in rect: NSRect) {
+        if enabled {
             NSColor(calibratedWhite: 0, alpha: 0.38).setFill()
             rect.fill()
         }

@@ -68,7 +68,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let smbServerButtonContent: SMBServerButtonContent?
     let pageFolderButtonContent: PageFolderButtonContent?
     let pageBackButtonContent: PageBackButtonContent?
-    let buttonBackgroundDimmingEnabled: Bool
+    let buttonVisualContent: ButtonVisualContent
     let isSelected: Bool
     let isPressed: Bool
     let canDelete: Bool
@@ -77,7 +77,6 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     init(
         key: DeckGridLayout.Key,
         configuration: DeckKeyConfiguration,
-        buttonBackgroundDimmingEnabled: Bool = true,
         isSelected: Bool,
         isPressed: Bool
     ) {
@@ -94,53 +93,93 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         var smbServerButtonContent: SMBServerButtonContent?
         var pageFolderButtonContent: PageFolderButtonContent?
         var pageBackButtonContent: PageBackButtonContent?
+        var buttonBackgroundAssetName: String?
+        var buttonBackgroundUsesFittedImage = true
+        let hasCustomDisplayName = !configuration.visual.name.isEmpty
 
         if key.columnSpan > 1 && configuration.displayMode != .function {
-            title = configuration.displayMode.previewTitle
+            title = configuration.visual.displayName(fallback: configuration.displayMode.previewTitle)
             subtitle = configuration.displayMode.previewSubtitle
             mihoyoGame = nil
         } else {
             mihoyoGame = configuredMihoyoGame
             switch configuration.function {
             case .none:
-                title = ""
+                title = configuration.visual.displayName(fallback: "")
                 subtitle = ""
             case .tally:
-                title = "\(configuration.tally.value)"
+                title = configuration.visual.displayName(fallback: "\(configuration.tally.value)")
                 subtitle = "默认 \(configuration.tally.defaultValue)"
             case .openFolder:
+                buttonBackgroundAssetName = FolderButtonContent.backgroundAssetName
                 let content = FolderButtonContent(
-                    displayName: configuration.openFolder.displayName,
-                    backgroundPNGData: configuration.openFolder.backgroundPNGData
+                    visual: ButtonVisualContent(
+                        displayName: configuration.visual.displayName(fallback: configuration.openFolder.automaticDisplayName),
+                        backgroundPNGData: configuration.selectedButtonBackgroundPNGData,
+                        backgroundAssetName: buttonBackgroundAssetName,
+                        usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
+                        dimsBackground: configuration.visual.dimsBackground,
+                        hasCustomDisplayName: hasCustomDisplayName,
+                        hasCustomBackground: configuration.visual.hasCustomBackground
+                    )
                 )
                 title = content.displayName
                 subtitle = configuration.openFolder.path ?? ""
                 folderButtonContent = content
             case .openFile:
                 let content = FileButtonContent(
-                    displayName: configuration.openFile.displayName,
-                    backgroundPNGData: configuration.openFile.selectedIconPNGData
+                    visual: ButtonVisualContent(
+                        displayName: configuration.visual.displayName(fallback: configuration.openFile.automaticDisplayName),
+                        backgroundPNGData: configuration.selectedButtonBackgroundPNGData,
+                        backgroundAssetName: nil,
+                        usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
+                        dimsBackground: configuration.visual.dimsBackground,
+                        hasCustomDisplayName: hasCustomDisplayName,
+                        hasCustomBackground: configuration.visual.hasCustomBackground
+                    )
                 )
                 title = content.displayName
                 subtitle = configuration.openFile.path ?? ""
                 fileButtonContent = content
             case .connectSMBServer:
-                let content = SMBServerButtonContent(displayName: configuration.smbServer.displayName)
+                buttonBackgroundAssetName = SMBServerButtonContent.backgroundAssetName
+                let content = SMBServerButtonContent(
+                    visual: ButtonVisualContent(
+                        displayName: configuration.visual.displayName(fallback: configuration.smbServer.automaticDisplayName),
+                        backgroundPNGData: configuration.selectedButtonBackgroundPNGData,
+                        backgroundAssetName: buttonBackgroundAssetName,
+                        usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
+                        dimsBackground: configuration.visual.dimsBackground,
+                        hasCustomDisplayName: hasCustomDisplayName,
+                        hasCustomBackground: configuration.visual.hasCustomBackground
+                    )
+                )
                 title = content.displayName
                 subtitle = configuration.smbServer.address
                 smbServerButtonContent = content
             case .pageFolder:
-                let content = PageFolderButtonContent(displayName: configuration.pageFolder.displayName)
+                buttonBackgroundAssetName = PageFolderButtonContent.backgroundAssetName
+                let content = PageFolderButtonContent(
+                    visual: ButtonVisualContent(
+                        displayName: configuration.visual.displayName(fallback: "文件夹"),
+                        backgroundPNGData: configuration.selectedButtonBackgroundPNGData,
+                        backgroundAssetName: buttonBackgroundAssetName,
+                        usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
+                        dimsBackground: configuration.visual.dimsBackground,
+                        hasCustomDisplayName: hasCustomDisplayName,
+                        hasCustomBackground: configuration.visual.hasCustomBackground
+                    )
+                )
                 title = content.displayName
                 subtitle = ""
                 pageFolderButtonContent = content
             case .pageBack:
-                let content = PageBackButtonContent(displayName: "返回")
+                let content = PageBackButtonContent(displayName: configuration.visual.displayName(fallback: "返回"))
                 title = content.displayName
                 subtitle = "上一级"
                 pageBackButtonContent = content
             case .brightness:
-                title = ""
+                title = configuration.visual.displayName(fallback: "")
                 subtitle = ""
             case .sub2API:
                 if case let .success(item) = configuration.sub2API.lastResult {
@@ -149,48 +188,59 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                         groupName: configuration.sub2API.displayName,
                         availableConcurrency: item.availableConcurrency
                     )
-                    title = content.availableConcurrencyText
+                    title = configuration.visual.displayName(fallback: content.availableConcurrencyText)
                     subtitle = "\(content.serviceName) \(content.groupName)"
                     sub2APIButtonContent = content
                 } else if case .invalidToken = configuration.sub2API.lastResult {
-                    title = "令牌"
+                    title = configuration.visual.displayName(fallback: "令牌")
                     subtitle = "无效"
                 } else if case .tokenExpired = configuration.sub2API.lastResult {
-                    title = "令牌"
+                    title = configuration.visual.displayName(fallback: "令牌")
                     subtitle = "已过期"
                 } else if case .notFound = configuration.sub2API.lastResult {
-                    title = "未找到"
+                    title = configuration.visual.displayName(fallback: "未找到")
                     subtitle = "分组 \(configuration.sub2API.targetGroupID)"
                 } else if case .networkError = configuration.sub2API.lastResult {
-                    title = "网络"
+                    title = configuration.visual.displayName(fallback: "网络")
                     subtitle = "错误"
                 } else {
-                    title = "号池"
+                    title = configuration.visual.displayName(fallback: "号池")
                     subtitle = "未配置"
                 }
             case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
+                buttonBackgroundAssetName = configuration.function.game?.buttonBackgroundAssetName
+                buttonBackgroundUsesFittedImage = false
                 if case let .success(status) = configuration.mihoyoGame.lastResult {
-                    title = status.buttonTitle
+                    title = configuration.visual.displayName(fallback: status.buttonTitle)
                     subtitle = status.buttonSubtitle
                     mihoyoGameButtonContent = status.buttonContent
                 } else if case .loginRequired = configuration.mihoyoGame.lastResult {
-                    title = configuration.function.game?.shortDisplayName ?? "游戏"
+                    title = configuration.visual.displayName(fallback: configuration.function.game?.shortDisplayName ?? "游戏")
                     subtitle = "未登录"
                 } else if case .loginExpired = configuration.mihoyoGame.lastResult {
-                    title = configuration.function.game?.shortDisplayName ?? "游戏"
+                    title = configuration.visual.displayName(fallback: configuration.function.game?.shortDisplayName ?? "游戏")
                     subtitle = "需重登"
                 } else if case .noBoundRole = configuration.mihoyoGame.lastResult {
-                    title = configuration.function.game?.shortDisplayName ?? "游戏"
+                    title = configuration.visual.displayName(fallback: configuration.function.game?.shortDisplayName ?? "游戏")
                     subtitle = "无角色"
                 } else if case .networkError = configuration.mihoyoGame.lastResult {
-                    title = configuration.function.game?.shortDisplayName ?? "游戏"
+                    title = configuration.visual.displayName(fallback: configuration.function.game?.shortDisplayName ?? "游戏")
                     subtitle = "查询失败"
                 } else {
-                    title = configuration.function.game?.shortDisplayName ?? "游戏"
+                    title = configuration.visual.displayName(fallback: configuration.function.game?.shortDisplayName ?? "游戏")
                     subtitle = "未查询"
                 }
             }
         }
+        let buttonVisualContent = ButtonVisualContent(
+            displayName: title,
+            backgroundPNGData: configuration.selectedButtonBackgroundPNGData,
+            backgroundAssetName: buttonBackgroundAssetName,
+            usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
+            dimsBackground: configuration.visual.dimsBackground,
+            hasCustomDisplayName: hasCustomDisplayName,
+            hasCustomBackground: configuration.visual.hasCustomBackground
+        )
         self.mihoyoGameButtonContent = mihoyoGameButtonContent
         self.sub2APIButtonContent = sub2APIButtonContent
         self.folderButtonContent = folderButtonContent
@@ -198,7 +248,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         self.smbServerButtonContent = smbServerButtonContent
         self.pageFolderButtonContent = pageFolderButtonContent
         self.pageBackButtonContent = pageBackButtonContent
-        self.buttonBackgroundDimmingEnabled = buttonBackgroundDimmingEnabled
+        self.buttonVisualContent = buttonVisualContent
         self.isSelected = isSelected
         self.isPressed = isPressed
         canDelete = configuration.function != .pageBack
@@ -230,7 +280,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             smbServerButtonContent: smbServerButtonContent,
             pageFolderButtonContent: pageFolderButtonContent,
             pageBackButtonContent: pageBackButtonContent,
-            buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled,
+            buttonVisualContent: buttonVisualContent,
             devicePixelSize: devicePixelSize
         )
     }
@@ -252,32 +302,56 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let smbServerButtonContent: SMBServerButtonContent?
     let pageFolderButtonContent: PageFolderButtonContent?
     let pageBackButtonContent: PageBackButtonContent?
-    let buttonBackgroundDimmingEnabled: Bool
+    let buttonVisualContent: ButtonVisualContent
     let devicePixelSize: H200DeviceTarget.PixelSize
+}
+
+nonisolated struct ButtonVisualContent: Equatable {
+    let displayName: String
+    let backgroundPNGData: Data?
+    let backgroundAssetName: String?
+    let usesFittedBackgroundImage: Bool
+    let dimsBackground: Bool
+    let hasCustomDisplayName: Bool
+    let hasCustomBackground: Bool
 }
 
 nonisolated struct FolderButtonContent: Equatable {
     static let backgroundAssetName = "FolderBackground"
 
-    let displayName: String
-    let backgroundPNGData: Data?
+    let visual: ButtonVisualContent
+
+    var displayName: String { visual.displayName }
+    var backgroundPNGData: Data? { visual.backgroundPNGData }
+    var dimsBackground: Bool { visual.dimsBackground }
 }
 
 nonisolated struct FileButtonContent: Equatable {
-    let displayName: String
-    let backgroundPNGData: Data?
+    let visual: ButtonVisualContent
+
+    var displayName: String { visual.displayName }
+    var backgroundPNGData: Data? { visual.backgroundPNGData }
+    var dimsBackground: Bool { visual.dimsBackground }
 }
 
 nonisolated struct SMBServerButtonContent: Equatable {
     static let backgroundAssetName = "SMBServerBackground"
 
-    let displayName: String
+    let visual: ButtonVisualContent
+
+    var displayName: String { visual.displayName }
+    var backgroundPNGData: Data? { visual.backgroundPNGData }
+    var dimsBackground: Bool { visual.dimsBackground }
 }
 
 nonisolated struct PageFolderButtonContent: Equatable {
     static let backgroundAssetName = "PageFolderBackground"
 
-    let displayName: String
+    let visual: ButtonVisualContent
+
+    var displayName: String { visual.displayName }
+    var backgroundPNGData: Data? { visual.backgroundPNGData }
+    var dimsBackground: Bool { visual.dimsBackground }
 }
 
 nonisolated struct PageBackButtonContent: Equatable {
@@ -894,6 +968,67 @@ nonisolated struct DeckGridInteractionState: Equatable {
         return true
     }
 
+    func buttonVisualConfiguration(for keyID: Int) -> DeckKeyVisualConfiguration? {
+        guard validKeyIDs.contains(keyID) else {
+            return nil
+        }
+
+        return configurations[keyID]?.buttonVisualConfiguration
+    }
+
+    @discardableResult
+    mutating func setButtonVisualConfiguration(
+        _ visual: DeckKeyVisualConfiguration,
+        for keyID: Int,
+        selectsKey: Bool = true
+    ) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              var configuration = configurations[keyID],
+              configuration.setButtonVisualConfiguration(visual)
+        else {
+            return false
+        }
+
+        if selectsKey {
+            selectedKeyID = keyID
+        }
+        configurations[keyID] = configuration
+        return true
+    }
+
+    @discardableResult
+    mutating func setButtonVisualName(_ name: String, for keyID: Int, selectsKey: Bool = true) -> Bool {
+        guard var visual = buttonVisualConfiguration(for: keyID) else {
+            return false
+        }
+
+        visual.name = DeckKeyVisualConfiguration.normalizedName(name)
+        return setButtonVisualConfiguration(visual, for: keyID, selectsKey: selectsKey)
+    }
+
+    @discardableResult
+    mutating func setButtonVisualBlurEnabled(_ enabled: Bool, for keyID: Int, selectsKey: Bool = true) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].buttonVisualCanUseBlurredBackground,
+              var visual = buttonVisualConfiguration(for: keyID)
+        else {
+            return false
+        }
+
+        visual.usesBlurredBackground = enabled
+        return setButtonVisualConfiguration(visual, for: keyID, selectsKey: selectsKey)
+    }
+
+    @discardableResult
+    mutating func setButtonVisualDimmingEnabled(_ enabled: Bool, for keyID: Int, selectsKey: Bool = true) -> Bool {
+        guard var visual = buttonVisualConfiguration(for: keyID) else {
+            return false
+        }
+
+        visual.dimsBackground = enabled
+        return setButtonVisualConfiguration(visual, for: keyID, selectsKey: selectsKey)
+    }
+
     @discardableResult
     mutating func setFolderConfiguration(
         _ configuration: DeckKeyOpenFolderConfiguration,
@@ -908,6 +1043,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
         if selectsKey {
             selectedKeyID = keyID
+            configurations[keyID, default: .tallyDefault].visual = configuration.visual
         }
         configurations[keyID, default: .tallyDefault].openFolder = configuration
         return true
@@ -915,33 +1051,21 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     @discardableResult
     mutating func setFolderName(_ name: String, for keyID: Int, selectsKey: Bool = true) -> Bool {
-        guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .openFolder
-        else {
-            return false
-        }
-
-        if selectsKey {
-            selectedKeyID = keyID
-        }
-        configurations[keyID, default: .tallyDefault].openFolder.name =
-            DeckKeyOpenFolderConfiguration.normalizedName(name)
-        return true
+        setButtonVisualName(name, for: keyID, selectsKey: selectsKey)
     }
 
     @discardableResult
     mutating func setFolderBackgroundPNGData(_ backgroundPNGData: Data?, for keyID: Int, selectsKey: Bool = true) -> Bool {
-        guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .openFolder
-        else {
+        guard var visual = buttonVisualConfiguration(for: keyID) else {
             return false
         }
 
-        if selectsKey {
-            selectedKeyID = keyID
+        visual.backgroundPNGData = backgroundPNGData
+        if backgroundPNGData == nil {
+            visual.blurredBackgroundPNGData = nil
+            visual.usesBlurredBackground = false
         }
-        configurations[keyID, default: .tallyDefault].openFolder.backgroundPNGData = backgroundPNGData
-        return true
+        return setButtonVisualConfiguration(visual, for: keyID, selectsKey: selectsKey)
     }
 
     @discardableResult
@@ -958,6 +1082,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
         if selectsKey {
             selectedKeyID = keyID
+            configurations[keyID, default: .tallyDefault].visual.name = configuration.visual.name
         }
         configurations[keyID, default: .tallyDefault].openFile = configuration
         return true
@@ -965,34 +1090,12 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     @discardableResult
     mutating func setFileName(_ name: String, for keyID: Int, selectsKey: Bool = true) -> Bool {
-        guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .openFile
-        else {
-            return false
-        }
-
-        if selectsKey {
-            selectedKeyID = keyID
-        }
-        configurations[keyID, default: .tallyDefault].openFile.name =
-            DeckKeyOpenFileConfiguration.normalizedName(name)
-        return true
+        setButtonVisualName(name, for: keyID, selectsKey: selectsKey)
     }
 
     @discardableResult
     mutating func setFileIconBlurEnabled(_ enabled: Bool, for keyID: Int, selectsKey: Bool = true) -> Bool {
-        guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .openFile,
-              configurations[keyID, default: .tallyDefault].openFile.canUseIconBlur
-        else {
-            return false
-        }
-
-        if selectsKey {
-            selectedKeyID = keyID
-        }
-        configurations[keyID, default: .tallyDefault].openFile.usesBlurredIcon = enabled
-        return true
+        setButtonVisualBlurEnabled(enabled, for: keyID, selectsKey: selectsKey)
     }
 
     @discardableResult
@@ -1010,17 +1113,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     @discardableResult
     mutating func setSMBServerName(_ name: String, for keyID: Int, selectsKey: Bool = true) -> Bool {
-        guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .connectSMBServer
-        else {
-            return false
-        }
-
-        if selectsKey {
-            selectedKeyID = keyID
-        }
-        configurations[keyID, default: .tallyDefault].smbServer.name = DeckKeySMBServerConfiguration.normalizedName(name)
-        return true
+        setButtonVisualName(name, for: keyID, selectsKey: selectsKey)
     }
 
     @discardableResult
@@ -1176,19 +1269,18 @@ nonisolated struct DeckGridInteractionState: Equatable {
         pages[pageID] = nil
     }
 
-    func display(for key: DeckGridLayout.Key, buttonBackgroundDimmingEnabled: Bool = true) -> DeckKeyDisplay {
+    func display(for key: DeckGridLayout.Key) -> DeckKeyDisplay {
         DeckKeyDisplay(
             key: key,
             configuration: configurations[key.id, default: .tallyDefault],
-            buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled,
             isSelected: selectedKeyID == key.id,
             isPressed: isPressed(keyID: key.id)
         )
     }
 
-    func displays(for layout: DeckGridLayout, buttonBackgroundDimmingEnabled: Bool = true) -> [DeckKeyDisplay] {
+    func displays(for layout: DeckGridLayout) -> [DeckKeyDisplay] {
         layout.keys.map { key in
-            display(for: key, buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled)
+            display(for: key)
         }
     }
 }

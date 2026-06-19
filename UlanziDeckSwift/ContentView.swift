@@ -6,15 +6,11 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @State private var brightnessDraftPercent: Int?
     @State var activeParameterFocusField: ParameterFocusField?
-    @State var folderNameDraft: ParameterNameDraft?
-    @State var fileNameDraft: ParameterNameDraft?
-    @State var smbServerNameDraft: ParameterNameDraft?
+    @State var buttonVisualNameDraft: ParameterNameDraft?
     @FocusState var focusedParameterField: ParameterFocusField?
 
     enum ParameterFocusField: Hashable {
-        case folderName
-        case fileName
-        case smbServerName
+        case buttonVisualName
     }
 
     struct ParameterNameDraft: Equatable {
@@ -27,7 +23,6 @@ struct ContentView: View {
     let brightnessPercent: Int
     let interactionState: DeckGridInteractionState
     let mihoyoLoginState: MihoyoLoginState
-    let buttonBackgroundDimmingEnabled: Bool
     let onKeySelection: (Int) -> Void
     let onKeyNavigation: (Int) -> Void
     let onKeyFunctionDeletion: (Int) -> Void
@@ -36,16 +31,11 @@ struct ContentView: View {
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
     let onFolderPathSelection: (DeckKeyOpenFolderConfiguration) -> Void
-    let onFolderNamePreview: (Int, String) -> Void
-    let onFolderNameChange: (Int, String) -> Void
-    let onFolderBackgroundChange: (Int, Data?) -> Void
     let onFilePathSelection: (DeckKeyOpenFileConfiguration) -> Void
-    let onFileNamePreview: (Int, String) -> Void
-    let onFileNameChange: (Int, String) -> Void
-    let onFileIconBlurChange: (Int, Bool) -> Void
+    let onButtonVisualNamePreview: (Int, String) -> Void
+    let onButtonVisualNameChange: (Int, String) -> Void
+    let onButtonVisualChange: (Int, DeckKeyVisualConfiguration) -> Void
     let onSMBServerAddressChange: (String) -> Void
-    let onSMBServerNamePreview: (Int, String) -> Void
-    let onSMBServerNameChange: (Int, String) -> Void
     let onBrightnessPercentPreview: (Int) -> Void
     let onBrightnessPercentCommit: (Int) -> Void
     let onSub2APIBaseURLChange: (String) -> Void
@@ -58,7 +48,6 @@ struct ContentView: View {
     let onMihoyoQRCodeLoginRequest: () -> Void
     let onMihoyoGameRefreshIntervalChange: (Int) -> Void
     let onMihoyoGameStatusRefresh: () -> Void
-    let onButtonBackgroundDimmingToggle: () -> Void
 
     private let layout = DeckGridLayout.h200Prototype
     private let previewLayoutMetrics = DeckPreviewLayoutMetrics.h200
@@ -163,10 +152,7 @@ struct ContentView: View {
 
             Spacer()
 
-            HStack(spacing: 16) {
-                buttonBackgroundDimmingToggle
-                brightnessControl
-            }
+            brightnessControl
         }
         .padding(.horizontal, 28)
         .padding(.vertical, 18)
@@ -219,23 +205,6 @@ struct ContentView: View {
         .accessibilityValue("\(displayedBrightnessPercent)%")
     }
 
-    private var buttonBackgroundDimmingToggle: some View {
-        Button {
-            onButtonBackgroundDimmingToggle()
-        } label: {
-            Label(
-                buttonBackgroundDimmingEnabled ? "背景已降亮" : "背景原亮度",
-                systemImage: buttonBackgroundDimmingEnabled ? "circle.lefthalf.filled" : "circle"
-            )
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .tint(buttonBackgroundDimmingEnabled ? .accentColor : .secondary)
-        .help(buttonBackgroundDimmingEnabled ? "按钮背景已降低亮度" : "按钮背景使用原始亮度")
-        .accessibilityLabel("降低按钮背景亮度")
-        .accessibilityValue(buttonBackgroundDimmingEnabled ? "已开启" : "已关闭")
-    }
-
     private var workbench: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
@@ -280,10 +249,7 @@ struct ContentView: View {
                 HStack(spacing: previewGridSpacing) {
                     ForEach(row) { key in
                         DeckKeyButton(
-                            display: interactionState.display(
-                                for: key,
-                                buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled
-                            ),
+                            display: interactionState.display(for: key),
                             metrics: previewGridMetrics
                         ) {
                             onKeySelection(key.id)
@@ -768,7 +734,6 @@ struct MihoyoQRCodeView: View {
         brightnessPercent: DeckBrightnessConfiguration.defaultPercent,
         interactionState: DeckGridInteractionState(layout: .h200Prototype),
         mihoyoLoginState: .notLoggedIn,
-        buttonBackgroundDimmingEnabled: true,
         onKeySelection: { _ in },
         onKeyNavigation: { _ in },
         onKeyFunctionDeletion: { _ in },
@@ -777,16 +742,11 @@ struct MihoyoQRCodeView: View {
         onFunctionSelection: { _ in },
         onTallyDefaultValueChange: { _ in },
         onFolderPathSelection: { _ in },
-        onFolderNamePreview: { _, _ in },
-        onFolderNameChange: { _, _ in },
-        onFolderBackgroundChange: { _, _ in },
         onFilePathSelection: { _ in },
-        onFileNamePreview: { _, _ in },
-        onFileNameChange: { _, _ in },
-        onFileIconBlurChange: { _, _ in },
+        onButtonVisualNamePreview: { _, _ in },
+        onButtonVisualNameChange: { _, _ in },
+        onButtonVisualChange: { _, _ in },
         onSMBServerAddressChange: { _ in },
-        onSMBServerNamePreview: { _, _ in },
-        onSMBServerNameChange: { _, _ in },
         onBrightnessPercentPreview: { _ in },
         onBrightnessPercentCommit: { _ in },
         onSub2APIBaseURLChange: { _ in },
@@ -798,7 +758,6 @@ struct MihoyoQRCodeView: View {
         onSub2APIGroupNameChange: { _ in },
         onMihoyoQRCodeLoginRequest: {},
         onMihoyoGameRefreshIntervalChange: { _ in },
-        onMihoyoGameStatusRefresh: {},
-        onButtonBackgroundDimmingToggle: {}
+        onMihoyoGameStatusRefresh: {}
     )
 }
