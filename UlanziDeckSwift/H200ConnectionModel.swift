@@ -375,6 +375,13 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    func setFolderBackgroundPNGData(_ backgroundPNGData: Data?, for keyID: Int) {
+        if interactionState.setFolderBackgroundPNGData(backgroundPNGData, for: keyID, selectsKey: false) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: keyID)
+        }
+    }
+
     func setSelectedFileConfiguration(_ configuration: DeckKeyOpenFileConfiguration) {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return
@@ -756,6 +763,7 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         refreshedConfiguration.name = configuration.name
+        refreshedConfiguration.backgroundPNGData = configuration.backgroundPNGData
         if interactionState.setFolderConfiguration(refreshedConfiguration, for: keyID, selectsKey: false) {
             persistCurrentConfiguration()
         }

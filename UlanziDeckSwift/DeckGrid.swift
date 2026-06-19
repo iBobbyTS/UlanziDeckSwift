@@ -109,7 +109,10 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 title = "\(configuration.tally.value)"
                 subtitle = "默认 \(configuration.tally.defaultValue)"
             case .openFolder:
-                let content = FolderButtonContent(displayName: configuration.openFolder.displayName)
+                let content = FolderButtonContent(
+                    displayName: configuration.openFolder.displayName,
+                    backgroundPNGData: configuration.openFolder.backgroundPNGData
+                )
                 title = content.displayName
                 subtitle = configuration.openFolder.path ?? ""
                 folderButtonContent = content
@@ -257,6 +260,7 @@ nonisolated struct FolderButtonContent: Equatable {
     static let backgroundAssetName = "FolderBackground"
 
     let displayName: String
+    let backgroundPNGData: Data?
 }
 
 nonisolated struct FileButtonContent: Equatable {
@@ -922,6 +926,21 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
         configurations[keyID, default: .tallyDefault].openFolder.name =
             DeckKeyOpenFolderConfiguration.normalizedName(name)
+        return true
+    }
+
+    @discardableResult
+    mutating func setFolderBackgroundPNGData(_ backgroundPNGData: Data?, for keyID: Int, selectsKey: Bool = true) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .openFolder
+        else {
+            return false
+        }
+
+        if selectsKey {
+            selectedKeyID = keyID
+        }
+        configurations[keyID, default: .tallyDefault].openFolder.backgroundPNGData = backgroundPNGData
         return true
     }
 

@@ -1,5 +1,56 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
+
+private enum FolderBackgroundSelectionMode: Int {
+    case image
+    case allFiles
+}
+
+private final class FolderBackgroundSelectionAccessory: NSObject {
+    let view: NSView
+    private let popupButton: NSPopUpButton
+    private weak var panel: NSOpenPanel?
+
+    var mode: FolderBackgroundSelectionMode {
+        FolderBackgroundSelectionMode(rawValue: popupButton.indexOfSelectedItem) ?? .image
+    }
+
+    init(panel: NSOpenPanel) {
+        self.panel = panel
+        popupButton = NSPopUpButton()
+        popupButton.addItem(withTitle: "图像")
+        popupButton.addItem(withTitle: "所有文件")
+
+        let label = NSTextField(labelWithString: "类型")
+        label.alignment = .right
+
+        let stackView = NSStackView(views: [label, popupButton])
+        stackView.orientation = .horizontal
+        stackView.alignment = .centerY
+        stackView.spacing = 8
+        view = stackView
+
+        super.init()
+
+        popupButton.target = self
+        popupButton.action = #selector(selectionChanged(_:))
+        applyMode()
+    }
+
+    @objc private func selectionChanged(_ sender: NSPopUpButton) {
+        applyMode()
+    }
+
+    private func applyMode() {
+        switch mode {
+        case .image:
+            panel?.allowedContentTypes = [.image]
+        case .allFiles:
+            panel?.allowedContentTypes = []
+        }
+    }
+}
 
 extension ContentView {
     @ViewBuilder
@@ -108,7 +159,7 @@ extension ContentView {
                 chooseButtonTitle: "选择文件夹",
                 rechooseButtonTitle: "重新选择文件夹",
                 chooseButtonSystemImage: "folder.badge.plus",
-                extraContent: AnyView(EmptyView())
+                extraContent: AnyView(folderBackgroundButtons(for: configuration.openFolder))
             ) {
                 chooseFolder()
             }
@@ -386,6 +437,32 @@ extension ContentView {
         .help(configuration.canUseIconBlur ? "切换文件图标背景的高斯模糊版本" : "选择文件并成功获取图标后可用")
         .accessibilityLabel("高斯模糊")
         .accessibilityValue(configuration.usesBlurredIcon ? "已开启" : "已关闭")
+    }
+
+    private func folderBackgroundButtons(for configuration: DeckKeyOpenFolderConfiguration) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                chooseFolderBackground()
+            } label: {
+                Label(configuration.backgroundPNGData == nil ? "选择背景" : "更换背景", systemImage: "photo.badge.plus")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            if configuration.backgroundPNGData != nil {
+                Button(role: .destructive) {
+                    guard let selectedKeyID = interactionState.selectedKeyID else {
+                        return
+                    }
+
+                    onFolderBackgroundChange(selectedKeyID, nil)
+                } label: {
+                    Label("清除背景", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
     }
 }
 
@@ -891,7 +968,8 @@ extension ContentView {
         do {
             onFolderPathSelection(try DeckKeyOpenFolderConfiguration(
                 folderURL: url,
-                name: folderName
+                name: folderName,
+                backgroundPNGData: selectedConfiguration?.openFolder.backgroundPNGData
             ))
         } catch {
             let alert = NSAlert()
@@ -900,6 +978,47 @@ extension ContentView {
             alert.alertStyle = .warning
             alert.runModal()
         }
+    }
+
+    func chooseFolderBackground() {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        let panel = NSOpenPanel()
+        panel.title = "选择背景"
+        panel.prompt = "选择"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        let accessory = FolderBackgroundSelectionAccessory(panel: panel)
+        panel.accessoryView = accessory.view
+
+        guard panel.runModal() == .OK,
+              let url = panel.url
+        else {
+            return
+        }
+
+        let backgroundPNGData: Data?
+        switch accessory.mode {
+        case .image:
+            guard let image = NSImage(contentsOf: url) else {
+                showWarningAlert(title: "无法读取背景图像", message: "请选择可读取的图像文件。")
+                return
+            }
+            backgroundPNGData = FileIconSnapshot.pngData(for: image)
+        case .allFiles:
+            backgroundPNGData = FileIconSnapshot.snapshotData(for: url)?.iconPNGData
+        }
+
+        guard let backgroundPNGData else {
+            showWarningAlert(title: "无法生成背景图像", message: "请选择其他文件后重试。")
+            return
+        }
+
+        onFolderBackgroundChange(selectedKeyID, backgroundPNGData)
     }
 
     func chooseFile() {
@@ -939,6 +1058,14 @@ extension ContentView {
             alert.alertStyle = .warning
             alert.runModal()
         }
+    }
+
+    private func showWarningAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 
     func mihoyoGameParameterContent(for configuration: DeckKeyConfiguration) -> some View {

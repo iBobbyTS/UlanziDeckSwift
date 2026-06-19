@@ -386,7 +386,7 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
     }
 
     private func drawBackground(for display: DeckKeyDisplay, in rect: NSRect) {
-        if let iconPNGData = display.fileButtonContent?.backgroundPNGData,
+        if let iconPNGData = display.folderButtonContent?.backgroundPNGData ?? display.fileButtonContent?.backgroundPNGData,
            let image = NSImage(data: iconPNGData) {
             drawFittedBackgroundImage(image, in: rect)
             if display.buttonBackgroundDimmingEnabled {

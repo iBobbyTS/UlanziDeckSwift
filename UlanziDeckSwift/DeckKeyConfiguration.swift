@@ -232,14 +232,16 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
     var path: String?
     var bookmarkData: Data?
     var name: String
+    var backgroundPNGData: Data?
 
-    init(path: String? = nil, bookmarkData: Data? = nil, name: String = "") {
+    init(path: String? = nil, bookmarkData: Data? = nil, name: String = "", backgroundPNGData: Data? = nil) {
         self.path = Self.normalizedPath(path)
         self.bookmarkData = bookmarkData
         self.name = Self.normalizedName(name)
+        self.backgroundPNGData = backgroundPNGData
     }
 
-    init(folderURL: URL, name: String = "") throws {
+    init(folderURL: URL, name: String = "", backgroundPNGData: Data? = nil) throws {
         self.path = Self.normalizedPath(folderURL.path)
         self.bookmarkData = try folderURL.bookmarkData(
             options: Self.securityScopedBookmarkCreationOptions,
@@ -247,6 +249,7 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
             relativeTo: nil
         )
         self.name = Self.normalizedName(name)
+        self.backgroundPNGData = backgroundPNGData
     }
 
     var displayName: String {
@@ -278,6 +281,7 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
         case path
         case bookmarkData
         case name
+        case backgroundPNGData
     }
 
     init(from decoder: Decoder) throws {
@@ -285,6 +289,7 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
         path = Self.normalizedPath(try container.decodeIfPresent(String.self, forKey: .path))
         bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
         name = Self.normalizedName(try container.decodeIfPresent(String.self, forKey: .name) ?? "")
+        backgroundPNGData = try container.decodeIfPresent(Data.self, forKey: .backgroundPNGData)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -292,6 +297,7 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
         try container.encodeIfPresent(path, forKey: .path)
         try container.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
         try container.encode(name, forKey: .name)
+        try container.encodeIfPresent(backgroundPNGData, forKey: .backgroundPNGData)
     }
 
     private static func normalizedPath(_ path: String?) -> String? {

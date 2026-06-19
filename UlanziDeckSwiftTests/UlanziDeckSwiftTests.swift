@@ -476,14 +476,19 @@ struct UlanziDeckSwiftTests {
     @Test func openFolderFunctionDisplaysSelectedFolderName() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
+        let backgroundPNGData = Self.solidColorIconPNGData(color: NSColor(calibratedRed: 1, green: 0, blue: 0, alpha: 1))
 
         state.assign(.openFolder, to: 5)
-        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents/Codex"), for: 5)
+        state.setFolderConfiguration(Self.folderConfiguration(
+            path: "/Users/ibobby/Documents/Codex",
+            backgroundPNGData: backgroundPNGData
+        ), for: 5)
         let display = state.display(for: layout.keys[4])
 
         #expect(display.title == "Codex")
         #expect(display.subtitle == "/Users/ibobby/Documents/Codex")
         #expect(display.folderButtonContent?.displayName == "Codex")
+        #expect(display.folderButtonContent?.backgroundPNGData == backgroundPNGData)
         #expect(state.folderPath(for: 5) == "/Users/ibobby/Documents/Codex")
 
         state.setFolderName(" 项目 ", for: 5)
@@ -562,7 +567,13 @@ struct UlanziDeckSwiftTests {
 
     @Test func openFolderConfigurationPersistsBookmarkData() throws {
         let bookmarkData = try #require("bookmark-data".data(using: .utf8))
-        let configuration = Self.folderConfiguration(path: "/Users/ibobby/Documents", bookmarkData: bookmarkData, name: "下载")
+        let backgroundPNGData = Self.solidColorIconPNGData(color: .systemGreen)
+        let configuration = Self.folderConfiguration(
+            path: "/Users/ibobby/Documents",
+            bookmarkData: bookmarkData,
+            name: "下载",
+            backgroundPNGData: backgroundPNGData
+        )
 
         let encoded = try JSONEncoder().encode(configuration)
         let restored = try JSONDecoder().decode(DeckKeyOpenFolderConfiguration.self, from: encoded)
@@ -570,6 +581,7 @@ struct UlanziDeckSwiftTests {
         #expect(restored.path == "/Users/ibobby/Documents")
         #expect(restored.bookmarkData == bookmarkData)
         #expect(restored.name == "下载")
+        #expect(restored.backgroundPNGData == backgroundPNGData)
         #expect(restored.displayName == "下载")
         #expect(!restored.needsReselection)
         #expect(restored.canOpen)
@@ -1469,6 +1481,7 @@ struct UlanziDeckSwiftTests {
     @Test func selectingOpenFolderFunctionSyncsAndPersistsFolderPath() async throws {
         let syncer = FakeH200DeckSyncer()
         let store = FakeDeckConfigurationStore()
+        let backgroundPNGData = Self.solidColorIconPNGData(color: .systemGreen)
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
             syncer: syncer,
@@ -1484,20 +1497,23 @@ struct UlanziDeckSwiftTests {
         model.assignSelectedFunction(.openFolder)
         model.setSelectedFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"))
         model.setSelectedFolderName("下载")
+        model.setFolderBackgroundPNGData(backgroundPNGData, for: 4)
 
         try await Self.waitUntil {
-            syncer.partialDisplays.count == 3
+            syncer.partialDisplays.count == 4
         }
         #expect(model.interactionState.configuration(for: 4)?.function == DeckKeyFunction.openFolder)
         #expect(model.interactionState.folderPath(for: 4) == "/Users/ibobby/Documents")
         #expect(syncer.sentDisplays.count == 1)
-        #expect(syncer.partialDisplays.count == 3)
+        #expect(syncer.partialDisplays.count == 4)
         #expect(syncer.partialDisplays.last?.map(\.id) == [4])
         #expect(syncer.partialDisplays.last?.first?.title == "下载")
         #expect(syncer.partialDisplays.last?.first?.subtitle == "/Users/ibobby/Documents")
         #expect(syncer.partialDisplays.last?.first?.folderButtonContent?.displayName == "下载")
+        #expect(syncer.partialDisplays.last?.first?.folderButtonContent?.backgroundPNGData == backgroundPNGData)
         #expect(store.savedStates.last?.folderPath(for: 4) == "/Users/ibobby/Documents")
         #expect(store.savedStates.last?.openFolderConfiguration(for: 4).name == "下载")
+        #expect(store.savedStates.last?.openFolderConfiguration(for: 4).backgroundPNGData == backgroundPNGData)
     }
 
     @MainActor
@@ -2023,11 +2039,13 @@ struct UlanziDeckSwiftTests {
         try await Self.waitUntil {
             syncer.sentDisplays.count == 1 && model.syncSummary != nil
         }
+        let backgroundPNGData = Self.solidColorIconPNGData(color: .systemBlue)
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.openFolder)
         model.setSelectedFolderConfiguration(Self.folderConfiguration(
             path: "/Users/ibobby/Documents",
-            bookmarkData: Data("old-bookmark".utf8)
+            bookmarkData: Data("old-bookmark".utf8),
+            backgroundPNGData: backgroundPNGData
         ))
         try await Self.waitUntil {
             syncer.partialDisplays.count >= 2
@@ -2044,6 +2062,8 @@ struct UlanziDeckSwiftTests {
 
         #expect(opener.openedPaths == ["/Users/ibobby/Documents"])
         #expect(model.interactionState.openFolderConfiguration(for: 4).bookmarkData == refreshedBookmarkData)
+        #expect(model.interactionState.openFolderConfiguration(for: 4).backgroundPNGData == backgroundPNGData)
+        #expect(store.savedStates.last?.openFolderConfiguration(for: 4).backgroundPNGData == backgroundPNGData)
         #expect(syncer.sentDisplays.count == sentDisplayCount)
         #expect(syncer.partialDisplays.count == partialDisplayCount)
         #expect(model.interactionState.selectedKeyID == 4)
@@ -2587,6 +2607,29 @@ struct UlanziDeckSwiftTests {
         #expect(display.subtitle == "/Users/ibobby/Documents")
         #expect(display.folderButtonContent?.displayName == "下载")
         #expect(color.redComponent + color.greenComponent + color.blueComponent > 0.12)
+        #expect(color.alphaComponent > 0.999)
+    }
+
+    @Test func iconRendererUsesCustomFolderBackgroundWhenPresent() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        let backgroundPNGData = Self.solidColorIconPNGData(color: .systemRed)
+        state.assign(.openFolder, to: 2)
+        state.setFolderConfiguration(Self.folderConfiguration(
+            path: "/Users/ibobby/Documents",
+            backgroundPNGData: backgroundPNGData
+        ), for: 2)
+        state.setFolderName("下载", for: 2)
+        let display = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: false)
+
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+        let color = try #require(image.colorAt(x: 2, y: 2)?.usingColorSpace(.deviceRGB))
+
+        #expect(display.folderButtonContent?.backgroundPNGData == backgroundPNGData)
+        #expect(color.redComponent > 0.9)
+        #expect(color.redComponent > color.greenComponent * 2)
+        #expect(color.redComponent > color.blueComponent * 2)
         #expect(color.alphaComponent > 0.999)
     }
 
@@ -3451,9 +3494,15 @@ struct UlanziDeckSwiftTests {
     private static func folderConfiguration(
         path: String,
         bookmarkData: Data? = Data("bookmark".utf8),
-        name: String = ""
+        name: String = "",
+        backgroundPNGData: Data? = nil
     ) -> DeckKeyOpenFolderConfiguration {
-        DeckKeyOpenFolderConfiguration(path: path, bookmarkData: bookmarkData, name: name)
+        DeckKeyOpenFolderConfiguration(
+            path: path,
+            bookmarkData: bookmarkData,
+            name: name,
+            backgroundPNGData: backgroundPNGData
+        )
     }
 
     private static func fileConfiguration(

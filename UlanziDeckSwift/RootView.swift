@@ -66,6 +66,9 @@ struct RootView: View {
             onFolderNameChange: { keyID, name in
                 connectionModel.setFolderName(name, for: keyID)
             },
+            onFolderBackgroundChange: { keyID, backgroundPNGData in
+                connectionModel.setFolderBackgroundPNGData(backgroundPNGData, for: keyID)
+            },
             onFilePathSelection: { configuration in
                 connectionModel.setSelectedFileConfiguration(configuration)
             },

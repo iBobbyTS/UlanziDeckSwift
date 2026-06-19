@@ -38,6 +38,7 @@ struct ContentView: View {
     let onFolderPathSelection: (DeckKeyOpenFolderConfiguration) -> Void
     let onFolderNamePreview: (Int, String) -> Void
     let onFolderNameChange: (Int, String) -> Void
+    let onFolderBackgroundChange: (Int, Data?) -> Void
     let onFilePathSelection: (DeckKeyOpenFileConfiguration) -> Void
     let onFileNamePreview: (Int, String) -> Void
     let onFileNameChange: (Int, String) -> Void
@@ -778,6 +779,7 @@ struct MihoyoQRCodeView: View {
         onFolderPathSelection: { _ in },
         onFolderNamePreview: { _, _ in },
         onFolderNameChange: { _, _ in },
+        onFolderBackgroundChange: { _, _ in },
         onFilePathSelection: { _ in },
         onFileNamePreview: { _, _ in },
         onFileNameChange: { _, _ in },
