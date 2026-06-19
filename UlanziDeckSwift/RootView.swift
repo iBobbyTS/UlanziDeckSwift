@@ -57,6 +57,9 @@ struct RootView: View {
             onSMBServerAddressChange: { address in
                 connectionModel.setSelectedSMBServerAddress(address)
             },
+            onSMBServerNameChange: { name in
+                connectionModel.setSelectedSMBServerName(name)
+            },
             onBrightnessPercentPreview: { percent in
                 connectionModel.previewBrightnessPercent(percent)
             },

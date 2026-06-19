@@ -63,6 +63,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let mihoyoGame: MihoyoGame?
     let mihoyoGameButtonContent: MihoyoGameButtonContent?
     let sub2APIButtonContent: Sub2APIButtonContent?
+    let smbServerButtonContent: SMBServerButtonContent?
     let isSelected: Bool
     let isPressed: Bool
 
@@ -75,6 +76,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         let configuredMihoyoGame = configuration.function.game
         var mihoyoGameButtonContent: MihoyoGameButtonContent?
         var sub2APIButtonContent: Sub2APIButtonContent?
+        var smbServerButtonContent: SMBServerButtonContent?
 
         if key.columnSpan > 1 && configuration.displayMode != .function {
             title = configuration.displayMode.previewTitle
@@ -93,8 +95,10 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 title = "打开"
                 subtitle = configuration.openFolder.displayName
             case .connectSMBServer:
-                title = "连接"
-                subtitle = configuration.smbServer.displayName
+                let content = SMBServerButtonContent(displayName: configuration.smbServer.displayName)
+                title = content.displayName
+                subtitle = configuration.smbServer.address
+                smbServerButtonContent = content
             case .brightness:
                 title = ""
                 subtitle = ""
@@ -149,6 +153,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         }
         self.mihoyoGameButtonContent = mihoyoGameButtonContent
         self.sub2APIButtonContent = sub2APIButtonContent
+        self.smbServerButtonContent = smbServerButtonContent
         self.isSelected = isSelected
         self.isPressed = isPressed
     }
@@ -173,6 +178,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             mihoyoGame: mihoyoGame,
             mihoyoGameButtonContent: mihoyoGameButtonContent,
             sub2APIButtonContent: sub2APIButtonContent,
+            smbServerButtonContent: smbServerButtonContent,
             devicePixelSize: devicePixelSize
         )
     }
@@ -189,7 +195,14 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let mihoyoGame: MihoyoGame?
     let mihoyoGameButtonContent: MihoyoGameButtonContent?
     let sub2APIButtonContent: Sub2APIButtonContent?
+    let smbServerButtonContent: SMBServerButtonContent?
     let devicePixelSize: H200DeviceTarget.PixelSize
+}
+
+nonisolated struct SMBServerButtonContent: Equatable {
+    static let backgroundAssetName = "SMBServerBackground"
+
+    let displayName: String
 }
 
 nonisolated struct DeckPreviewGridMetrics: Equatable {
@@ -440,13 +453,23 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
 
 nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
     var address: String
+    var name: String
 
-    init(address: String = "") {
+    init(address: String = "", name: String = "") {
         self.address = Self.normalizedAddress(address)
+        self.name = Self.normalizedName(name)
     }
 
     var displayName: String {
-        address.isEmpty ? "填写地址" : address
+        if !name.isEmpty {
+            return name
+        }
+
+        if !address.isEmpty {
+            return address
+        }
+
+        return "填写名字"
     }
 
     var fullURLString: String? {
@@ -455,6 +478,23 @@ nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
         }
 
         return "smb://\(address)"
+    }
+
+    enum CodingKeys: CodingKey {
+        case address
+        case name
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        address = Self.normalizedAddress(try container.decodeIfPresent(String.self, forKey: .address) ?? "")
+        name = Self.normalizedName(try container.decodeIfPresent(String.self, forKey: .name) ?? "")
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(address, forKey: .address)
+        try container.encode(name, forKey: .name)
     }
 
     static func normalizedAddress(_ rawValue: String) -> String {
@@ -470,6 +510,10 @@ nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
         }
 
         return address
+    }
+
+    static func normalizedName(_ rawValue: String) -> String {
+        rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -899,6 +943,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations[keyID, default: .tallyDefault].smbServer.address
     }
 
+    func smbServerName(for keyID: Int) -> String {
+        configurations[keyID, default: .tallyDefault].smbServer.name
+    }
+
     func sub2APIConfiguration(for keyID: Int) -> DeckKeySub2APIConfiguration {
         configurations[keyID, default: .tallyDefault].sub2API
     }
@@ -1104,6 +1152,19 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].smbServer.address = DeckKeySMBServerConfiguration.normalizedAddress(address)
+        return true
+    }
+
+    @discardableResult
+    mutating func setSMBServerName(_ name: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .connectSMBServer
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].smbServer.name = DeckKeySMBServerConfiguration.normalizedName(name)
         return true
     }
 

@@ -176,6 +176,7 @@ struct UlanziDeckSwiftTests {
         state.setFolderPath("/Users/ibobby/Documents", for: 1)
         state.assign(.connectSMBServer, to: 2)
         state.setSMBServerAddress("nas.local/media", for: 2)
+        state.setSMBServerName("NAS", for: 2)
         state.select(keyID: 1)
 
         let didSwap = state.swapSquareConfigurations(sourceKeyID: 1, targetKeyID: 2)
@@ -187,6 +188,7 @@ struct UlanziDeckSwiftTests {
         #expect(state.selectedKeyID == 2)
         #expect(state.configuration(for: 1)?.function == .connectSMBServer)
         #expect(state.configuration(for: 1)?.smbServer.address == "nas.local/media")
+        #expect(state.configuration(for: 1)?.smbServer.name == "NAS")
         #expect(state.configuration(for: 2)?.function == .openFolder)
         #expect(state.configuration(for: 2)?.openFolder.path == "/Users/ibobby/Documents")
         #expect(!didRejectWideKey)
@@ -375,17 +377,20 @@ struct UlanziDeckSwiftTests {
         #expect(state.folderPath(for: 5) == "/Users/ibobby/Documents/Codex")
     }
 
-    @Test func connectSMBServerFunctionDisplaysNormalizedAddress() {
+    @Test func connectSMBServerFunctionDisplaysNameAndPersistsNormalizedAddress() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
 
         state.assign(.connectSMBServer, to: 5)
         state.setSMBServerAddress("smb://server.local/share", for: 5)
+        state.setSMBServerName("素材库", for: 5)
         let display = state.display(for: layout.keys[4])
 
-        #expect(display.title == "连接")
+        #expect(display.title == "素材库")
         #expect(display.subtitle == "server.local/share")
+        #expect(display.smbServerButtonContent?.displayName == "素材库")
         #expect(state.smbServerAddress(for: 5) == "server.local/share")
+        #expect(state.smbServerName(for: 5) == "素材库")
         #expect(state.configuration(for: 5)?.smbServer.fullURLString == "smb://server.local/share")
     }
 
@@ -427,6 +432,7 @@ struct UlanziDeckSwiftTests {
         state.setFolderPath("/Users/ibobby/Documents", for: 9)
         state.assign(.connectSMBServer, to: 10)
         state.setSMBServerAddress("smb://nas.local/media", for: 10)
+        state.setSMBServerName("NAS", for: 10)
 
         store.saveInteractionState(state, for: layout)
         store.saveBrightnessPercent(140)
@@ -439,6 +445,7 @@ struct UlanziDeckSwiftTests {
         #expect(restored.folderPath(for: 9) == "/Users/ibobby/Documents")
         #expect(restored.configuration(for: 10)?.function == DeckKeyFunction.connectSMBServer)
         #expect(restored.smbServerAddress(for: 10) == "nas.local/media")
+        #expect(restored.smbServerName(for: 10) == "NAS")
         #expect(store.loadBrightnessPercent() == 100)
         #expect(restored.pressedKeyIDs.isEmpty)
         #expect(restored.selectedKeyID == 1)
@@ -917,6 +924,7 @@ struct UlanziDeckSwiftTests {
         loadedState.setFolderPath("/Users/ibobby/Documents", for: 1)
         loadedState.assign(.connectSMBServer, to: 2)
         loadedState.setSMBServerAddress("nas.local/media", for: 2)
+        loadedState.setSMBServerName("NAS", for: 2)
         loadedState.select(keyID: 1)
         let store = FakeDeckConfigurationStore(loadedState: loadedState)
         let syncer = FakeH200DeckSyncer()
@@ -938,8 +946,9 @@ struct UlanziDeckSwiftTests {
         }
         let displays = try #require(syncer.partialDisplays.last)
         #expect(displays.map(\.id) == [1, 2])
-        #expect(displays[0].title == "连接")
+        #expect(displays[0].title == "NAS")
         #expect(displays[0].subtitle == "nas.local/media")
+        #expect(displays[0].smbServerButtonContent?.displayName == "NAS")
         #expect(displays[1].title == "打开")
         #expect(displays[1].subtitle == "Documents")
         #expect(model.interactionState.selectedKeyID == 2)
@@ -1153,7 +1162,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func selectingConnectSMBServerFunctionSyncsAndPersistsAddress() async throws {
+    @Test func selectingConnectSMBServerFunctionSyncsAndPersistsNameAndAddress() async throws {
         let syncer = FakeH200DeckSyncer()
         let store = FakeDeckConfigurationStore()
         let model = H200ConnectionModel(
@@ -1170,18 +1179,22 @@ struct UlanziDeckSwiftTests {
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.connectSMBServer)
         model.setSelectedSMBServerAddress("smb://nas.local/media")
+        model.setSelectedSMBServerName("NAS")
 
         try await Self.waitUntil {
-            syncer.partialDisplays.count == 2
+            syncer.partialDisplays.count == 3
         }
         #expect(model.interactionState.configuration(for: 4)?.function == DeckKeyFunction.connectSMBServer)
         #expect(model.interactionState.smbServerAddress(for: 4) == "nas.local/media")
+        #expect(model.interactionState.smbServerName(for: 4) == "NAS")
         #expect(syncer.sentDisplays.count == 1)
-        #expect(syncer.partialDisplays.count == 2)
+        #expect(syncer.partialDisplays.count == 3)
         #expect(syncer.partialDisplays.last?.map(\.id) == [4])
-        #expect(syncer.partialDisplays.last?.first?.title == "连接")
+        #expect(syncer.partialDisplays.last?.first?.title == "NAS")
         #expect(syncer.partialDisplays.last?.first?.subtitle == "nas.local/media")
+        #expect(syncer.partialDisplays.last?.first?.smbServerButtonContent?.displayName == "NAS")
         #expect(store.savedStates.last?.smbServerAddress(for: 4) == "nas.local/media")
+        #expect(store.savedStates.last?.smbServerName(for: 4) == "NAS")
     }
 
     @MainActor
@@ -1473,6 +1486,7 @@ struct UlanziDeckSwiftTests {
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.connectSMBServer)
         model.setSelectedSMBServerAddress("nas.local/media")
+        model.setSelectedSMBServerName("NAS")
         let sentDisplayCount = syncer.sentDisplays.count
         syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -1729,13 +1743,11 @@ struct UlanziDeckSwiftTests {
         try Self.expectBlackButtonBackground(for: display)
     }
 
-    @Test func iconRendererUsesBlackBackgroundForEveryNonGameFunction() throws {
+    @Test func iconRendererUsesBlackBackgroundForPlainFunctions() throws {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
         state.assign(.openFolder, to: 1)
         state.setFolderPath("/Users/ibobby/Documents", for: 1)
-        state.assign(.connectSMBServer, to: 2)
-        state.setSMBServerAddress("server/share", for: 2)
         state.assign(.sub2API, to: 3)
         state.setSub2APITargetGroupID(1215, for: 3)
         state.setSub2APILastResult(.success(item: Sub2APICapacityItem(
@@ -1751,9 +1763,28 @@ struct UlanziDeckSwiftTests {
         )), for: 3)
         state.setTallyDefaultValue(7, for: 4)
 
-        for key in layout.keys.prefix(4) {
+        for key in [layout.keys[0], layout.keys[2], layout.keys[3]] {
             try Self.expectBlackButtonBackground(for: state.display(for: key))
         }
+    }
+
+    @Test func iconRendererUsesSMBBackgroundAndCenteredName() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.connectSMBServer, to: 2)
+        state.setSMBServerAddress("server/share", for: 2)
+        state.setSMBServerName("NAS", for: 2)
+        let display = state.display(for: layout.keys[1])
+
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+        let color = try #require(image.colorAt(x: 50, y: 50)?.usingColorSpace(.deviceRGB))
+
+        #expect(display.title == "NAS")
+        #expect(display.subtitle == "server/share")
+        #expect(display.smbServerButtonContent?.displayName == "NAS")
+        #expect(color.redComponent + color.greenComponent + color.blueComponent > 0.12)
+        #expect(color.alphaComponent > 0.999)
     }
 
     @Test func iconRendererUsesMihoyoBlurredBackgrounds() throws {

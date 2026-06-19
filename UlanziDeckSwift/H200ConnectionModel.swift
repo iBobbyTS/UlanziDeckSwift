@@ -306,6 +306,17 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    func setSelectedSMBServerName(_ name: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        if interactionState.setSMBServerName(name, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: selectedKeyID)
+        }
+    }
+
     func setSelectedSub2APIBaseURL(_ baseURL: String) {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return

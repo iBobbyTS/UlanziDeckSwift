@@ -329,6 +329,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             drawSub2APIContent(content, in: cardRect, buttonRect: rect)
             return
         }
+        if let content = display.smbServerButtonContent {
+            drawSMBServerContent(content, in: cardRect, buttonRect: rect)
+            return
+        }
 
         drawCenteredAutoSizedSingleLineText(
             display.title,
@@ -349,8 +353,17 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
     }
 
     private func drawBackground(for display: DeckKeyDisplay, in rect: NSRect) {
-        guard let game = display.mihoyoGame,
-              let image = NSImage(named: NSImage.Name(game.buttonBackgroundAssetName))
+        let backgroundAssetName: String?
+        if let game = display.mihoyoGame {
+            backgroundAssetName = game.buttonBackgroundAssetName
+        } else if display.smbServerButtonContent != nil {
+            backgroundAssetName = SMBServerButtonContent.backgroundAssetName
+        } else {
+            backgroundAssetName = nil
+        }
+
+        guard let backgroundAssetName,
+              let image = NSImage(named: NSImage.Name(backgroundAssetName))
         else {
             Self.buttonBackgroundColor.setFill()
             rect.fill()
@@ -368,6 +381,22 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         )
         NSColor(calibratedWhite: 0, alpha: 0.38).setFill()
         rect.fill()
+    }
+
+    private func drawSMBServerContent(
+        _ content: SMBServerButtonContent,
+        in rect: NSRect,
+        buttonRect: NSRect
+    ) {
+        drawCenteredAutoSizedSingleLineText(
+            content.displayName,
+            weight: .heavy,
+            maxFontSize: buttonRect.height * 0.32,
+            minFontSize: buttonRect.height * 0.12,
+            color: .white,
+            rect: NSRect(x: rect.minX, y: rect.midY - buttonRect.height * 0.18, width: rect.width, height: buttonRect.height * 0.36),
+            shadow: textShadow()
+        )
     }
 
     private func drawSub2APIContent(

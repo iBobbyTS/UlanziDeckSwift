@@ -18,6 +18,7 @@ struct ContentView: View {
     let onTallyDefaultValueChange: (Int) -> Void
     let onFolderPathSelection: (String) -> Void
     let onSMBServerAddressChange: (String) -> Void
+    let onSMBServerNameChange: (String) -> Void
     let onBrightnessPercentPreview: (Int) -> Void
     let onBrightnessPercentCommit: (Int) -> Void
     let onSub2APIBaseURLChange: (String) -> Void
@@ -434,28 +435,40 @@ struct ContentView: View {
                 }
                 .frame(width: 150, alignment: .leading)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("服务器地址")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 0) {
-                        Text("smb://")
-                            .font(.callout.monospaced())
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("显示名称")
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, 9)
-                            .frame(height: 24)
-                            .background(Color(nsColor: .controlBackgroundColor))
 
-                        TextField("server.local/share", text: selectedSMBServerAddressBinding)
+                        TextField("NAS", text: selectedSMBServerNameBinding)
                             .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 260, alignment: .leading)
                     }
-                    .frame(maxWidth: 360, alignment: .leading)
 
-                    Text("只填写服务器和共享名，例如 server.local/share。连接时会使用系统认证窗口。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("服务器地址")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 0) {
+                            Text("smb://")
+                                .font(.callout.monospaced())
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 9)
+                                .frame(height: 24)
+                                .background(Color(nsColor: .controlBackgroundColor))
+
+                            TextField("server.local/share", text: selectedSMBServerAddressBinding)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        .frame(maxWidth: 360, alignment: .leading)
+
+                        Text("名称会显示在按钮画面中心；地址只填写服务器和共享名，例如 server.local/share。连接时会使用系统认证窗口。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 Spacer()
@@ -622,6 +635,17 @@ private extension ContentView {
             },
             set: { address in
                 onSMBServerAddressChange(address)
+            }
+        )
+    }
+
+    var selectedSMBServerNameBinding: Binding<String> {
+        Binding(
+            get: {
+                selectedConfiguration?.smbServer.name ?? ""
+            },
+            set: { name in
+                onSMBServerNameChange(name)
             }
         )
     }
@@ -1338,6 +1362,7 @@ private struct MihoyoQRCodeView: View {
         onTallyDefaultValueChange: { _ in },
         onFolderPathSelection: { _ in },
         onSMBServerAddressChange: { _ in },
+        onSMBServerNameChange: { _ in },
         onBrightnessPercentPreview: { _ in },
         onBrightnessPercentCommit: { _ in },
         onSub2APIBaseURLChange: { _ in },
