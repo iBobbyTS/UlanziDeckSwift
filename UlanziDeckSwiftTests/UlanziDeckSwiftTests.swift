@@ -411,6 +411,26 @@ struct UlanziDeckSwiftTests {
         #expect(namedDisplay.folderButtonContent?.displayName == "项目")
     }
 
+    @Test func openFileFunctionDisplaysSelectedFileName() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.assign(.openFile, to: 5)
+        state.setFileConfiguration(Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf"), for: 5)
+        let display = state.display(for: layout.keys[4])
+
+        #expect(display.title == "report.pdf")
+        #expect(display.subtitle == "/Users/ibobby/Documents/report.pdf")
+        #expect(display.fileButtonContent?.displayName == "report.pdf")
+        #expect(state.filePath(for: 5) == "/Users/ibobby/Documents/report.pdf")
+
+        state.setFileName(" 报告 ", for: 5)
+        let namedDisplay = state.display(for: layout.keys[4])
+
+        #expect(namedDisplay.title == "报告")
+        #expect(namedDisplay.fileButtonContent?.displayName == "报告")
+    }
+
     @Test func legacyOpenFolderConfigurationRequiresReselection() throws {
         let data = try #require(#"{"path":"/Users/ibobby/Documents"}"#.data(using: .utf8))
         let configuration = try JSONDecoder().decode(DeckKeyOpenFolderConfiguration.self, from: data)
@@ -423,10 +443,25 @@ struct UlanziDeckSwiftTests {
         #expect(configuration.displayName == "Documents")
     }
 
+    @Test func legacyOpenFileConfigurationRequiresReselection() throws {
+        let data = try #require(#"{"path":"/Users/ibobby/Documents/report.pdf"}"#.data(using: .utf8))
+        let configuration = try JSONDecoder().decode(DeckKeyOpenFileConfiguration.self, from: data)
+
+        #expect(configuration.path == "/Users/ibobby/Documents/report.pdf")
+        #expect(configuration.bookmarkData == nil)
+        #expect(configuration.name.isEmpty)
+        #expect(configuration.needsReselection)
+        #expect(!configuration.canOpen)
+        #expect(configuration.displayName == "report.pdf")
+    }
+
     @Test func openFolderBookmarksUseReadOnlySecurityScope() {
         #expect(DeckKeyOpenFolderConfiguration.securityScopedBookmarkCreationOptions.contains(.withSecurityScope))
         #expect(DeckKeyOpenFolderConfiguration.securityScopedBookmarkCreationOptions.contains(.securityScopeAllowOnlyReadAccess))
         #expect(DeckKeyOpenFolderConfiguration.securityScopedBookmarkResolutionOptions.contains(.withSecurityScope))
+        #expect(DeckKeyOpenFileConfiguration.securityScopedBookmarkCreationOptions.contains(.withSecurityScope))
+        #expect(DeckKeyOpenFileConfiguration.securityScopedBookmarkCreationOptions.contains(.securityScopeAllowOnlyReadAccess))
+        #expect(DeckKeyOpenFileConfiguration.securityScopedBookmarkResolutionOptions.contains(.withSecurityScope))
     }
 
     @Test func openFolderConfigurationPersistsBookmarkData() throws {
@@ -440,6 +475,21 @@ struct UlanziDeckSwiftTests {
         #expect(restored.bookmarkData == bookmarkData)
         #expect(restored.name == "下载")
         #expect(restored.displayName == "下载")
+        #expect(!restored.needsReselection)
+        #expect(restored.canOpen)
+    }
+
+    @Test func openFileConfigurationPersistsBookmarkData() throws {
+        let bookmarkData = try #require("bookmark-data".data(using: .utf8))
+        let configuration = Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf", bookmarkData: bookmarkData, name: "报告")
+
+        let encoded = try JSONEncoder().encode(configuration)
+        let restored = try JSONDecoder().decode(DeckKeyOpenFileConfiguration.self, from: encoded)
+
+        #expect(restored.path == "/Users/ibobby/Documents/report.pdf")
+        #expect(restored.bookmarkData == bookmarkData)
+        #expect(restored.name == "报告")
+        #expect(restored.displayName == "报告")
         #expect(!restored.needsReselection)
         #expect(restored.canOpen)
     }
@@ -469,14 +519,18 @@ struct UlanziDeckSwiftTests {
         state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"), for: 4)
         state.assign(.connectSMBServer, to: 5)
         state.setSMBServerAddress("nas.local/media", for: 5)
+        state.assign(.openFile, to: 6)
+        state.setFileConfiguration(Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf"), for: 6)
         state.select(keyID: 2)
 
         state.setFolderName(" 资料 ", for: 4, selectsKey: false)
         state.setSMBServerName(" NAS ", for: 5, selectsKey: false)
+        state.setFileName(" 报告 ", for: 6, selectsKey: false)
 
         #expect(state.selectedKeyID == 2)
         #expect(state.openFolderConfiguration(for: 4).name == "资料")
         #expect(state.smbServerName(for: 5) == "NAS")
+        #expect(state.openFileConfiguration(for: 6).name == "报告")
     }
 
     @Test func legacyBrightnessKeyFunctionIsNormalizedToNoFunction() {
@@ -519,6 +573,9 @@ struct UlanziDeckSwiftTests {
         state.assign(.connectSMBServer, to: 10)
         state.setSMBServerAddress("smb://nas.local/media", for: 10)
         state.setSMBServerName("NAS", for: 10)
+        state.assign(.openFile, to: 11)
+        state.setFileConfiguration(Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf"), for: 11)
+        state.setFileName("报告", for: 11)
 
         store.saveInteractionState(state, for: layout)
         store.saveBrightnessPercent(140)
@@ -534,6 +591,10 @@ struct UlanziDeckSwiftTests {
         #expect(restored.configuration(for: 10)?.function == DeckKeyFunction.connectSMBServer)
         #expect(restored.smbServerAddress(for: 10) == "nas.local/media")
         #expect(restored.smbServerName(for: 10) == "NAS")
+        #expect(restored.configuration(for: 11)?.function == DeckKeyFunction.openFile)
+        #expect(restored.filePath(for: 11) == "/Users/ibobby/Documents/report.pdf")
+        #expect(restored.openFileConfiguration(for: 11).bookmarkData == Data("bookmark".utf8))
+        #expect(restored.openFileConfiguration(for: 11).name == "报告")
         #expect(store.loadBrightnessPercent() == 100)
         #expect(store.loadButtonBackgroundDimmingEnabled() == false)
         #expect(restored.pressedKeyIDs.isEmpty)
@@ -1255,6 +1316,41 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func selectingOpenFileFunctionSyncsAndPersistsFilePath() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            fileOpener: FakeFinderFileOpener()
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openFile)
+        model.setSelectedFileConfiguration(Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf"))
+        model.setSelectedFileName("报告")
+
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 3
+        }
+        #expect(model.interactionState.configuration(for: 4)?.function == DeckKeyFunction.openFile)
+        #expect(model.interactionState.filePath(for: 4) == "/Users/ibobby/Documents/report.pdf")
+        #expect(syncer.sentDisplays.count == 1)
+        #expect(syncer.partialDisplays.count == 3)
+        #expect(syncer.partialDisplays.last?.map(\.id) == [4])
+        #expect(syncer.partialDisplays.last?.first?.title == "报告")
+        #expect(syncer.partialDisplays.last?.first?.subtitle == "/Users/ibobby/Documents/report.pdf")
+        #expect(syncer.partialDisplays.last?.first?.fileButtonContent?.displayName == "报告")
+        #expect(store.savedStates.last?.filePath(for: 4) == "/Users/ibobby/Documents/report.pdf")
+        #expect(store.savedStates.last?.openFileConfiguration(for: 4).name == "报告")
+    }
+
+    @MainActor
     @Test func selectingConnectSMBServerFunctionSyncsAndPersistsNameAndAddress() async throws {
         let syncer = FakeH200DeckSyncer()
         let store = FakeDeckConfigurationStore()
@@ -1299,6 +1395,7 @@ struct UlanziDeckSwiftTests {
             syncer: syncer,
             configurationStore: store,
             folderOpener: FakeFinderFolderOpener(),
+            fileOpener: FakeFinderFileOpener(),
             smbServerConnector: FakeSMBServerConnector()
         )
 
@@ -1324,11 +1421,29 @@ struct UlanziDeckSwiftTests {
         #expect(model.interactionState.openFolderConfiguration(for: 4).name == "资料")
         #expect(syncer.partialDisplays.last?.first?.title == "资料")
 
+        model.selectKey(keyID: 6)
+        model.assignSelectedFunction(.openFile)
+        model.setSelectedFileConfiguration(Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf"))
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == folderPartialDisplayCount + 3
+        }
+
+        let fileSavedStateCount = store.savedStates.count
+        let filePartialDisplayCount = syncer.partialDisplays.count
+        model.previewFileName(" 报告 ", for: 6)
+
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == filePartialDisplayCount + 1
+        }
+        #expect(store.savedStates.count == fileSavedStateCount)
+        #expect(model.interactionState.openFileConfiguration(for: 6).name == "报告")
+        #expect(syncer.partialDisplays.last?.first?.title == "报告")
+
         model.selectKey(keyID: 5)
         model.assignSelectedFunction(.connectSMBServer)
         model.setSelectedSMBServerAddress("nas.local/media")
         try await Self.waitUntil {
-            syncer.partialDisplays.count == folderPartialDisplayCount + 3
+            syncer.partialDisplays.count == filePartialDisplayCount + 3
         }
 
         let smbSavedStateCount = store.savedStates.count
@@ -1721,6 +1836,137 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func physicalButtonShortPressOpensConfiguredFileWithoutSyncingDisplay() async throws {
+        let opener = FakeFinderFileOpener()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            fileOpener: opener
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openFile)
+        model.setSelectedFileConfiguration(Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf"))
+        let sentDisplayCount = syncer.sentDisplays.count
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(opener.openedPaths == ["/Users/ibobby/Documents/report.pdf"])
+        #expect(syncer.sentDisplays.count == sentDisplayCount)
+        #expect(model.interactionState.selectedKeyID == 4)
+    }
+
+    @MainActor
+    @Test func physicalButtonOpenFilePersistsRefreshedBookmarkWithoutSyncingDisplay() async throws {
+        let opener = FakeFinderFileOpener()
+        let refreshedBookmarkData = try #require("refreshed-bookmark".data(using: .utf8))
+        opener.result = .opened(refreshedConfiguration: Self.fileConfiguration(
+            path: "/Users/ibobby/Documents/report.pdf",
+            bookmarkData: refreshedBookmarkData
+        ))
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            fileOpener: opener
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openFile)
+        model.setSelectedFileConfiguration(Self.fileConfiguration(
+            path: "/Users/ibobby/Documents/report.pdf",
+            bookmarkData: Data("old-bookmark".utf8)
+        ))
+        try await Self.waitUntil {
+            syncer.partialDisplays.count >= 2
+        }
+        let sentDisplayCount = syncer.sentDisplays.count
+        let partialDisplayCount = syncer.partialDisplays.count
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+
+        try await Self.waitUntil {
+            store.savedStates.last?.openFileConfiguration(for: 4).bookmarkData == refreshedBookmarkData
+        }
+
+        #expect(opener.openedPaths == ["/Users/ibobby/Documents/report.pdf"])
+        #expect(model.interactionState.openFileConfiguration(for: 4).bookmarkData == refreshedBookmarkData)
+        #expect(syncer.sentDisplays.count == sentDisplayCount)
+        #expect(syncer.partialDisplays.count == partialDisplayCount)
+        #expect(model.interactionState.selectedKeyID == 4)
+    }
+
+    @MainActor
+    @Test func physicalButtonOpenFileWithoutFileDoesNothing() async throws {
+        let opener = FakeFinderFileOpener()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            fileOpener: opener
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openFile)
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(opener.openedPaths.isEmpty)
+    }
+
+    @MainActor
+    @Test func physicalButtonOpenFileWithLegacyPathOnlyConfigurationDoesNothing() async throws {
+        let opener = FakeFinderFileOpener()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            fileOpener: opener
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openFile)
+        model.setSelectedFileConfiguration(Self.fileConfiguration(
+            path: "/Users/ibobby/Documents/report.pdf",
+            bookmarkData: nil
+        ))
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(opener.openedPaths.isEmpty)
+        #expect(opener.openedConfigurations.isEmpty)
+    }
+
+    @MainActor
     @Test func physicalButtonShortPressConnectsConfiguredSMBServerWithoutSyncingDisplay() async throws {
         let connector = FakeSMBServerConnector()
         let syncer = FakeH200DeckSyncer()
@@ -2035,6 +2281,20 @@ struct UlanziDeckSwiftTests {
         #expect(display.folderButtonContent?.displayName == "下载")
         #expect(color.redComponent + color.greenComponent + color.blueComponent > 0.12)
         #expect(color.alphaComponent > 0.999)
+    }
+
+    @Test func iconRendererUsesFileNameContentOnBlackBackground() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.openFile, to: 2)
+        state.setFileConfiguration(Self.fileConfiguration(path: "/Users/ibobby/Documents/report.pdf"), for: 2)
+        state.setFileName("报告", for: 2)
+        let display = state.display(for: layout.keys[1])
+
+        #expect(display.title == "报告")
+        #expect(display.subtitle == "/Users/ibobby/Documents/report.pdf")
+        #expect(display.fileButtonContent?.displayName == "报告")
+        try Self.expectBlackButtonBackground(for: display)
     }
 
     @Test func iconRendererCanDisableButtonBackgroundDimming() throws {
@@ -2770,6 +3030,14 @@ struct UlanziDeckSwiftTests {
         DeckKeyOpenFolderConfiguration(path: path, bookmarkData: bookmarkData, name: name)
     }
 
+    private static func fileConfiguration(
+        path: String,
+        bookmarkData: Data? = Data("bookmark".utf8),
+        name: String = ""
+    ) -> DeckKeyOpenFileConfiguration {
+        DeckKeyOpenFileConfiguration(path: path, bookmarkData: bookmarkData, name: name)
+    }
+
     private static func sub2APICapacityItem(
         groupID: Int,
         groupName: String,
@@ -3304,6 +3572,21 @@ private final class FakeFinderFolderOpener: FinderFolderOpening {
     var result: FinderFolderOpenResult = .opened(refreshedConfiguration: nil)
 
     func openFolder(_ configuration: DeckKeyOpenFolderConfiguration) -> FinderFolderOpenResult {
+        openedConfigurations.append(configuration)
+        if let path = configuration.path {
+            openedPaths.append(path)
+        }
+        return result
+    }
+}
+
+@MainActor
+private final class FakeFinderFileOpener: FinderFileOpening {
+    private(set) var openedPaths: [String] = []
+    private(set) var openedConfigurations: [DeckKeyOpenFileConfiguration] = []
+    var result: FinderFileOpenResult = .opened(refreshedConfiguration: nil)
+
+    func openFile(_ configuration: DeckKeyOpenFileConfiguration) -> FinderFileOpenResult {
         openedConfigurations.append(configuration)
         if let path = configuration.path {
             openedPaths.append(path)

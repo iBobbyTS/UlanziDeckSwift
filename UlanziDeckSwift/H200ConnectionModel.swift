@@ -17,6 +17,7 @@ final class H200ConnectionModel: ObservableObject {
     private let syncer: H200DeckSyncing
     private let configurationStore: DeckConfigurationStoring
     private let folderOpener: FinderFolderOpening
+    private let fileOpener: FinderFileOpening
     private let smbServerConnector: SMBServerConnecting
     private let sub2APIFetcher: Sub2APIFetching
     private let mihoyoGameService: MihoyoGameServicing
@@ -55,6 +56,7 @@ final class H200ConnectionModel: ObservableObject {
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         folderOpener: FinderFolderOpening? = nil,
+        fileOpener: FinderFileOpening? = nil,
         smbServerConnector: SMBServerConnecting? = nil,
         sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher(),
         mihoyoGameService: MihoyoGameServicing = MihoyoGameClient(),
@@ -69,6 +71,7 @@ final class H200ConnectionModel: ObservableObject {
         self.syncer = syncer
         self.configurationStore = configurationStore
         self.folderOpener = folderOpener ?? FinderFolderOpener()
+        self.fileOpener = fileOpener ?? FinderFileOpener()
         self.smbServerConnector = smbServerConnector ?? SMBServerConnector()
         self.sub2APIFetcher = sub2APIFetcher
         self.mihoyoGameService = mihoyoGameService
@@ -235,6 +238,8 @@ final class H200ConnectionModel: ObservableObject {
             }
         case .openFolder:
             openFolder(for: keyID)
+        case .openFile:
+            openFile(for: keyID)
         case .connectSMBServer:
             connectSMBServer(for: keyID)
         case .refreshSub2API:
@@ -320,6 +325,38 @@ final class H200ConnectionModel: ObservableObject {
 
     func setFolderName(_ name: String, for keyID: Int) {
         if interactionState.setFolderName(name, for: keyID, selectsKey: false) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: keyID)
+        }
+    }
+
+    func setSelectedFileConfiguration(_ configuration: DeckKeyOpenFileConfiguration) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        if interactionState.setFileConfiguration(configuration, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: selectedKeyID)
+        }
+    }
+
+    func setSelectedFileName(_ name: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        setFileName(name, for: selectedKeyID)
+    }
+
+    func previewFileName(_ name: String, for keyID: Int) {
+        if interactionState.setFileName(name, for: keyID, selectsKey: false) {
+            syncKeyDisplay(keyID: keyID)
+        }
+    }
+
+    func setFileName(_ name: String, for keyID: Int) {
+        if interactionState.setFileName(name, for: keyID, selectsKey: false) {
             persistCurrentConfiguration()
             syncKeyDisplay(keyID: keyID)
         }
@@ -667,6 +704,25 @@ final class H200ConnectionModel: ObservableObject {
 
         refreshedConfiguration.name = configuration.name
         if interactionState.setFolderConfiguration(refreshedConfiguration, for: keyID, selectsKey: false) {
+            persistCurrentConfiguration()
+        }
+    }
+
+    private func openFile(for keyID: Int) {
+        let configuration = interactionState.openFileConfiguration(for: keyID)
+        guard configuration.canOpen else {
+            return
+        }
+
+        let result = fileOpener.openFile(configuration)
+        guard case let .opened(refreshedConfiguration) = result,
+              var refreshedConfiguration
+        else {
+            return
+        }
+
+        refreshedConfiguration.name = configuration.name
+        if interactionState.setFileConfiguration(refreshedConfiguration, for: keyID, selectsKey: false) {
             persistCurrentConfiguration()
         }
     }

@@ -7,11 +7,13 @@ struct ContentView: View {
     @State private var brightnessDraftPercent: Int?
     @State var activeParameterFocusField: ParameterFocusField?
     @State var folderNameDraft: ParameterNameDraft?
+    @State var fileNameDraft: ParameterNameDraft?
     @State var smbServerNameDraft: ParameterNameDraft?
     @FocusState var focusedParameterField: ParameterFocusField?
 
     enum ParameterFocusField: Hashable {
         case folderName
+        case fileName
         case smbServerName
     }
 
@@ -35,6 +37,9 @@ struct ContentView: View {
     let onFolderPathSelection: (DeckKeyOpenFolderConfiguration) -> Void
     let onFolderNamePreview: (Int, String) -> Void
     let onFolderNameChange: (Int, String) -> Void
+    let onFilePathSelection: (DeckKeyOpenFileConfiguration) -> Void
+    let onFileNamePreview: (Int, String) -> Void
+    let onFileNameChange: (Int, String) -> Void
     let onSMBServerAddressChange: (String) -> Void
     let onSMBServerNamePreview: (Int, String) -> Void
     let onSMBServerNameChange: (Int, String) -> Void
@@ -732,6 +737,9 @@ struct MihoyoQRCodeView: View {
         onFolderPathSelection: { _ in },
         onFolderNamePreview: { _, _ in },
         onFolderNameChange: { _, _ in },
+        onFilePathSelection: { _ in },
+        onFileNamePreview: { _, _ in },
+        onFileNameChange: { _, _ in },
         onSMBServerAddressChange: { _ in },
         onSMBServerNamePreview: { _, _ in },
         onSMBServerNameChange: { _, _ in },

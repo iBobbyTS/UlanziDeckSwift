@@ -10,6 +10,7 @@ struct RootView: View {
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         folderOpener: FinderFolderOpening? = nil,
+        fileOpener: FinderFileOpening? = nil,
         smbServerConnector: SMBServerConnecting? = nil,
         sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher(),
         mihoyoGameService: MihoyoGameServicing = MihoyoGameClient(),
@@ -20,6 +21,7 @@ struct RootView: View {
             syncer: syncer,
             configurationStore: configurationStore,
             folderOpener: folderOpener,
+            fileOpener: fileOpener,
             smbServerConnector: smbServerConnector,
             sub2APIFetcher: sub2APIFetcher,
             mihoyoGameService: mihoyoGameService,
@@ -60,6 +62,15 @@ struct RootView: View {
             },
             onFolderNameChange: { keyID, name in
                 connectionModel.setFolderName(name, for: keyID)
+            },
+            onFilePathSelection: { configuration in
+                connectionModel.setSelectedFileConfiguration(configuration)
+            },
+            onFileNamePreview: { keyID, name in
+                connectionModel.previewFileName(name, for: keyID)
+            },
+            onFileNameChange: { keyID, name in
+                connectionModel.setFileName(name, for: keyID)
             },
             onSMBServerAddressChange: { address in
                 connectionModel.setSelectedSMBServerAddress(address)

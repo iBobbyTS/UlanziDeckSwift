@@ -71,64 +71,37 @@ extension ContentView {
             }
 
         case .openFolder:
-            HStack(alignment: .top, spacing: 28) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("功能")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+            localResourceParameterContent(
+                function: configuration.function,
+                automaticDisplayName: selectedFolderAutomaticDisplayName,
+                name: selectedFolderNameBinding,
+                focusField: .folderName,
+                resourceTitle: "文件夹",
+                path: configuration.openFolder.path,
+                emptyPathText: "未选择文件夹",
+                needsReselection: configuration.openFolder.needsReselection,
+                chooseButtonTitle: "选择文件夹",
+                rechooseButtonTitle: "重新选择文件夹",
+                chooseButtonSystemImage: "folder.badge.plus"
+            ) {
+                chooseFolder()
+            }
 
-                    Label(configuration.function.title, systemImage: configuration.function.systemImageName)
-                        .font(.callout.weight(.medium))
-                }
-                .frame(width: 150, alignment: .leading)
-
-                VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("显示名称")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        TextField(
-                            selectedFolderAutomaticDisplayName,
-                            text: selectedFolderNameBinding,
-                            prompt: Text(selectedFolderAutomaticDisplayName)
-                        )
-                        .textFieldStyle(.roundedBorder)
-                        .focused($focusedParameterField, equals: .folderName)
-                        .frame(maxWidth: 260, alignment: .leading)
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("文件夹")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        Text(configuration.openFolder.path ?? "未选择文件夹")
-                            .font(.callout)
-                            .foregroundStyle(configuration.openFolder.path == nil ? Color.secondary : Color.primary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                        if configuration.openFolder.needsReselection {
-                            Text("需要重新选择")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                }
-
-                Button {
-                    chooseFolder()
-                } label: {
-                    Label(
-                        configuration.openFolder.needsReselection ? "重新选择文件夹" : "选择文件夹",
-                        systemImage: "folder.badge.plus"
-                    )
-                }
-                .buttonStyle(.bordered)
-
-                Spacer()
+        case .openFile:
+            localResourceParameterContent(
+                function: configuration.function,
+                automaticDisplayName: selectedFileAutomaticDisplayName,
+                name: selectedFileNameBinding,
+                focusField: .fileName,
+                resourceTitle: "文件",
+                path: configuration.openFile.path,
+                emptyPathText: "未选择文件",
+                needsReselection: configuration.openFile.needsReselection,
+                chooseButtonTitle: "选择文件",
+                rechooseButtonTitle: "重新选择文件",
+                chooseButtonSystemImage: "doc.badge.plus"
+            ) {
+                chooseFile()
             }
 
         case .connectSMBServer:
@@ -290,6 +263,81 @@ extension ContentView {
             mihoyoGameParameterContent(for: configuration)
         }
     }
+
+    private func localResourceParameterContent(
+        function: DeckKeyFunction,
+        automaticDisplayName: String,
+        name: Binding<String>,
+        focusField: ParameterFocusField,
+        resourceTitle: String,
+        path: String?,
+        emptyPathText: String,
+        needsReselection: Bool,
+        chooseButtonTitle: String,
+        rechooseButtonTitle: String,
+        chooseButtonSystemImage: String,
+        chooseAction: @escaping () -> Void
+    ) -> some View {
+        HStack(alignment: .top, spacing: 28) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("功能")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Label(function.title, systemImage: function.systemImageName)
+                    .font(.callout.weight(.medium))
+            }
+            .frame(width: 150, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("显示名称")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    TextField(
+                        automaticDisplayName,
+                        text: name,
+                        prompt: Text(automaticDisplayName)
+                    )
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focusedParameterField, equals: focusField)
+                    .frame(maxWidth: 260, alignment: .leading)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(resourceTitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Text(path ?? emptyPathText)
+                        .font(.callout)
+                        .foregroundStyle(path == nil ? Color.secondary : Color.primary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if needsReselection {
+                        Text("需要重新选择")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            Button {
+                chooseAction()
+            } label: {
+                Label(
+                    needsReselection ? rechooseButtonTitle : chooseButtonTitle,
+                    systemImage: chooseButtonSystemImage
+                )
+            }
+            .buttonStyle(.bordered)
+
+            Spacer()
+        }
+    }
 }
 
 extension ContentView {
@@ -303,7 +351,7 @@ extension ContentView {
             FunctionSection(
                 title: "访达",
                 systemImageName: "folder",
-                functions: [.openFolder, .connectSMBServer]
+                functions: [.openFolder, .openFile, .connectSMBServer]
             ),
             FunctionSection(
                 title: "网站",
@@ -376,6 +424,49 @@ extension ContentView {
                     text: name
                 )
                 onFolderNamePreview(selectedKeyID, name)
+            }
+        )
+    }
+
+    var selectedFileAutomaticDisplayName: String {
+        guard let openFile = selectedConfiguration?.openFile else {
+            return "选择文件"
+        }
+
+        let automaticConfiguration = DeckKeyOpenFileConfiguration(
+            path: openFile.path,
+            bookmarkData: openFile.bookmarkData
+        )
+        return automaticConfiguration.displayName
+    }
+
+    var selectedFileNameBinding: Binding<String> {
+        Binding(
+            get: {
+                if focusedParameterField == .fileName,
+                   let draft = fileNameDraft,
+                   draft.keyID == interactionState.selectedKeyID {
+                    return draft.text
+                }
+
+                return selectedConfiguration?.openFile.name ?? ""
+            },
+            set: { name in
+                guard let selectedKeyID = interactionState.selectedKeyID else {
+                    return
+                }
+
+                let originalName = if fileNameDraft?.keyID == selectedKeyID {
+                    fileNameDraft?.originalNormalizedText ?? ""
+                } else {
+                    selectedConfiguration?.openFile.name ?? ""
+                }
+                fileNameDraft = ParameterNameDraft(
+                    keyID: selectedKeyID,
+                    originalNormalizedText: originalName,
+                    text: name
+                )
+                onFileNamePreview(selectedKeyID, name)
             }
         )
     }
@@ -460,6 +551,15 @@ extension ContentView {
                 originalNormalizedText: selectedConfiguration?.openFolder.name ?? "",
                 text: selectedConfiguration?.openFolder.name ?? ""
             )
+        case .fileName:
+            guard selectedConfiguration?.function == .openFile else {
+                return
+            }
+            fileNameDraft = ParameterNameDraft(
+                keyID: selectedKeyID,
+                originalNormalizedText: selectedConfiguration?.openFile.name ?? "",
+                text: selectedConfiguration?.openFile.name ?? ""
+            )
         case .smbServerName:
             guard selectedConfiguration?.function == .connectSMBServer else {
                 return
@@ -476,6 +576,8 @@ extension ContentView {
         switch field {
         case .folderName:
             commitFolderNameDraft()
+        case .fileName:
+            commitFileNameDraft()
         case .smbServerName:
             commitSMBServerNameDraft()
         case nil:
@@ -502,6 +604,27 @@ extension ContentView {
         }
 
         onFolderNameChange(draft.keyID, draft.text)
+    }
+
+    private func commitFileNameDraft() {
+        guard let draft = fileNameDraft else {
+            return
+        }
+
+        defer {
+            fileNameDraft = nil
+        }
+
+        guard interactionState.configuration(for: draft.keyID)?.function == .openFile else {
+            return
+        }
+
+        let normalizedName = DeckKeyOpenFileConfiguration.normalizedName(draft.text)
+        guard draft.originalNormalizedText != normalizedName else {
+            return
+        }
+
+        onFileNameChange(draft.keyID, draft.text)
     }
 
     private func commitSMBServerNameDraft() {
@@ -719,6 +842,44 @@ extension ContentView {
         } catch {
             let alert = NSAlert()
             alert.messageText = "无法保存文件夹权限"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+    }
+
+    func chooseFile() {
+        let panel = NSOpenPanel()
+        panel.title = "选择文件"
+        panel.prompt = "选择"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+
+        guard panel.runModal() == .OK,
+              let url = panel.url
+        else {
+            return
+        }
+
+        let fileName: String
+        if focusedParameterField == .fileName,
+           let draft = fileNameDraft,
+           draft.keyID == interactionState.selectedKeyID {
+            fileName = draft.text
+        } else {
+            fileName = selectedConfiguration?.openFile.name ?? ""
+        }
+
+        do {
+            onFilePathSelection(try DeckKeyOpenFileConfiguration(
+                fileURL: url,
+                name: fileName
+            ))
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "无法保存文件权限"
             alert.informativeText = error.localizedDescription
             alert.alertStyle = .warning
             alert.runModal()

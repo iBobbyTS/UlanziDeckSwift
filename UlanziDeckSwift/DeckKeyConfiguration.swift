@@ -4,6 +4,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case none
     case tally
     case openFolder
+    case openFile
     case connectSMBServer
     case brightness
     case sub2API
@@ -14,6 +15,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     static let assignableCases: [DeckKeyFunction] = [
         .tally,
         .openFolder,
+        .openFile,
         .connectSMBServer,
         .sub2API,
         .genshinStatus,
@@ -29,6 +31,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "计数器"
         case .openFolder:
             return "打开文件夹"
+        case .openFile:
+            return "打开文件"
         case .connectSMBServer:
             return "连接 SMB"
         case .brightness:
@@ -52,6 +56,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "number.square"
         case .openFolder:
             return "folder"
+        case .openFile:
+            return "doc"
         case .connectSMBServer:
             return "network"
         case .brightness:
@@ -75,7 +81,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return .starRail
         case .zenlessZoneStatus:
             return .zenlessZoneZero
-        case .none, .tally, .openFolder, .connectSMBServer, .brightness, .sub2API:
+        case .none, .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API:
             return nil
         }
     }
@@ -85,6 +91,7 @@ nonisolated enum DeckKeyPressRuntimeAction: Equatable {
     case none
     case incrementTally
     case openFolder
+    case openFile
     case connectSMBServer
     case refreshSub2API
     case refreshMihoyoGame
@@ -102,6 +109,8 @@ extension DeckKeyFunction {
             return .incrementTally
         case .openFolder:
             return .openFolder
+        case .openFile:
+            return .openFile
         case .connectSMBServer:
             return .connectSMBServer
         case .sub2API:
@@ -119,7 +128,7 @@ extension DeckKeyFunction {
             return .sub2API
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .mihoyoGame
-        case .tally, .openFolder, .connectSMBServer, .brightness, .none:
+        case .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .none:
             return nil
         }
     }
@@ -189,14 +198,19 @@ nonisolated struct DeckKeyTallyConfiguration: Codable, Equatable {
     }
 }
 
-nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
-    static let securityScopedBookmarkCreationOptions: URL.BookmarkCreationOptions = [
+nonisolated enum DeckKeySecurityScopedBookmarkOptions {
+    static let readOnlyCreation: URL.BookmarkCreationOptions = [
         .withSecurityScope,
         .securityScopeAllowOnlyReadAccess,
     ]
-    static let securityScopedBookmarkResolutionOptions: URL.BookmarkResolutionOptions = [
+    static let resolution: URL.BookmarkResolutionOptions = [
         .withSecurityScope,
     ]
+}
+
+nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
+    static let securityScopedBookmarkCreationOptions = DeckKeySecurityScopedBookmarkOptions.readOnlyCreation
+    static let securityScopedBookmarkResolutionOptions = DeckKeySecurityScopedBookmarkOptions.resolution
 
     var path: String?
     var bookmarkData: Data?
@@ -228,6 +242,88 @@ nonisolated struct DeckKeyOpenFolderConfiguration: Codable, Equatable {
         }
 
         let name = URL(fileURLWithPath: path, isDirectory: true).lastPathComponent
+        return name.isEmpty ? path : name
+    }
+
+    var needsReselection: Bool {
+        guard let path, !path.isEmpty else {
+            return false
+        }
+
+        return bookmarkData == nil
+    }
+
+    var canOpen: Bool {
+        bookmarkData != nil
+    }
+
+    enum CodingKeys: CodingKey {
+        case path
+        case bookmarkData
+        case name
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        path = Self.normalizedPath(try container.decodeIfPresent(String.self, forKey: .path))
+        bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        name = Self.normalizedName(try container.decodeIfPresent(String.self, forKey: .name) ?? "")
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(path, forKey: .path)
+        try container.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
+        try container.encode(name, forKey: .name)
+    }
+
+    private static func normalizedPath(_ path: String?) -> String? {
+        guard let path, !path.isEmpty else {
+            return nil
+        }
+
+        return path
+    }
+
+    static func normalizedName(_ rawValue: String) -> String {
+        rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+nonisolated struct DeckKeyOpenFileConfiguration: Codable, Equatable {
+    static let securityScopedBookmarkCreationOptions = DeckKeySecurityScopedBookmarkOptions.readOnlyCreation
+    static let securityScopedBookmarkResolutionOptions = DeckKeySecurityScopedBookmarkOptions.resolution
+
+    var path: String?
+    var bookmarkData: Data?
+    var name: String
+
+    init(path: String? = nil, bookmarkData: Data? = nil, name: String = "") {
+        self.path = Self.normalizedPath(path)
+        self.bookmarkData = bookmarkData
+        self.name = Self.normalizedName(name)
+    }
+
+    init(fileURL: URL, name: String = "") throws {
+        self.path = Self.normalizedPath(fileURL.path)
+        self.bookmarkData = try fileURL.bookmarkData(
+            options: Self.securityScopedBookmarkCreationOptions,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        self.name = Self.normalizedName(name)
+    }
+
+    var displayName: String {
+        if !name.isEmpty {
+            return name
+        }
+
+        guard let path, !path.isEmpty else {
+            return "选择文件"
+        }
+
+        let name = URL(fileURLWithPath: path, isDirectory: false).lastPathComponent
         return name.isEmpty ? path : name
     }
 
@@ -566,6 +662,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var displayMode: DeckKeyDisplayMode
     var tally: DeckKeyTallyConfiguration
     var openFolder: DeckKeyOpenFolderConfiguration
+    var openFile: DeckKeyOpenFileConfiguration
     var smbServer: DeckKeySMBServerConfiguration
     var sub2API: DeckKeySub2APIConfiguration
     var mihoyoGame: DeckKeyMihoyoGameConfiguration
@@ -575,6 +672,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         displayMode: .function,
         tally: DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration(),
+        openFile: DeckKeyOpenFileConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration()
@@ -585,6 +683,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         displayMode: .function,
         tally: DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration(),
+        openFile: DeckKeyOpenFileConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration()
@@ -595,6 +694,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         displayMode: DeckKeyDisplayMode = .function,
         tally: DeckKeyTallyConfiguration = DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration = DeckKeyOpenFolderConfiguration(),
+        openFile: DeckKeyOpenFileConfiguration = DeckKeyOpenFileConfiguration(),
         smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration = DeckKeySub2APIConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration()
@@ -603,6 +703,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         self.displayMode = displayMode
         self.tally = tally
         self.openFolder = openFolder
+        self.openFile = openFile
         self.smbServer = smbServer
         self.sub2API = sub2API
         self.mihoyoGame = mihoyoGame
@@ -613,6 +714,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case displayMode
         case tally
         case openFolder
+        case openFile
         case smbServer
         case sub2API
         case mihoyoGame
@@ -624,6 +726,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         displayMode = try container.decodeIfPresent(DeckKeyDisplayMode.self, forKey: .displayMode) ?? .function
         tally = try container.decodeIfPresent(DeckKeyTallyConfiguration.self, forKey: .tally) ?? DeckKeyTallyConfiguration()
         openFolder = try container.decodeIfPresent(DeckKeyOpenFolderConfiguration.self, forKey: .openFolder) ?? DeckKeyOpenFolderConfiguration()
+        openFile = try container.decodeIfPresent(DeckKeyOpenFileConfiguration.self, forKey: .openFile) ?? DeckKeyOpenFileConfiguration()
         smbServer = try container.decodeIfPresent(DeckKeySMBServerConfiguration.self, forKey: .smbServer) ?? DeckKeySMBServerConfiguration()
         sub2API = try container.decodeIfPresent(DeckKeySub2APIConfiguration.self, forKey: .sub2API) ?? DeckKeySub2APIConfiguration()
         mihoyoGame = try container.decodeIfPresent(DeckKeyMihoyoGameConfiguration.self, forKey: .mihoyoGame) ?? DeckKeyMihoyoGameConfiguration()
@@ -635,6 +738,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         try container.encode(displayMode, forKey: .displayMode)
         try container.encode(tally, forKey: .tally)
         try container.encode(openFolder, forKey: .openFolder)
+        try container.encode(openFile, forKey: .openFile)
         try container.encode(smbServer, forKey: .smbServer)
         try container.encode(sub2API, forKey: .sub2API)
         try container.encode(mihoyoGame, forKey: .mihoyoGame)

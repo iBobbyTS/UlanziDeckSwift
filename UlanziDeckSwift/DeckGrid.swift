@@ -64,6 +64,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let mihoyoGameButtonContent: MihoyoGameButtonContent?
     let sub2APIButtonContent: Sub2APIButtonContent?
     let folderButtonContent: FolderButtonContent?
+    let fileButtonContent: FileButtonContent?
     let smbServerButtonContent: SMBServerButtonContent?
     let buttonBackgroundDimmingEnabled: Bool
     let isSelected: Bool
@@ -85,6 +86,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         var mihoyoGameButtonContent: MihoyoGameButtonContent?
         var sub2APIButtonContent: Sub2APIButtonContent?
         var folderButtonContent: FolderButtonContent?
+        var fileButtonContent: FileButtonContent?
         var smbServerButtonContent: SMBServerButtonContent?
 
         if key.columnSpan > 1 && configuration.displayMode != .function {
@@ -105,6 +107,11 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 title = content.displayName
                 subtitle = configuration.openFolder.path ?? ""
                 folderButtonContent = content
+            case .openFile:
+                let content = FileButtonContent(displayName: configuration.openFile.displayName)
+                title = content.displayName
+                subtitle = configuration.openFile.path ?? ""
+                fileButtonContent = content
             case .connectSMBServer:
                 let content = SMBServerButtonContent(displayName: configuration.smbServer.displayName)
                 title = content.displayName
@@ -165,6 +172,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         self.mihoyoGameButtonContent = mihoyoGameButtonContent
         self.sub2APIButtonContent = sub2APIButtonContent
         self.folderButtonContent = folderButtonContent
+        self.fileButtonContent = fileButtonContent
         self.smbServerButtonContent = smbServerButtonContent
         self.buttonBackgroundDimmingEnabled = buttonBackgroundDimmingEnabled
         self.isSelected = isSelected
@@ -192,6 +200,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             mihoyoGameButtonContent: mihoyoGameButtonContent,
             sub2APIButtonContent: sub2APIButtonContent,
             folderButtonContent: folderButtonContent,
+            fileButtonContent: fileButtonContent,
             smbServerButtonContent: smbServerButtonContent,
             buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled,
             devicePixelSize: devicePixelSize
@@ -211,6 +220,7 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let mihoyoGameButtonContent: MihoyoGameButtonContent?
     let sub2APIButtonContent: Sub2APIButtonContent?
     let folderButtonContent: FolderButtonContent?
+    let fileButtonContent: FileButtonContent?
     let smbServerButtonContent: SMBServerButtonContent?
     let buttonBackgroundDimmingEnabled: Bool
     let devicePixelSize: H200DeviceTarget.PixelSize
@@ -219,6 +229,10 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
 nonisolated struct FolderButtonContent: Equatable {
     static let backgroundAssetName = "FolderBackground"
 
+    let displayName: String
+}
+
+nonisolated struct FileButtonContent: Equatable {
     let displayName: String
 }
 
@@ -430,6 +444,14 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     func openFolderConfiguration(for keyID: Int) -> DeckKeyOpenFolderConfiguration {
         configurations[keyID, default: .tallyDefault].openFolder
+    }
+
+    func filePath(for keyID: Int) -> String? {
+        configurations[keyID, default: .tallyDefault].openFile.path
+    }
+
+    func openFileConfiguration(for keyID: Int) -> DeckKeyOpenFileConfiguration {
+        configurations[keyID, default: .tallyDefault].openFile
     }
 
     func smbServerAddress(for keyID: Int) -> String {
@@ -654,6 +676,41 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
         configurations[keyID, default: .tallyDefault].openFolder.name =
             DeckKeyOpenFolderConfiguration.normalizedName(name)
+        return true
+    }
+
+    @discardableResult
+    mutating func setFileConfiguration(
+        _ configuration: DeckKeyOpenFileConfiguration,
+        for keyID: Int,
+        selectsKey: Bool = true
+    ) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .openFile
+        else {
+            return false
+        }
+
+        if selectsKey {
+            selectedKeyID = keyID
+        }
+        configurations[keyID, default: .tallyDefault].openFile = configuration
+        return true
+    }
+
+    @discardableResult
+    mutating func setFileName(_ name: String, for keyID: Int, selectsKey: Bool = true) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .openFile
+        else {
+            return false
+        }
+
+        if selectsKey {
+            selectedKeyID = keyID
+        }
+        configurations[keyID, default: .tallyDefault].openFile.name =
+            DeckKeyOpenFileConfiguration.normalizedName(name)
         return true
     }
 

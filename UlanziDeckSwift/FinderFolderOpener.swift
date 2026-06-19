@@ -1,20 +1,40 @@
 import AppKit
 import Foundation
 
-enum FinderFolderOpenResult: Equatable {
-    case opened(refreshedConfiguration: DeckKeyOpenFolderConfiguration?)
+enum FinderResourceOpenResult<Configuration: Equatable>: Equatable {
+    case opened(refreshedConfiguration: Configuration?)
     case needsReselection
     case failed
 }
+
+typealias FinderFolderOpenResult = FinderResourceOpenResult<DeckKeyOpenFolderConfiguration>
+typealias FinderFileOpenResult = FinderResourceOpenResult<DeckKeyOpenFileConfiguration>
+
+private protocol FinderSecurityScopedResourceConfiguration {
+    static var securityScopedBookmarkResolutionOptions: URL.BookmarkResolutionOptions { get }
+
+    var bookmarkData: Data? { get }
+}
+
+extension DeckKeyOpenFolderConfiguration: FinderSecurityScopedResourceConfiguration {}
+extension DeckKeyOpenFileConfiguration: FinderSecurityScopedResourceConfiguration {}
 
 protocol FinderFolderOpening {
     @MainActor
     func openFolder(_ configuration: DeckKeyOpenFolderConfiguration) -> FinderFolderOpenResult
 }
 
-struct FinderFolderOpener: FinderFolderOpening {
+protocol FinderFileOpening {
     @MainActor
-    func openFolder(_ configuration: DeckKeyOpenFolderConfiguration) -> FinderFolderOpenResult {
+    func openFile(_ configuration: DeckKeyOpenFileConfiguration) -> FinderFileOpenResult
+}
+
+private enum FinderSecurityScopedResourceOpener {
+    @MainActor
+    static func open<Configuration: FinderSecurityScopedResourceConfiguration & Equatable>(
+        _ configuration: Configuration,
+        refreshedConfiguration: (URL) -> Configuration?
+    ) -> FinderResourceOpenResult<Configuration> {
         guard let bookmarkData = configuration.bookmarkData else {
             return .needsReselection
         }
@@ -24,7 +44,7 @@ struct FinderFolderOpener: FinderFolderOpening {
         do {
             url = try URL(
                 resolvingBookmarkData: bookmarkData,
-                options: DeckKeyOpenFolderConfiguration.securityScopedBookmarkResolutionOptions,
+                options: Configuration.securityScopedBookmarkResolutionOptions,
                 relativeTo: nil,
                 bookmarkDataIsStale: &isStale
             )
@@ -44,11 +64,29 @@ struct FinderFolderOpener: FinderFolderOpening {
         }
 
         guard isStale,
-              let refreshedConfiguration = try? DeckKeyOpenFolderConfiguration(folderURL: url)
+              let refreshedConfiguration = refreshedConfiguration(url)
         else {
             return .opened(refreshedConfiguration: nil)
         }
 
         return .opened(refreshedConfiguration: refreshedConfiguration)
+    }
+}
+
+struct FinderFolderOpener: FinderFolderOpening {
+    @MainActor
+    func openFolder(_ configuration: DeckKeyOpenFolderConfiguration) -> FinderFolderOpenResult {
+        FinderSecurityScopedResourceOpener.open(configuration) { url in
+            try? DeckKeyOpenFolderConfiguration(folderURL: url)
+        }
+    }
+}
+
+struct FinderFileOpener: FinderFileOpening {
+    @MainActor
+    func openFile(_ configuration: DeckKeyOpenFileConfiguration) -> FinderFileOpenResult {
+        FinderSecurityScopedResourceOpener.open(configuration) { url in
+            try? DeckKeyOpenFileConfiguration(fileURL: url)
+        }
     }
 }
