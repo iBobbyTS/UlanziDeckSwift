@@ -25,6 +25,7 @@ struct ContentView: View {
     let brightnessPercent: Int
     let interactionState: DeckGridInteractionState
     let mihoyoLoginState: MihoyoLoginState
+    let buttonBackgroundDimmingEnabled: Bool
     let onKeySelection: (Int) -> Void
     let onKeyFunctionDeletion: (Int) -> Void
     let onKeyDisplayModeSelection: (Int, DeckKeyDisplayMode) -> Void
@@ -49,6 +50,7 @@ struct ContentView: View {
     let onMihoyoQRCodeLoginRequest: () -> Void
     let onMihoyoGameRefreshIntervalChange: (Int) -> Void
     let onMihoyoGameStatusRefresh: () -> Void
+    let onButtonBackgroundDimmingToggle: () -> Void
 
     private let layout = DeckGridLayout.h200Prototype
     private let previewLayoutMetrics = DeckPreviewLayoutMetrics.h200
@@ -154,6 +156,7 @@ struct ContentView: View {
             Spacer()
 
             HStack(spacing: 16) {
+                buttonBackgroundDimmingToggle
                 brightnessControl
             }
         }
@@ -208,6 +211,23 @@ struct ContentView: View {
         .accessibilityValue("\(displayedBrightnessPercent)%")
     }
 
+    private var buttonBackgroundDimmingToggle: some View {
+        Button {
+            onButtonBackgroundDimmingToggle()
+        } label: {
+            Label(
+                buttonBackgroundDimmingEnabled ? "背景已降亮" : "背景原亮度",
+                systemImage: buttonBackgroundDimmingEnabled ? "circle.lefthalf.filled" : "circle"
+            )
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(buttonBackgroundDimmingEnabled ? .accentColor : .secondary)
+        .help(buttonBackgroundDimmingEnabled ? "按钮背景已降低亮度" : "按钮背景使用原始亮度")
+        .accessibilityLabel("降低按钮背景亮度")
+        .accessibilityValue(buttonBackgroundDimmingEnabled ? "已开启" : "已关闭")
+    }
+
     private var workbench: some View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
@@ -251,7 +271,13 @@ struct ContentView: View {
             ForEach(Array(layout.rows.enumerated()), id: \.offset) { _, row in
                 HStack(spacing: previewGridSpacing) {
                     ForEach(row) { key in
-                        DeckKeyButton(display: interactionState.display(for: key), metrics: previewGridMetrics) {
+                        DeckKeyButton(
+                            display: interactionState.display(
+                                for: key,
+                                buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled
+                            ),
+                            metrics: previewGridMetrics
+                        ) {
                             onKeySelection(key.id)
                         } deleteAction: {
                             onKeyFunctionDeletion(key.id)
@@ -696,6 +722,7 @@ struct MihoyoQRCodeView: View {
         brightnessPercent: DeckBrightnessConfiguration.defaultPercent,
         interactionState: DeckGridInteractionState(layout: .h200Prototype),
         mihoyoLoginState: .notLoggedIn,
+        buttonBackgroundDimmingEnabled: true,
         onKeySelection: { _ in },
         onKeyFunctionDeletion: { _ in },
         onKeyDisplayModeSelection: { _, _ in },
@@ -719,6 +746,7 @@ struct MihoyoQRCodeView: View {
         onSub2APIGroupNameChange: { _ in },
         onMihoyoQRCodeLoginRequest: {},
         onMihoyoGameRefreshIntervalChange: { _ in },
-        onMihoyoGameStatusRefresh: {}
+        onMihoyoGameStatusRefresh: {},
+        onButtonBackgroundDimmingToggle: {}
     )
 }

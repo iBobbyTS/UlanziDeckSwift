@@ -8,6 +8,7 @@ final class H200ConnectionModel: ObservableObject {
     @Published private(set) var syncSummary: H200DeckSyncSummary?
     @Published private(set) var interactionState = DeckGridInteractionState(layout: .h200Prototype)
     @Published private(set) var brightnessPercent = DeckBrightnessConfiguration.defaultPercent
+    @Published private(set) var buttonBackgroundDimmingEnabled = true
     @Published private(set) var mihoyoLoginState: MihoyoLoginState = .notLoggedIn
     @Published var alert: H200ConnectionAlert?
 
@@ -81,6 +82,7 @@ final class H200ConnectionModel: ObservableObject {
         let loadedBrightnessPercent = configurationStore.loadBrightnessPercent()
         hasPersistedBrightnessPercent = loadedBrightnessPercent != nil
         brightnessPercent = loadedBrightnessPercent ?? DeckBrightnessConfiguration.defaultPercent
+        buttonBackgroundDimmingEnabled = configurationStore.loadButtonBackgroundDimmingEnabled() ?? true
         mihoyoSession = mihoyoSessionStore.loadSession()
         if let mihoyoSession {
             mihoyoLoginState = .loggedIn(accountID: mihoyoSession.accountID)
@@ -283,6 +285,12 @@ final class H200ConnectionModel: ObservableObject {
             persistCurrentConfiguration()
             syncKeyDisplay(keyID: selectedKeyID)
         }
+    }
+
+    func toggleButtonBackgroundDimming() {
+        buttonBackgroundDimmingEnabled.toggle()
+        configurationStore.saveButtonBackgroundDimmingEnabled(buttonBackgroundDimmingEnabled)
+        syncCurrentDisplays()
     }
 
     func setSelectedFolderConfiguration(_ configuration: DeckKeyOpenFolderConfiguration) {
@@ -555,7 +563,10 @@ final class H200ConnectionModel: ObservableObject {
 
         let discovery = discovery
         let syncer = syncer
-        let initialDisplays = interactionState.displays(for: layout)
+        let initialDisplays = interactionState.displays(
+            for: layout,
+            buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled
+        )
         let startupDisplayRevision = displayRevision
         deviceCommandQueue.async { [weak self] in
             syncer.close()
@@ -1012,7 +1023,10 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        let displays = interactionState.displays(for: layout)
+        let displays = interactionState.displays(
+            for: layout,
+            buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled
+        )
         let generation = deviceCommandGeneration
         let syncer = syncer
         deviceCommandQueue.async { [weak self] in
@@ -1034,7 +1048,12 @@ final class H200ConnectionModel: ObservableObject {
 
         let displays = layout.keys
             .filter { keyIDs.contains($0.id) }
-            .map { interactionState.display(for: $0) }
+            .map {
+                interactionState.display(
+                    for: $0,
+                    buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled
+                )
+            }
         guard !displays.isEmpty else {
             return
         }
@@ -1067,7 +1086,10 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        let display = interactionState.display(for: key)
+        let display = interactionState.display(
+            for: key,
+            buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled
+        )
         let generation = deviceCommandGeneration
         let syncer = syncer
         deviceCommandQueue.async { [weak self] in

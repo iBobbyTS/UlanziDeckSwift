@@ -65,10 +65,17 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let sub2APIButtonContent: Sub2APIButtonContent?
     let folderButtonContent: FolderButtonContent?
     let smbServerButtonContent: SMBServerButtonContent?
+    let buttonBackgroundDimmingEnabled: Bool
     let isSelected: Bool
     let isPressed: Bool
 
-    init(key: DeckGridLayout.Key, configuration: DeckKeyConfiguration, isSelected: Bool, isPressed: Bool) {
+    init(
+        key: DeckGridLayout.Key,
+        configuration: DeckKeyConfiguration,
+        buttonBackgroundDimmingEnabled: Bool = true,
+        isSelected: Bool,
+        isPressed: Bool
+    ) {
         id = key.id
         row = key.row
         column = key.column
@@ -159,6 +166,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         self.sub2APIButtonContent = sub2APIButtonContent
         self.folderButtonContent = folderButtonContent
         self.smbServerButtonContent = smbServerButtonContent
+        self.buttonBackgroundDimmingEnabled = buttonBackgroundDimmingEnabled
         self.isSelected = isSelected
         self.isPressed = isPressed
     }
@@ -185,6 +193,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             sub2APIButtonContent: sub2APIButtonContent,
             folderButtonContent: folderButtonContent,
             smbServerButtonContent: smbServerButtonContent,
+            buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled,
             devicePixelSize: devicePixelSize
         )
     }
@@ -203,6 +212,7 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let sub2APIButtonContent: Sub2APIButtonContent?
     let folderButtonContent: FolderButtonContent?
     let smbServerButtonContent: SMBServerButtonContent?
+    let buttonBackgroundDimmingEnabled: Bool
     let devicePixelSize: H200DeviceTarget.PixelSize
 }
 
@@ -734,16 +744,19 @@ nonisolated struct DeckGridInteractionState: Equatable {
         pressedKeyIDs.contains(keyID)
     }
 
-    func display(for key: DeckGridLayout.Key) -> DeckKeyDisplay {
+    func display(for key: DeckGridLayout.Key, buttonBackgroundDimmingEnabled: Bool = true) -> DeckKeyDisplay {
         DeckKeyDisplay(
             key: key,
             configuration: configurations[key.id, default: .tallyDefault],
+            buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled,
             isSelected: selectedKeyID == key.id,
             isPressed: isPressed(keyID: key.id)
         )
     }
 
-    func displays(for layout: DeckGridLayout) -> [DeckKeyDisplay] {
-        layout.keys.map(display(for:))
+    func displays(for layout: DeckGridLayout, buttonBackgroundDimmingEnabled: Bool = true) -> [DeckKeyDisplay] {
+        layout.keys.map { key in
+            display(for: key, buttonBackgroundDimmingEnabled: buttonBackgroundDimmingEnabled)
+        }
     }
 }

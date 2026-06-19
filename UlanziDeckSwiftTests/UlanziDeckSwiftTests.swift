@@ -507,7 +507,8 @@ struct UlanziDeckSwiftTests {
         let store = UserDefaultsDeckConfigurationStore(
             defaults: defaults,
             storageKey: "deckConfiguration",
-            brightnessStorageKey: "brightness"
+            brightnessStorageKey: "brightness",
+            buttonBackgroundDimmingStorageKey: "buttonBackgroundDimming"
         )
         var state = DeckGridInteractionState(layout: layout)
         state.setTallyDefaultValue(6, for: 3)
@@ -521,6 +522,7 @@ struct UlanziDeckSwiftTests {
 
         store.saveInteractionState(state, for: layout)
         store.saveBrightnessPercent(140)
+        store.saveButtonBackgroundDimmingEnabled(false)
 
         let restored = try #require(store.loadInteractionState(for: layout))
         #expect(restored.tallyDefaultValue(for: 3) == 6)
@@ -533,6 +535,7 @@ struct UlanziDeckSwiftTests {
         #expect(restored.smbServerAddress(for: 10) == "nas.local/media")
         #expect(restored.smbServerName(for: 10) == "NAS")
         #expect(store.loadBrightnessPercent() == 100)
+        #expect(store.loadButtonBackgroundDimmingEnabled() == false)
         #expect(restored.pressedKeyIDs.isEmpty)
         #expect(restored.selectedKeyID == 1)
     }
@@ -1415,6 +1418,35 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func buttonBackgroundDimmingTogglePersistsAndResyncsDisplays() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore(loadedButtonBackgroundDimmingEnabled: true)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            folderOpener: FakeFinderFolderOpener()
+        )
+
+        #expect(model.buttonBackgroundDimmingEnabled)
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        #expect(syncer.sentDisplays.last?.allSatisfy(\.buttonBackgroundDimmingEnabled) == true)
+
+        model.toggleButtonBackgroundDimming()
+
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 2
+        }
+        #expect(!model.buttonBackgroundDimmingEnabled)
+        #expect(store.savedButtonBackgroundDimmingValues == [false])
+        #expect(syncer.sentDisplays.last?.allSatisfy { !$0.buttonBackgroundDimmingEnabled } == true)
+    }
+
+    @MainActor
     @Test func successfulLaunchSendsPersistedBrightnessAfterStartup() async throws {
         let store = FakeDeckConfigurationStore(loadedBrightnessPercent: 65)
         let syncer = FakeH200DeckSyncer()
@@ -2003,6 +2035,29 @@ struct UlanziDeckSwiftTests {
         #expect(display.folderButtonContent?.displayName == "下载")
         #expect(color.redComponent + color.greenComponent + color.blueComponent > 0.12)
         #expect(color.alphaComponent > 0.999)
+    }
+
+    @Test func iconRendererCanDisableButtonBackgroundDimming() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.openFolder, to: 2)
+        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents"), for: 2)
+        state.setFolderName("下载", for: 2)
+        let dimmedDisplay = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: true)
+        let brightDisplay = state.display(for: layout.keys[1], buttonBackgroundDimmingEnabled: false)
+        let renderer = H200ButtonIconRenderer()
+
+        let dimmedPNG = try renderer.pngData(for: dimmedDisplay)
+        let brightPNG = try renderer.pngData(for: brightDisplay)
+        let dimmedImage = try #require(NSBitmapImageRep(data: dimmedPNG))
+        let brightImage = try #require(NSBitmapImageRep(data: brightPNG))
+        let dimmedColor = try #require(dimmedImage.colorAt(x: 50, y: 50)?.usingColorSpace(.deviceRGB))
+        let brightColor = try #require(brightImage.colorAt(x: 50, y: 50)?.usingColorSpace(.deviceRGB))
+
+        let dimmedLuma = dimmedColor.redComponent + dimmedColor.greenComponent + dimmedColor.blueComponent
+        let brightLuma = brightColor.redComponent + brightColor.greenComponent + brightColor.blueComponent
+        #expect(brightDisplay.renderIdentity != dimmedDisplay.renderIdentity)
+        #expect(brightLuma > dimmedLuma)
     }
 
     @Test func iconRendererUsesSMBBackgroundAndCenteredName() throws {
@@ -3043,12 +3098,19 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
 private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
     private let loadedState: DeckGridInteractionState?
     private let loadedBrightnessPercent: Int?
+    private let loadedButtonBackgroundDimmingEnabled: Bool?
     private(set) var savedStates: [DeckGridInteractionState] = []
     private(set) var savedBrightnessPercents: [Int] = []
+    private(set) var savedButtonBackgroundDimmingValues: [Bool] = []
 
-    init(loadedState: DeckGridInteractionState? = nil, loadedBrightnessPercent: Int? = nil) {
+    init(
+        loadedState: DeckGridInteractionState? = nil,
+        loadedBrightnessPercent: Int? = nil,
+        loadedButtonBackgroundDimmingEnabled: Bool? = nil
+    ) {
         self.loadedState = loadedState
         self.loadedBrightnessPercent = loadedBrightnessPercent
+        self.loadedButtonBackgroundDimmingEnabled = loadedButtonBackgroundDimmingEnabled
     }
 
     func loadInteractionState(for layout: DeckGridLayout) -> DeckGridInteractionState? {
@@ -3065,6 +3127,14 @@ private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
 
     func saveBrightnessPercent(_ percent: Int) {
         savedBrightnessPercents.append(percent)
+    }
+
+    func loadButtonBackgroundDimmingEnabled() -> Bool? {
+        loadedButtonBackgroundDimmingEnabled
+    }
+
+    func saveButtonBackgroundDimmingEnabled(_ enabled: Bool) {
+        savedButtonBackgroundDimmingValues.append(enabled)
     }
 }
 

@@ -389,8 +389,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
                 hints: [.interpolation: NSImageInterpolation.high]
             )
         }
-        NSColor(calibratedWhite: 0, alpha: 0.38).setFill()
-        rect.fill()
+        if display.buttonBackgroundDimmingEnabled {
+            NSColor(calibratedWhite: 0, alpha: 0.38).setFill()
+            rect.fill()
+        }
     }
 
     private func drawFittedBackgroundImage(_ image: NSImage, in rect: NSRect) {

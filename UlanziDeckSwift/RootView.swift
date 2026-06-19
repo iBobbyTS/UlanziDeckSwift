@@ -33,6 +33,7 @@ struct RootView: View {
             brightnessPercent: connectionModel.brightnessPercent,
             interactionState: connectionModel.interactionState,
             mihoyoLoginState: connectionModel.mihoyoLoginState,
+            buttonBackgroundDimmingEnabled: connectionModel.buttonBackgroundDimmingEnabled,
             onKeySelection: { keyID in
                 connectionModel.selectKey(keyID: keyID)
             },
@@ -104,6 +105,9 @@ struct RootView: View {
             },
             onMihoyoGameStatusRefresh: {
                 connectionModel.refreshSelectedMihoyoGameStatus()
+            },
+            onButtonBackgroundDimmingToggle: {
+                connectionModel.toggleButtonBackgroundDimming()
             }
         )
             .background {
