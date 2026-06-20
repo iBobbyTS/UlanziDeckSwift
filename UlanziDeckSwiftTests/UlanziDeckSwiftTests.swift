@@ -1015,7 +1015,8 @@ struct UlanziDeckSwiftTests {
             discovery: FakeH200Discovery(results: [.notConnected]),
             syncer: FakeH200DeckSyncer(),
             configurationStore: FakeDeckConfigurationStore(),
-            sub2APIFetcher: fetcher
+            sub2APIFetcher: fetcher,
+            sub2APIGroupListMinimumIntervalNanoseconds: 1_000_000
         )
 
         model.selectKey(keyID: 3)
@@ -1028,6 +1029,12 @@ struct UlanziDeckSwiftTests {
         }
 
         model.refreshSelectedSub2APIGroupList()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(fetcher.groupListRequests == [
+            FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "token"),
+        ])
+
+        model.setSelectedSub2APIBearerKey("new-token")
 
         try await Self.waitUntil {
             model.interactionState.sub2APIConfiguration(for: 3).groupListState == .tokenExpired
@@ -1035,7 +1042,7 @@ struct UlanziDeckSwiftTests {
 
         #expect(fetcher.groupListRequests == [
             FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "token"),
-            FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "token"),
+            FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "new-token"),
         ])
     }
 
@@ -1126,6 +1133,100 @@ struct UlanziDeckSwiftTests {
         try await Self.waitUntil {
             fetcher.requests.count >= 2
                 && model.interactionState.sub2APIConfiguration(for: 3).lastResult == .success(item: secondItem)
+        }
+
+        #expect(Array(fetcher.requests.prefix(2)) == [
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "token"),
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "token"),
+        ])
+    }
+
+    @MainActor
+    @Test func sub2APITokenFailurePausesRequestsUntilBearerKeyChanges() async throws {
+        let restoredItem = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3050)
+        let fetcher = FakeSub2APIFetcher(
+            results: [.invalidToken, .success(item: restoredItem)],
+            defaultResult: .success(item: restoredItem)
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        loadedState.setSub2APITargetGroupID(1215, for: 3)
+        loadedState.setSub2APIBearerKey("old-token", for: 3)
+        loadedState.setSub2APIRefreshInterval(5, for: 3)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 0.01
+        )
+
+        model.checkOnLaunch()
+
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .invalidToken
+        }
+        try await Task.sleep(nanoseconds: 120_000_000)
+        #expect(fetcher.requests.count == 1)
+
+        syncer.emitInput(H200InputEvent(state: 1, index: 2, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 2, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(fetcher.requests.count == 1)
+
+        model.selectKey(keyID: 3)
+        model.setSelectedSub2APIBearerKey("old-token")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(fetcher.requests.count == 1)
+
+        model.setSelectedSub2APIBaseURL("api2.example.com")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(fetcher.requests.count == 1)
+
+        model.setSelectedSub2APIBearerKey("new-token")
+
+        try await Self.waitUntil {
+            fetcher.requests.count >= 2
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .success(item: restoredItem)
+        }
+
+        #expect(Array(fetcher.requests.prefix(2)) == [
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "old-token"),
+            FakeSub2APIFetcher.Request(baseURL: "api2.example.com", targetGroupID: 1215, bearerKey: "new-token"),
+        ])
+    }
+
+    @MainActor
+    @Test func sub2APINetworkErrorKeepsAutomaticRefreshRunning() async throws {
+        let item = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3040)
+        let fetcher = FakeSub2APIFetcher(
+            results: [.networkError("网络未连接"), .success(item: item)],
+            defaultResult: .success(item: item)
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        loadedState.setSub2APITargetGroupID(1215, for: 3)
+        loadedState.setSub2APIBearerKey("token", for: 3)
+        loadedState.setSub2APIRefreshInterval(5, for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 0.01
+        )
+
+        model.checkOnLaunch()
+
+        try await Self.waitUntil {
+            fetcher.requests.count >= 2
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .success(item: item)
         }
 
         #expect(Array(fetcher.requests.prefix(2)) == [
@@ -1967,6 +2068,90 @@ struct UlanziDeckSwiftTests {
         #expect(store.savedBrightnessPercents.isEmpty)
         try await Self.waitUntil {
             syncer.brightnessPercents == [35]
+        }
+    }
+
+    @MainActor
+    @Test func brightnessZeroPausesInternalRefreshAndRestoringBrightnessRefetches() async throws {
+        let sub2APIItem = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3078)
+        let gameStatus = Self.mihoyoStatus(game: .genshin, currentStamina: 180, maxStamina: 200)
+        let fetcher = FakeSub2APIFetcher(defaultResult: .success(item: sub2APIItem))
+        let mihoyoService = FakeMihoyoGameService(defaultFetchResult: .success(gameStatus))
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        loadedState.setSub2APITargetGroupID(1215, for: 3)
+        loadedState.setSub2APIBearerKey("token", for: 3)
+        loadedState.setSub2APIRefreshInterval(5, for: 3)
+        loadedState.assign(.genshinStatus, to: 4)
+        loadedState.setMihoyoGameRefreshIntervalMinutes(1, for: 4)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            sub2APIFetcher: fetcher,
+            mihoyoGameService: mihoyoService,
+            mihoyoSessionStore: FakeMihoyoSessionStore(loadedSession: Self.mihoyoSession()),
+            sub2APIRefreshSecondDuration: 0.02,
+            mihoyoGameRefreshMinuteDuration: 0.1
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.requests.count >= 1 && mihoyoService.fetchRequests.count >= 1
+        }
+
+        model.commitBrightnessPercent(0)
+        try await Self.waitUntil {
+            syncer.internalRefreshPausedValues.contains(true)
+                && syncer.brightnessPercents.contains(0)
+        }
+        let pausedSub2APIRequestCount = fetcher.requests.count
+        let pausedGameRequestCount = mihoyoService.fetchRequests.count
+        try await Task.sleep(nanoseconds: 160_000_000)
+
+        #expect(fetcher.requests.count == pausedSub2APIRequestCount)
+        #expect(mihoyoService.fetchRequests.count == pausedGameRequestCount)
+
+        model.commitBrightnessPercent(20)
+
+        try await Self.waitUntil {
+            syncer.internalRefreshPausedValues.contains(false)
+                && fetcher.requests.count > pausedSub2APIRequestCount
+                && mihoyoService.fetchRequests.count > pausedGameRequestCount
+        }
+    }
+
+    @MainActor
+    @Test func shortcutsBrightnessZeroPausesInternalRefreshWithoutPersisting() async throws {
+        let store = FakeDeckConfigurationStore()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            folderOpener: FakeFinderFolderOpener()
+        )
+        BrightnessAdjustmentRuntime.shared.register(model)
+        defer {
+            BrightnessAdjustmentRuntime.shared.unregister(model)
+        }
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+
+        let result = BrightnessAdjustmentRuntime.shared.adjustBrightness(to: 0)
+
+        #expect(result == .sent(0))
+        #expect(model.brightnessPercent == 0)
+        #expect(store.savedBrightnessPercents.isEmpty)
+        try await Self.waitUntil {
+            syncer.brightnessPercents == [0]
+                && syncer.internalRefreshPausedValues.contains(true)
         }
     }
 
@@ -3311,6 +3496,94 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func gameLoginRequiredStopsRefreshesUntilQRCodeLoginSucceeds() async throws {
+        let oldSession = Self.mihoyoSession(accountID: "100001")
+        let newSession = Self.mihoyoSession(accountID: "100002")
+        let qrSession = MihoyoQRLoginSession(ticket: "ticket", url: "https://example.com/login", deviceID: "device")
+        let status = Self.mihoyoStatus(game: .genshin, currentStamina: 180, maxStamina: 200)
+        let sessionStore = FakeMihoyoSessionStore(loadedSession: oldSession)
+        let mihoyoService = FakeMihoyoGameService(
+            createdQRCode: qrSession,
+            qrResults: [.confirmed(newSession)],
+            fetchResultsByAccountID: [
+                oldSession.accountID: .loginRequired,
+                newSession.accountID: .success(status),
+            ]
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.genshinStatus, to: 4)
+        loadedState.setMihoyoGameRefreshIntervalMinutes(1, for: 4)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            mihoyoGameService: mihoyoService,
+            mihoyoSessionStore: sessionStore,
+            mihoyoLoginPollNanoseconds: 1_000_000,
+            mihoyoGameRefreshMinuteDuration: 0.01
+        )
+
+        model.checkOnLaunch()
+
+        try await Self.waitUntil {
+            model.mihoyoLoginState == .notLoggedIn
+                && model.interactionState.configuration(for: 4)?.mihoyoGame.lastResult == .loginRequired
+        }
+        let pausedRequestCount = mihoyoService.fetchRequests.count
+        try await Task.sleep(nanoseconds: 80_000_000)
+        #expect(mihoyoService.fetchRequests.count == pausedRequestCount)
+
+        model.beginMihoyoQRCodeLogin()
+
+        try await Self.waitUntil {
+            model.mihoyoLoginState == .loggedIn(accountID: newSession.accountID)
+                && model.interactionState.configuration(for: 4)?.mihoyoGame.lastResult == .success(status)
+        }
+
+        #expect(sessionStore.clearCount >= 2)
+        #expect(sessionStore.savedSessions == [newSession])
+        #expect(mihoyoService.fetchRequests.contains {
+            $0.session == oldSession && $0.game == .genshin
+        })
+        #expect(mihoyoService.fetchRequests.contains {
+            $0.session == newSession && $0.game == .genshin
+        })
+    }
+
+    @MainActor
+    @Test func gameNetworkErrorKeepsRefreshTimerAndLoginSession() async throws {
+        let session = Self.mihoyoSession()
+        let sessionStore = FakeMihoyoSessionStore(loadedSession: session)
+        let mihoyoService = FakeMihoyoGameService(defaultFetchResult: .networkError("网络未连接"))
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.starRailStatus, to: 6)
+        loadedState.setMihoyoGameRefreshIntervalMinutes(1, for: 6)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            mihoyoGameService: mihoyoService,
+            mihoyoSessionStore: sessionStore,
+            mihoyoGameRefreshMinuteDuration: 0.01
+        )
+
+        model.checkOnLaunch()
+
+        try await Self.waitUntil {
+            mihoyoService.fetchRequests.count >= 2
+                && model.interactionState.configuration(for: 6)?.mihoyoGame.lastResult == .networkError("网络未连接")
+        }
+
+        #expect(model.mihoyoLoginState == .loggedIn(accountID: session.accountID))
+        #expect(sessionStore.clearCount == 0)
+        #expect(mihoyoService.fetchRequests.prefix(2).allSatisfy {
+            $0.session == session && $0.game == .starRail
+        })
+    }
+
+    @MainActor
     @Test func qrLoginStoresSharedSessionAndRefreshesConfiguredGameKeys() async throws {
         let session = Self.mihoyoSession(accountID: "100002")
         let qrSession = MihoyoQRLoginSession(ticket: "ticket", url: "https://example.com/login", deviceID: "device")
@@ -3746,6 +4019,7 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
     private var storedPartialDisplays: [[DeckKeyDisplay]] = []
     private var storedBrightnessPercents: [Int] = []
     private var storedSmallWindowModes: [H200SmallWindowMode] = []
+    private var storedInternalRefreshPausedValues: [Bool] = []
     private var inputHandler: H200InputHandler?
     private let packageDelayNanoseconds: UInt64
     private let brightnessDelayNanoseconds: UInt64
@@ -3764,6 +4038,10 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
 
     var smallWindowModes: [H200SmallWindowMode] {
         locked { storedSmallWindowModes }
+    }
+
+    var internalRefreshPausedValues: [Bool] {
+        locked { storedInternalRefreshPausedValues }
     }
 
     init(
@@ -3835,6 +4113,12 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
         }
 
         return .success(elapsedNanoseconds: brightnessDelayNanoseconds)
+    }
+
+    func setInternalRefreshPaused(_ paused: Bool) {
+        locked {
+            storedInternalRefreshPausedValues.append(paused)
+        }
     }
 
     func setInputHandler(_ handler: H200InputHandler?) {

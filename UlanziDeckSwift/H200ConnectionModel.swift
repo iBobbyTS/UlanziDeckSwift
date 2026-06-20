@@ -39,6 +39,7 @@ final class H200ConnectionModel: ObservableObject {
     private var sub2APIGroupListTasks: [Int: Task<Void, Never>] = [:]
     private var sub2APIGroupListRefreshTasks: [Int: Task<Void, Never>] = [:]
     private var sub2APIGroupListLastRequestNanoseconds: [Int: UInt64] = [:]
+    private var sub2APITokenPausedKeys: Set<PageKeyRuntimeID> = []
     private var mihoyoLoginTask: Task<Void, Never>?
     private var mihoyoGameTimers: [Int: Timer] = [:]
     private var mihoyoGameFetchTasks: [Int: Task<Void, Never>] = [:]
@@ -48,6 +49,11 @@ final class H200ConnectionModel: ObservableObject {
 
     private struct BrightnessUpdateRequest {
         let percent: Int
+    }
+
+    private struct PageKeyRuntimeID: Hashable {
+        let pageID: String
+        let keyID: Int
     }
 
     init(
@@ -84,6 +90,9 @@ final class H200ConnectionModel: ObservableObject {
         let loadedBrightnessPercent = configurationStore.loadBrightnessPercent()
         hasPersistedBrightnessPercent = loadedBrightnessPercent != nil
         brightnessPercent = loadedBrightnessPercent ?? DeckBrightnessConfiguration.defaultPercent
+        if brightnessPercent == 0 {
+            syncer.setInternalRefreshPaused(true)
+        }
         mihoyoSession = mihoyoSessionStore.loadSession()
         if let mihoyoSession {
             mihoyoLoginState = .loggedIn(accountID: mihoyoSession.accountID)
@@ -136,7 +145,7 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         refresh()
-        if mihoyoSession != nil {
+        if canRunInternalRefresh, mihoyoSession != nil {
             refreshAssignedMihoyoGameStatuses()
         }
     }
@@ -311,6 +320,7 @@ final class H200ConnectionModel: ObservableObject {
                 fetchSub2API(for: selectedKeyID)
                 scheduleSub2APIGroupListRefresh(for: selectedKeyID)
             } else {
+                clearSub2APITokenPause(for: selectedKeyID)
                 stopSub2APITimer(for: selectedKeyID)
             }
             if function.game != nil {
@@ -516,13 +526,21 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
+        guard interactionState.sub2APIConfiguration(for: selectedKeyID).bearerKey != bearerKey else {
+            return
+        }
+
         if interactionState.setSub2APIBearerKey(bearerKey, for: selectedKeyID) {
+            resumeSub2APIAfterBearerChange(for: selectedKeyID)
             persistCurrentConfiguration()
             stopSub2APITimer(for: selectedKeyID)
             sub2APIFetchTasks[selectedKeyID]?.cancel()
             sub2APIFetchTasks[selectedKeyID] = nil
             syncKeyDisplay(keyID: selectedKeyID)
             scheduleSub2APIGroupListRefresh(for: selectedKeyID)
+            if interactionState.sub2APIConfiguration(for: selectedKeyID).targetGroupID > 0 {
+                fetchSub2API(for: selectedKeyID)
+            }
         }
     }
 
@@ -640,6 +658,7 @@ final class H200ConnectionModel: ObservableObject {
 
     private func updateBrightnessPercent(_ percent: Int, persist: Bool, forceSend: Bool = false) {
         let clampedPercent = DeckBrightnessConfiguration.clamped(percent)
+        let wasInternalRefreshPaused = isInternalRefreshPaused
         let didChange = brightnessPercent != clampedPercent
 
         brightnessPercent = clampedPercent
@@ -647,11 +666,50 @@ final class H200ConnectionModel: ObservableObject {
             hasPersistedBrightnessPercent = true
             configurationStore.saveBrightnessPercent(clampedPercent)
         }
+        handleInternalRefreshPauseChange(wasPaused: wasInternalRefreshPaused)
         guard didChange || forceSend else {
             return
         }
 
         requestBrightnessUpdate(percent: clampedPercent)
+    }
+
+    private var isInternalRefreshPaused: Bool {
+        brightnessPercent == 0
+    }
+
+    private var canRunInternalRefresh: Bool {
+        !isInternalRefreshPaused
+    }
+
+    private func handleInternalRefreshPauseChange(wasPaused: Bool) {
+        let isPaused = isInternalRefreshPaused
+        guard wasPaused != isPaused else {
+            return
+        }
+
+        if isPaused {
+            pauseInternalRefresh()
+        } else {
+            resumeInternalRefresh()
+        }
+    }
+
+    private func pauseInternalRefresh() {
+        cancelAllSub2APITimers()
+        cancelAllSub2APIFetchTasks()
+        cancelAllSub2APIGroupListTasks()
+        cancelAllMihoyoGameTimers()
+        cancelAllMihoyoGameFetchTasks()
+        syncer.setInternalRefreshPaused(true)
+    }
+
+    private func resumeInternalRefresh() {
+        syncer.setInternalRefreshPaused(false)
+        startCurrentPageRuntime()
+        if mihoyoSession != nil {
+            refreshAssignedMihoyoGameStatuses()
+        }
     }
 
     private func refresh() {
@@ -668,7 +726,7 @@ final class H200ConnectionModel: ObservableObject {
         syncSummary = nil
         alert = nil
         needsFullDisplaySyncAfterStartup = false
-        if mihoyoSession != nil {
+        if canRunInternalRefresh, mihoyoSession != nil {
             startAssignedMihoyoGameTimers()
         }
 
@@ -727,7 +785,9 @@ final class H200ConnectionModel: ObservableObject {
                 needsFullDisplaySyncAfterStartup = false
                 syncCurrentDisplays()
             }
-            refreshAssignedSub2APIStatuses()
+            if canRunInternalRefresh {
+                refreshAssignedSub2APIStatuses()
+            }
         case let .failure(error, _):
             alert = H200ConnectionAlert(syncFailure: error)
         }
@@ -807,9 +867,38 @@ final class H200ConnectionModel: ObservableObject {
         _ = smbServerConnector.connect(to: address)
     }
 
+    private func pageKeyRuntimeID(for keyID: Int, pageID: String? = nil) -> PageKeyRuntimeID {
+        PageKeyRuntimeID(pageID: pageID ?? interactionState.currentPageID, keyID: keyID)
+    }
+
+    private func isSub2APITokenPaused(for keyID: Int, pageID: String? = nil) -> Bool {
+        sub2APITokenPausedKeys.contains(pageKeyRuntimeID(for: keyID, pageID: pageID))
+    }
+
+    private func pauseSub2APIForTokenError(keyID: Int, pageID: String) {
+        sub2APITokenPausedKeys.insert(pageKeyRuntimeID(for: keyID, pageID: pageID))
+        stopSub2APITimer(for: keyID)
+        sub2APIGroupListRefreshTasks[keyID]?.cancel()
+        sub2APIGroupListRefreshTasks[keyID] = nil
+    }
+
+    private func resumeSub2APIAfterBearerChange(for keyID: Int) {
+        sub2APITokenPausedKeys.remove(pageKeyRuntimeID(for: keyID))
+    }
+
+    private func clearSub2APITokenPause(for keyID: Int) {
+        sub2APITokenPausedKeys.remove(pageKeyRuntimeID(for: keyID))
+    }
+
     private func fetchSub2API(for keyID: Int) {
         let config = interactionState.sub2APIConfiguration(for: keyID)
-        guard !config.baseURL.isEmpty, config.targetGroupID > 0, !config.bearerKey.isEmpty else {
+        guard canRunInternalRefresh,
+              interactionState.configuration(for: keyID)?.function == .sub2API,
+              !isSub2APITokenPaused(for: keyID),
+              !config.baseURL.isEmpty,
+              config.targetGroupID > 0,
+              !config.bearerKey.isEmpty
+        else {
             return
         }
 
@@ -835,19 +924,32 @@ final class H200ConnectionModel: ObservableObject {
 
             self.interactionState.setSub2APILastResult(result, for: keyID)
             self.persistCurrentConfiguration()
+            if result.isTokenUnavailable {
+                self.pauseSub2APIForTokenError(keyID: keyID, pageID: pageID)
+            }
             self.syncKeyDisplay(keyID: keyID) { [weak self] (result: H200DeckSyncResult) in
                 guard case .success = result else {
                     return
                 }
 
-                self?.scheduleNextSub2APIRefresh(for: keyID)
+                guard let self,
+                      self.canRunInternalRefresh,
+                      !self.isSub2APITokenPaused(for: keyID, pageID: pageID)
+                else {
+                    return
+                }
+
+                self.scheduleNextSub2APIRefresh(for: keyID)
             }
         }
     }
 
     private func fetchSub2APIGroupList(for keyID: Int) {
         let config = interactionState.sub2APIConfiguration(for: keyID)
-        guard interactionState.configuration(for: keyID)?.function == .sub2API else {
+        guard canRunInternalRefresh,
+              interactionState.configuration(for: keyID)?.function == .sub2API,
+              !isSub2APITokenPaused(for: keyID)
+        else {
             return
         }
 
@@ -891,13 +993,18 @@ final class H200ConnectionModel: ObservableObject {
                 groupListState = .networkError(message)
             }
 
+            if result.isTokenUnavailable {
+                self.pauseSub2APIForTokenError(keyID: keyID, pageID: pageID)
+            }
             self.interactionState.setSub2APIGroupListState(groupListState, for: keyID)
         }
     }
 
     private func scheduleSub2APIGroupListRefresh(for keyID: Int) {
         let config = interactionState.sub2APIConfiguration(for: keyID)
-        guard interactionState.configuration(for: keyID)?.function == .sub2API,
+        guard canRunInternalRefresh,
+              interactionState.configuration(for: keyID)?.function == .sub2API,
+              !isSub2APITokenPaused(for: keyID),
               !config.baseURL.isEmpty,
               !config.bearerKey.isEmpty
         else {
@@ -935,7 +1042,9 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func fetchMihoyoGameStatus(for keyID: Int) {
-        guard let game = interactionState.mihoyoGame(for: keyID) else {
+        guard canRunInternalRefresh,
+              let game = interactionState.mihoyoGame(for: keyID)
+        else {
             return
         }
 
@@ -964,18 +1073,16 @@ final class H200ConnectionModel: ObservableObject {
             self.interactionState.setMihoyoGameLastResult(result, for: keyID)
             switch result {
             case let .loginExpired(message):
-                self.mihoyoSession = nil
-                self.mihoyoSessionStore.clearSession()
-                self.mihoyoLoginState = .expired(message)
-                self.cancelAllMihoyoGameTimers()
-                self.markAllMihoyoKeys(result: .loginExpired(message))
+                self.invalidateMihoyoSession(
+                    loginState: .expired(message),
+                    keyResult: .loginExpired(message)
+                )
                 return
             case .loginRequired:
-                self.mihoyoSession = nil
-                self.mihoyoSessionStore.clearSession()
-                self.mihoyoLoginState = .notLoggedIn
-                self.cancelAllMihoyoGameTimers()
-                self.markAllMihoyoKeys(result: .loginRequired)
+                self.invalidateMihoyoSession(
+                    loginState: .notLoggedIn,
+                    keyResult: .loginRequired
+                )
                 return
             case .success, .noBoundRole, .networkError:
                 break
@@ -984,10 +1091,26 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    private func invalidateMihoyoSession(
+        loginState: MihoyoLoginState,
+        keyResult: MihoyoGameStatusResult
+    ) {
+        mihoyoSession = nil
+        mihoyoSessionStore.clearSession()
+        mihoyoLoginState = loginState
+        cancelAllMihoyoGameTimers()
+        cancelAllMihoyoGameFetchTasks()
+        markAllMihoyoKeys(result: keyResult)
+    }
+
     private func finishMihoyoLogin(_ session: MihoyoLoginSession) {
         mihoyoSession = session
         mihoyoSessionStore.saveSession(session)
         mihoyoLoginState = .loggedIn(accountID: session.accountID)
+        guard canRunInternalRefresh else {
+            return
+        }
+
         startAssignedMihoyoGameTimers()
         refreshAssignedMihoyoGameStatuses()
     }
@@ -997,6 +1120,7 @@ final class H200ConnectionModel: ObservableObject {
         mihoyoSessionStore.clearSession()
         mihoyoLoginState = .failed(message)
         cancelAllMihoyoGameTimers()
+        cancelAllMihoyoGameFetchTasks()
         markAllMihoyoKeys(result: .loginRequired)
     }
 
@@ -1005,10 +1129,15 @@ final class H200ConnectionModel: ObservableObject {
         mihoyoSessionStore.clearSession()
         mihoyoLoginState = .expired(message)
         cancelAllMihoyoGameTimers()
+        cancelAllMihoyoGameFetchTasks()
         markAllMihoyoKeys(result: .loginRequired)
     }
 
     private func refreshAssignedMihoyoGameStatuses() {
+        guard canRunInternalRefresh else {
+            return
+        }
+
         for key in layout.keys where interactionState.mihoyoGame(for: key.id) != nil {
             fetchMihoyoGameStatus(for: key.id)
         }
@@ -1023,12 +1152,20 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func refreshAssignedSub2APIStatuses() {
+        guard canRunInternalRefresh else {
+            return
+        }
+
         for key in layout.keys where interactionState.configuration(for: key.id)?.function == .sub2API {
             fetchSub2API(for: key.id)
         }
     }
 
     private func startAssignedMihoyoGameTimers() {
+        guard canRunInternalRefresh else {
+            return
+        }
+
         for key in layout.keys where interactionState.mihoyoGame(for: key.id) != nil {
             startMihoyoGameTimer(for: key.id)
         }
@@ -1037,7 +1174,9 @@ final class H200ConnectionModel: ObservableObject {
     private func scheduleNextSub2APIRefresh(for keyID: Int) {
         stopSub2APITimer(for: keyID)
         let config = interactionState.sub2APIConfiguration(for: keyID)
-        guard interactionState.configuration(for: keyID)?.function == .sub2API,
+        guard canRunInternalRefresh,
+              interactionState.configuration(for: keyID)?.function == .sub2API,
+              !isSub2APITokenPaused(for: keyID),
               !config.baseURL.isEmpty,
               config.targetGroupID > 0,
               !config.bearerKey.isEmpty,
@@ -1061,6 +1200,12 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func restartSub2APITimer(for keyID: Int) {
+        guard canRunInternalRefresh,
+              !isSub2APITokenPaused(for: keyID)
+        else {
+            return
+        }
+
         guard interactionState.sub2APIConfiguration(for: keyID).lastResult != nil else {
             return
         }
@@ -1070,7 +1215,8 @@ final class H200ConnectionModel: ObservableObject {
 
     private func startMihoyoGameTimer(for keyID: Int) {
         stopMihoyoGameTimer(for: keyID)
-        guard mihoyoSession != nil,
+        guard canRunInternalRefresh,
+              mihoyoSession != nil,
               interactionState.mihoyoGame(for: keyID) != nil
         else {
             return
@@ -1241,6 +1387,10 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func startCurrentPageRuntime() {
+        guard canRunInternalRefresh else {
+            return
+        }
+
         if mihoyoSession != nil {
             startAssignedMihoyoGameTimers()
         }
@@ -1259,6 +1409,7 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIGroupListRefreshTasks[keyID]?.cancel()
         sub2APIGroupListRefreshTasks[keyID] = nil
         sub2APIGroupListLastRequestNanoseconds[keyID] = nil
+        clearSub2APITokenPause(for: keyID)
         stopMihoyoGameTimer(for: keyID)
         mihoyoGameFetchTasks[keyID]?.cancel()
         mihoyoGameFetchTasks[keyID] = nil
@@ -1329,6 +1480,28 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         mihoyoGameFetchTasks.removeAll()
+    }
+}
+
+private extension Sub2APICapacityResult {
+    var isTokenUnavailable: Bool {
+        switch self {
+        case .invalidToken, .tokenExpired:
+            return true
+        case .success, .notFound, .networkError:
+            return false
+        }
+    }
+}
+
+private extension Sub2APIGroupListResult {
+    var isTokenUnavailable: Bool {
+        switch self {
+        case .invalidToken, .tokenExpired:
+            return true
+        case .success, .networkError:
+            return false
+        }
     }
 }
 

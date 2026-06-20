@@ -107,6 +107,7 @@ nonisolated protocol H200DeckSyncing: Sendable {
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult
     func sendPartialPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult
     func setBrightness(percent: Int) -> H200DeckCommandResult
+    func setInternalRefreshPaused(_ paused: Bool)
     func setInputHandler(_ handler: H200InputHandler?)
     func close()
 }
@@ -117,6 +118,7 @@ extension H200DeckSyncing {
     }
 
     nonisolated func setBrightness(percent: Int) -> H200DeckCommandResult { .success(elapsedNanoseconds: 0) }
+    nonisolated func setInternalRefreshPaused(_ paused: Bool) {}
     nonisolated func setInputHandler(_ handler: H200InputHandler?) {}
     nonisolated func close() {}
 }
@@ -286,6 +288,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
     private var connection: H200HIDConnection?
     private var inputHandler: H200InputHandler?
     private var currentSmallWindowMode: H200SmallWindowMode = .background
+    private var isInternalRefreshPaused = false
 
     nonisolated init(
         packageBuilder: H200ButtonPackageBuilder = H200ButtonPackageBuilder(),
@@ -336,6 +339,12 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
             timedCommandResult(startedAt: startedAt) {
                 setBrightnessOnQueue(percent: percent)
             }
+        }
+    }
+
+    func setInternalRefreshPaused(_ paused: Bool) {
+        operationQueue.async { [weak self] in
+            self?.setInternalRefreshPausedOnQueue(paused)
         }
     }
 
@@ -431,7 +440,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
             return .failure(error, elapsedNanoseconds: 0)
         }
 
-        connection.startKeepAlive(mode: currentSmallWindowMode, systemStatsSampler: systemStatsSampler)
+        startKeepAliveIfNeeded(on: connection)
         return .success(elapsedNanoseconds: 0)
     }
 
@@ -448,7 +457,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
             closeOnQueue()
             return .failure(error, elapsedNanoseconds: 0)
         }
-        connection.startKeepAlive(mode: currentSmallWindowMode, systemStatsSampler: systemStatsSampler)
+        startKeepAliveIfNeeded(on: connection)
 
         return .success(H200DeckSyncSummary(
             payloadByteCount: package.payload.count,
@@ -460,6 +469,27 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
 
     private func systemStats(for mode: H200SmallWindowMode) -> H200SystemStats? {
         mode == .stats ? systemStatsSampler.sample() : nil
+    }
+
+    private func setInternalRefreshPausedOnQueue(_ paused: Bool) {
+        guard isInternalRefreshPaused != paused else {
+            return
+        }
+
+        isInternalRefreshPaused = paused
+        if paused {
+            connection?.stopKeepAlive()
+        } else if let connection {
+            startKeepAliveIfNeeded(on: connection)
+        }
+    }
+
+    private func startKeepAliveIfNeeded(on connection: H200HIDConnection) {
+        guard !isInternalRefreshPaused else {
+            return
+        }
+
+        connection.startKeepAlive(mode: currentSmallWindowMode, systemStatsSampler: systemStatsSampler)
     }
 
     private func openConnectionIfNeeded() -> Result<H200HIDConnection, H200DeckSyncFailure> {
@@ -597,6 +627,16 @@ nonisolated private final class H200HIDConnection: @unchecked Sendable {
             }
             self.keepAliveTimer = timer
             timer.resume()
+        }
+    }
+
+    func stopKeepAlive() {
+        queue.async { [weak self] in
+            guard let self, self.isOpen else {
+                return
+            }
+
+            self.stopKeepAliveOnQueue()
         }
     }
 

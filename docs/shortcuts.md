@@ -9,7 +9,7 @@
 - 动作只支持正在运行的 app 进程：如果 app 没有运行，Shortcuts 会得到错误提示，用户需要手动打开 app。
 - 动作不会主动打开 app，也不会保存亮度配置。
 - 动作只在 app 已连接 Ulanzi Deck 且启动同步完成后执行；未连接、未完成同步或连接失败时会返回错误。
-- 执行成功时，动作复用顶部亮度 slider 的异步 `0x000a` 发包路径，但调用 `persist: false`，因此不会写入 `UserDefaults`，下次启动也不会把这次 Shortcuts 临时亮度当成用户配置恢复。
+- 执行成功时，动作复用顶部亮度 slider 的异步 `0x000a` 发包路径，但调用 `persist: false`，因此不会写入 `UserDefaults`，下次启动也不会把这次 Shortcuts 临时亮度当成用户配置恢复。亮度设为 `0` 时仍会和 app 内 slider 一样暂停内部刷新，恢复到大于 `0` 后再继续刷新。
 
 ## 边界
 
