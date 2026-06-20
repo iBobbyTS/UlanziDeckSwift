@@ -1201,6 +1201,137 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func sub2APITokenPauseMovesWithSwappedConfiguration() async throws {
+        let restoredItem = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3050)
+        let fetcher = FakeSub2APIFetcher(
+            results: [.invalidToken, .success(item: restoredItem)],
+            defaultResult: .success(item: restoredItem)
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        loadedState.setSub2APITargetGroupID(1215, for: 3)
+        loadedState.setSub2APIBearerKey("old-token", for: 3)
+        loadedState.setSub2APIRefreshInterval(5, for: 3)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 0.01
+        )
+
+        model.checkOnLaunch()
+
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .invalidToken
+        }
+
+        model.swapSquareKeyConfigurations(sourceKeyID: 3, targetKeyID: 4)
+        try await Task.sleep(nanoseconds: 120_000_000)
+        #expect(fetcher.requests.count == 1)
+        #expect(model.interactionState.configuration(for: 3)?.function != .sub2API)
+        #expect(model.interactionState.configuration(for: 4)?.function == .sub2API)
+
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(fetcher.requests.count == 1)
+
+        model.selectKey(keyID: 4)
+        model.setSelectedSub2APIBearerKey("new-token")
+
+        try await Self.waitUntil {
+            fetcher.requests.count >= 2
+                && model.interactionState.configuration(for: 4)?.sub2API.lastResult == .success(item: restoredItem)
+        }
+
+        #expect(Array(fetcher.requests.prefix(2)) == [
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "old-token"),
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "new-token"),
+        ])
+    }
+
+    @MainActor
+    @Test func staleSub2APITokenFailureIsIgnoredAfterSwitchingFunction() async throws {
+        let restoredItem = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3050)
+        let fetcher = FakeSub2APIFetcher(
+            results: [.invalidToken, .success(item: restoredItem)],
+            defaultResult: .success(item: restoredItem),
+            fetchDelayNanoseconds: 80_000_000
+        )
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            sub2APIFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 3)
+        model.assignSelectedFunction(.sub2API)
+        model.setSelectedSub2APIBaseURL("api.example.com")
+        model.setSelectedSub2APIBearerKey("old-token")
+        model.setSelectedSub2APITargetGroupID(1215)
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+        }
+
+        model.assignSelectedFunction(.tally)
+        try await Task.sleep(nanoseconds: 120_000_000)
+        #expect(model.interactionState.configuration(for: 3)?.function == .tally)
+        #expect(model.interactionState.configuration(for: 3)?.sub2API.lastResult == nil)
+
+        model.assignSelectedFunction(.sub2API)
+
+        try await Self.waitUntil {
+            fetcher.requests.count >= 2
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .success(item: restoredItem)
+        }
+
+        #expect(Array(fetcher.requests.prefix(2)) == [
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "old-token"),
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "old-token"),
+        ])
+    }
+
+    @MainActor
+    @Test func sub2APIHighImpactSameValueWritesDoNotPersistOrRequest() {
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        loadedState.setSub2APITargetGroupID(1215, for: 3)
+        loadedState.setSub2APIBearerKey("token", for: 3)
+        loadedState.setSub2APIRefreshInterval(5, for: 3)
+        let fetcher = FakeSub2APIFetcher()
+        let store = FakeDeckConfigurationStore(loadedState: loadedState)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.notConnected]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: store,
+            sub2APIFetcher: fetcher
+        )
+
+        model.selectKey(keyID: 3)
+        model.setSelectedSub2APIBaseURL("  api.example.com  ")
+        model.setSelectedSub2APITargetGroupID(1215)
+        model.setSelectedSub2APIRefreshInterval(1)
+        model.setSelectedSub2APIBearerKey("token")
+
+        #expect(store.savedStates.isEmpty)
+        #expect(fetcher.requests.isEmpty)
+        #expect(fetcher.groupListRequests.isEmpty)
+    }
+
+    @MainActor
     @Test func sub2APINetworkErrorKeepsAutomaticRefreshRunning() async throws {
         let item = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3040)
         let fetcher = FakeSub2APIFetcher(
@@ -3468,6 +3599,26 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func mihoyoGameRefreshIntervalSameClampedValueDoesNotPersist() {
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.genshinStatus, to: 4)
+        loadedState.setMihoyoGameRefreshIntervalMinutes(1, for: 4)
+        let store = FakeDeckConfigurationStore(loadedState: loadedState)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.notConnected]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: store
+        )
+
+        model.selectKey(keyID: 4)
+        model.setSelectedMihoyoGameRefreshIntervalMinutes(0)
+
+        #expect(store.savedStates.isEmpty)
+        #expect(model.interactionState.configuration(for: 4)?.mihoyoGame.refreshIntervalMinutes == 1)
+    }
+
+    @MainActor
     @Test func expiredGameQueryClearsSharedLoginAndMarksAllGameKeysExpired() async throws {
         let session = Self.mihoyoSession()
         let sessionStore = FakeMihoyoSessionStore(loadedSession: session)
@@ -4217,6 +4368,8 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
     private let defaultResult: Sub2APICapacityResult
     private var groupListResults: [Sub2APIGroupListResult]
     private let defaultGroupListResult: Sub2APIGroupListResult
+    private let fetchDelayNanoseconds: UInt64?
+    private let groupListFetchDelayNanoseconds: UInt64?
     private var storedRequests: [Request] = []
     private var storedGroupListRequests: [GroupListRequest] = []
 
@@ -4232,16 +4385,20 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         results: [Sub2APICapacityResult] = [],
         defaultResult: Sub2APICapacityResult = .networkError("未配置响应"),
         groupListResults: [Sub2APIGroupListResult] = [],
-        defaultGroupListResult: Sub2APIGroupListResult = .networkError("未配置响应")
+        defaultGroupListResult: Sub2APIGroupListResult = .networkError("未配置响应"),
+        fetchDelayNanoseconds: UInt64? = nil,
+        groupListFetchDelayNanoseconds: UInt64? = nil
     ) {
         self.results = results
         self.defaultResult = defaultResult
         self.groupListResults = groupListResults
         self.defaultGroupListResult = defaultGroupListResult
+        self.fetchDelayNanoseconds = fetchDelayNanoseconds
+        self.groupListFetchDelayNanoseconds = groupListFetchDelayNanoseconds
     }
 
     func fetchCapacitySummary(baseURL: String, targetGroupID: Int, bearerKey: String) async -> Sub2APICapacityResult {
-        locked {
+        let result = locked {
             storedRequests.append(Request(baseURL: baseURL, targetGroupID: targetGroupID, bearerKey: bearerKey))
             guard !results.isEmpty else {
                 return defaultResult
@@ -4249,10 +4406,15 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
 
             return results.removeFirst()
         }
+        if let fetchDelayNanoseconds {
+            try? await Task.sleep(nanoseconds: fetchDelayNanoseconds)
+        }
+
+        return result
     }
 
     func fetchCapacityGroups(baseURL: String, bearerKey: String) async -> Sub2APIGroupListResult {
-        locked {
+        let result = locked {
             storedGroupListRequests.append(GroupListRequest(baseURL: baseURL, bearerKey: bearerKey))
             guard !groupListResults.isEmpty else {
                 return defaultGroupListResult
@@ -4260,6 +4422,11 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
 
             return groupListResults.removeFirst()
         }
+        if let groupListFetchDelayNanoseconds {
+            try? await Task.sleep(nanoseconds: groupListFetchDelayNanoseconds)
+        }
+
+        return result
     }
 
     private func locked<Value>(_ body: () -> Value) -> Value {
