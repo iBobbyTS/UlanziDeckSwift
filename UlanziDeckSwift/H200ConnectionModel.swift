@@ -2,6 +2,15 @@ import AppKit
 import Combine
 import Foundation
 
+private nonisolated struct RuntimeSlotID: Hashable {
+    let pageID: String
+    let keyID: Int
+}
+
+private nonisolated struct RuntimeInstanceID: Hashable {
+    let rawValue: Int
+}
+
 @MainActor
 final class H200ConnectionModel: ObservableObject {
     @Published private(set) var status: H200ConnectionStatus = .checking
@@ -34,26 +43,28 @@ final class H200ConnectionModel: ObservableObject {
     private var deviceCommandGeneration = 0
     private var displayRevision = 0
     private var needsFullDisplaySyncAfterStartup = false
-    private var sub2APITimers: [Int: Timer] = [:]
-    private var sub2APIFetchTasks: [Int: Task<Void, Never>] = [:]
-    private var sub2APIGroupListTasks: [Int: Task<Void, Never>] = [:]
-    private var sub2APIGroupListRefreshTasks: [Int: Task<Void, Never>] = [:]
-    private var sub2APIGroupListLastRequestNanoseconds: [Int: UInt64] = [:]
-    private var sub2APITokenPausedKeys: Set<PageKeyRuntimeID> = []
+    private var nextRuntimeInstanceRawValue = 0
+    private var runtimeInstancesBySlot: [RuntimeSlotID: RuntimeInstanceID] = [:]
+    private var runtimeSlotsByInstance: [RuntimeInstanceID: RuntimeSlotID] = [:]
+    private var runtimeKindsByInstance: [RuntimeInstanceID: DeckKeyScheduledRuntime] = [:]
+    private var sub2APITimers: [RuntimeInstanceID: Timer] = [:]
+    private var sub2APINextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
+    private var sub2APIFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
+    private var sub2APIGroupListTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
+    private var sub2APIGroupListRefreshTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
+    private var sub2APIGroupListRefreshFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
+    private var sub2APIGroupListLastRequestNanoseconds: [RuntimeInstanceID: UInt64] = [:]
+    private var sub2APITokenPausedInstances: Set<RuntimeInstanceID> = []
     private var mihoyoLoginTask: Task<Void, Never>?
-    private var mihoyoGameTimers: [Int: Timer] = [:]
-    private var mihoyoGameFetchTasks: [Int: Task<Void, Never>] = [:]
+    private var mihoyoGameTimers: [RuntimeInstanceID: Timer] = [:]
+    private var mihoyoGameNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
+    private var mihoyoGameFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
     private let sub2APIRefreshSecondDuration: TimeInterval
     private let sub2APIGroupListMinimumIntervalNanoseconds: UInt64
     private let mihoyoGameRefreshMinuteDuration: TimeInterval
 
     private struct BrightnessUpdateRequest {
         let percent: Int
-    }
-
-    private struct PageKeyRuntimeID: Hashable {
-        let pageID: String
-        let keyID: Int
     }
 
     init(
@@ -166,11 +177,16 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     func clearKeyFunction(keyID: Int) {
+        guard interactionState.canDeleteFunction(keyID: keyID) else {
+            return
+        }
+
+        destroyRuntimeInstance(for: keyID, clearsConfigurationRuntimeState: true)
         guard interactionState.clearFunction(keyID: keyID) else {
             return
         }
 
-        cancelRuntime(for: keyID)
+        reconcileRuntimeInstancesWithInteractionState()
         persistCurrentConfiguration()
         syncKeyDisplay(keyID: keyID)
     }
@@ -181,19 +197,18 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         let pageID = interactionState.currentPageID
-        let sourceSub2APITokenPaused = isSub2APITokenPaused(for: sourceKeyID, pageID: pageID)
-        let targetSub2APITokenPaused = isSub2APITokenPaused(for: targetKeyID, pageID: pageID)
-        cancelRuntime(for: sourceKeyID, clearsSub2APITokenPause: false)
-        cancelRuntime(for: targetKeyID, clearsSub2APITokenPause: false)
+        _ = ensureRuntimeInstance(for: sourceKeyID)
+        _ = ensureRuntimeInstance(for: targetKeyID)
+        cancelLongPressRuntime(for: sourceKeyID)
+        cancelLongPressRuntime(for: targetKeyID)
         guard interactionState.swapSquareConfigurations(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID) else {
             return
         }
-        setSub2APITokenPause(targetSub2APITokenPaused, for: sourceKeyID, pageID: pageID)
-        setSub2APITokenPause(sourceSub2APITokenPaused, for: targetKeyID, pageID: pageID)
+        swapRuntimeInstances(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID, pageID: pageID)
+        reconcileRuntimeInstancesWithInteractionState()
 
         persistCurrentConfiguration()
-        restartRuntime(for: sourceKeyID)
-        restartRuntime(for: targetKeyID)
+        resumeCurrentPageRuntime()
         syncKeyDisplays(keyIDs: [sourceKeyID, targetKeyID])
     }
 
@@ -214,8 +229,9 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         if displayMode != .function {
-            cancelRuntime(for: keyID)
+            destroyRuntimeInstance(for: keyID, clearsConfigurationRuntimeState: true)
         }
+        reconcileRuntimeInstancesWithInteractionState()
         persistCurrentConfiguration()
         syncKeyDisplay(keyID: keyID)
     }
@@ -318,15 +334,25 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
+        let previousInstanceID = runtimeInstanceID(for: selectedKeyID)
         if interactionState.assign(function, to: selectedKeyID) {
-            cancelRuntime(for: selectedKeyID)
+            if let previousInstanceID {
+                destroyRuntimeInstance(previousInstanceID, clearsConfigurationRuntimeState: true)
+            }
+            clearConfigurationRuntimeState(
+                for: runtimeSlotID(for: selectedKeyID),
+                kind: function.scheduledRuntime
+            )
+            reconcileRuntimeInstancesWithInteractionState()
             persistCurrentConfiguration()
             syncKeyDisplay(keyID: selectedKeyID)
             if function == .sub2API {
+                _ = ensureRuntimeInstance(for: selectedKeyID)
                 fetchSub2API(for: selectedKeyID)
                 scheduleSub2APIGroupListRefresh(for: selectedKeyID)
             }
             if function.game != nil {
+                _ = ensureRuntimeInstance(for: selectedKeyID)
                 startMihoyoGameTimer(for: selectedKeyID)
                 fetchMihoyoGameStatus(for: selectedKeyID)
             }
@@ -487,10 +513,16 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         if interactionState.setSub2APIBaseURL(baseURL, for: selectedKeyID) {
+            let instanceID = ensureRuntimeInstance(for: selectedKeyID)
             persistCurrentConfiguration()
-            stopSub2APITimer(for: selectedKeyID)
-            sub2APIFetchTasks[selectedKeyID]?.cancel()
-            sub2APIFetchTasks[selectedKeyID] = nil
+            if let instanceID {
+                stopSub2APITimer(for: instanceID, preservesNextFire: false)
+                sub2APIFetchTasks[instanceID]?.cancel()
+                sub2APIFetchTasks[instanceID] = nil
+                sub2APIGroupListTasks[instanceID]?.cancel()
+                sub2APIGroupListTasks[instanceID] = nil
+                stopSub2APIGroupListRefresh(for: instanceID, preservesNextFire: false)
+            }
             syncKeyDisplay(keyID: selectedKeyID)
             scheduleSub2APIGroupListRefresh(for: selectedKeyID)
         }
@@ -506,10 +538,13 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         if interactionState.setSub2APITargetGroupID(groupID, for: selectedKeyID) {
+            let instanceID = ensureRuntimeInstance(for: selectedKeyID)
             persistCurrentConfiguration()
-            stopSub2APITimer(for: selectedKeyID)
-            sub2APIFetchTasks[selectedKeyID]?.cancel()
-            sub2APIFetchTasks[selectedKeyID] = nil
+            if let instanceID {
+                stopSub2APITimer(for: instanceID, preservesNextFire: false)
+                sub2APIFetchTasks[instanceID]?.cancel()
+                sub2APIFetchTasks[instanceID] = nil
+            }
             if groupID > 0 {
                 fetchSub2API(for: selectedKeyID)
             } else {
@@ -545,10 +580,16 @@ final class H200ConnectionModel: ObservableObject {
 
         if interactionState.setSub2APIBearerKey(bearerKey, for: selectedKeyID) {
             resumeSub2APIAfterBearerChange(for: selectedKeyID)
+            let instanceID = ensureRuntimeInstance(for: selectedKeyID)
             persistCurrentConfiguration()
-            stopSub2APITimer(for: selectedKeyID)
-            sub2APIFetchTasks[selectedKeyID]?.cancel()
-            sub2APIFetchTasks[selectedKeyID] = nil
+            if let instanceID {
+                stopSub2APITimer(for: instanceID, preservesNextFire: false)
+                sub2APIFetchTasks[instanceID]?.cancel()
+                sub2APIFetchTasks[instanceID] = nil
+                sub2APIGroupListTasks[instanceID]?.cancel()
+                sub2APIGroupListTasks[instanceID] = nil
+                stopSub2APIGroupListRefresh(for: instanceID, preservesNextFire: false)
+            }
             syncKeyDisplay(keyID: selectedKeyID)
             scheduleSub2APIGroupListRefresh(for: selectedKeyID)
             if interactionState.sub2APIConfiguration(for: selectedKeyID).targetGroupID > 0 {
@@ -608,7 +649,7 @@ final class H200ConnectionModel: ObservableObject {
         mihoyoSession = nil
         mihoyoSessionStore.clearSession()
         mihoyoLoginState = .creatingQRCode
-        cancelAllMihoyoGameTimers()
+        cancelAllMihoyoGameTimers(preservesNextFire: false)
         cancelAllMihoyoGameFetchTasks()
         markAllMihoyoKeys(result: .loginRequired)
 
@@ -714,30 +755,19 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func pauseInternalRefresh() {
-        cancelAllSub2APITimers()
-        cancelAllSub2APIFetchTasks()
-        cancelAllSub2APIGroupListTasks()
-        cancelAllMihoyoGameTimers()
-        cancelAllMihoyoGameFetchTasks()
+        pauseAllRuntimeInstances()
         syncer.setInternalRefreshPaused(true)
     }
 
     private func resumeInternalRefresh() {
         syncer.setInternalRefreshPaused(false)
         startCurrentPageRuntime()
-        if mihoyoSession != nil {
-            refreshAssignedMihoyoGameStatuses()
-        }
     }
 
     private func refresh() {
-        cancelAllLongPressTasks()
-        cancelAllSub2APITimers()
-        cancelAllSub2APIFetchTasks()
-        cancelAllSub2APIGroupListTasks()
-        cancelAllMihoyoGameTimers()
-        cancelAllMihoyoGameFetchTasks()
+        pauseAllRuntimeInstances()
         _ = interactionState.goToRootPage()
+        reconcileRuntimeInstancesWithInteractionState()
         deviceCommandGeneration += 1
         let generation = deviceCommandGeneration
         status = .checking
@@ -885,131 +915,358 @@ final class H200ConnectionModel: ObservableObject {
         _ = smbServerConnector.connect(to: address)
     }
 
-    private func pageKeyRuntimeID(for keyID: Int, pageID: String? = nil) -> PageKeyRuntimeID {
-        PageKeyRuntimeID(pageID: pageID ?? interactionState.currentPageID, keyID: keyID)
+    private var nowNanoseconds: UInt64 {
+        DispatchTime.now().uptimeNanoseconds
     }
 
-    private func isSub2APITokenPaused(for keyID: Int, pageID: String? = nil) -> Bool {
-        sub2APITokenPausedKeys.contains(pageKeyRuntimeID(for: keyID, pageID: pageID))
+    private func runtimeSlotID(for keyID: Int, pageID: String? = nil) -> RuntimeSlotID {
+        RuntimeSlotID(pageID: pageID ?? interactionState.currentPageID, keyID: keyID)
     }
 
-    private func pauseSub2APIForTokenError(keyID: Int, pageID: String) {
-        sub2APITokenPausedKeys.insert(pageKeyRuntimeID(for: keyID, pageID: pageID))
-        stopSub2APITimer(for: keyID)
-        sub2APIGroupListRefreshTasks[keyID]?.cancel()
-        sub2APIGroupListRefreshTasks[keyID] = nil
+    private func runtimeConfiguration(for slot: RuntimeSlotID) -> DeckKeyConfiguration? {
+        if slot.pageID == interactionState.currentPageID {
+            return interactionState.configuration(for: slot.keyID)
+        }
+
+        return interactionState.persistedPages
+            .first { $0.id == slot.pageID }?
+            .configurations[slot.keyID]
     }
 
-    private func setSub2APITokenPause(_ paused: Bool, for keyID: Int, pageID: String? = nil) {
-        let runtimeID = pageKeyRuntimeID(for: keyID, pageID: pageID)
-        if paused {
-            sub2APITokenPausedKeys.insert(runtimeID)
-        } else {
-            sub2APITokenPausedKeys.remove(runtimeID)
+    private func runtimeInstanceID(for keyID: Int, pageID: String? = nil) -> RuntimeInstanceID? {
+        runtimeInstancesBySlot[runtimeSlotID(for: keyID, pageID: pageID)]
+    }
+
+    private func ensureRuntimeInstance(for keyID: Int) -> RuntimeInstanceID? {
+        guard let kind = interactionState.configuration(for: keyID)?.function.scheduledRuntime else {
+            return nil
+        }
+
+        let slot = runtimeSlotID(for: keyID)
+        if let existingInstanceID = runtimeInstancesBySlot[slot] {
+            if runtimeKindsByInstance[existingInstanceID] == kind {
+                return existingInstanceID
+            }
+            destroyRuntimeInstance(existingInstanceID, clearsConfigurationRuntimeState: true)
+        }
+
+        nextRuntimeInstanceRawValue += 1
+        let instanceID = RuntimeInstanceID(rawValue: nextRuntimeInstanceRawValue)
+        runtimeInstancesBySlot[slot] = instanceID
+        runtimeSlotsByInstance[instanceID] = slot
+        runtimeKindsByInstance[instanceID] = kind
+        return instanceID
+    }
+
+    private func ensureCurrentPageRuntimeInstances() {
+        for key in layout.keys where interactionState.configuration(for: key.id)?.function.scheduledRuntime != nil {
+            _ = ensureRuntimeInstance(for: key.id)
         }
     }
 
-    private func resumeSub2APIAfterBearerChange(for keyID: Int) {
-        sub2APITokenPausedKeys.remove(pageKeyRuntimeID(for: keyID))
+    private func reconcileRuntimeInstancesWithInteractionState() {
+        let pageIDs = Set(interactionState.persistedPages.map(\.id))
+        for (slot, instanceID) in Array(runtimeInstancesBySlot) {
+            let expectedKind = pageIDs.contains(slot.pageID)
+                ? runtimeConfiguration(for: slot)?.function.scheduledRuntime
+                : nil
+            guard expectedKind == runtimeKindsByInstance[instanceID] else {
+                destroyRuntimeInstance(
+                    instanceID,
+                    clearsConfigurationRuntimeState: slot.pageID == interactionState.currentPageID
+                )
+                continue
+            }
+        }
     }
 
-    private func clearSub2APITokenPause(for keyID: Int) {
-        sub2APITokenPausedKeys.remove(pageKeyRuntimeID(for: keyID))
+    private func clearConfigurationRuntimeState(for slot: RuntimeSlotID, kind: DeckKeyScheduledRuntime?) {
+        guard slot.pageID == interactionState.currentPageID else {
+            return
+        }
+
+        switch kind {
+        case .sub2API:
+            _ = interactionState.clearSub2APIRuntimeState(for: slot.keyID)
+        case .mihoyoGame:
+            _ = interactionState.clearMihoyoGameRuntimeState(for: slot.keyID)
+        case nil:
+            return
+        }
+    }
+
+    private func destroyRuntimeInstance(
+        _ instanceID: RuntimeInstanceID,
+        clearsConfigurationRuntimeState: Bool
+    ) {
+        let slot = runtimeSlotsByInstance[instanceID]
+        let kind = runtimeKindsByInstance[instanceID]
+
+        sub2APITimers[instanceID]?.invalidate()
+        sub2APITimers[instanceID] = nil
+        sub2APINextFireNanoseconds[instanceID] = nil
+        sub2APIFetchTasks[instanceID]?.cancel()
+        sub2APIFetchTasks[instanceID] = nil
+        sub2APIGroupListTasks[instanceID]?.cancel()
+        sub2APIGroupListTasks[instanceID] = nil
+        sub2APIGroupListRefreshTasks[instanceID]?.cancel()
+        sub2APIGroupListRefreshTasks[instanceID] = nil
+        sub2APIGroupListRefreshFireNanoseconds[instanceID] = nil
+        sub2APIGroupListLastRequestNanoseconds[instanceID] = nil
+        sub2APITokenPausedInstances.remove(instanceID)
+
+        mihoyoGameTimers[instanceID]?.invalidate()
+        mihoyoGameTimers[instanceID] = nil
+        mihoyoGameNextFireNanoseconds[instanceID] = nil
+        mihoyoGameFetchTasks[instanceID]?.cancel()
+        mihoyoGameFetchTasks[instanceID] = nil
+
+        if let slot {
+            runtimeInstancesBySlot[slot] = nil
+            runtimeSlotsByInstance[instanceID] = nil
+            if clearsConfigurationRuntimeState {
+                clearConfigurationRuntimeState(for: slot, kind: kind)
+            }
+        }
+        runtimeKindsByInstance[instanceID] = nil
+    }
+
+    private func destroyRuntimeInstance(for keyID: Int, clearsConfigurationRuntimeState: Bool) {
+        guard let instanceID = runtimeInstanceID(for: keyID) else {
+            return
+        }
+
+        destroyRuntimeInstance(
+            instanceID,
+            clearsConfigurationRuntimeState: clearsConfigurationRuntimeState
+        )
+    }
+
+    private func swapRuntimeInstances(sourceKeyID: Int, targetKeyID: Int, pageID: String) {
+        let sourceSlot = RuntimeSlotID(pageID: pageID, keyID: sourceKeyID)
+        let targetSlot = RuntimeSlotID(pageID: pageID, keyID: targetKeyID)
+        let sourceInstanceID = runtimeInstancesBySlot[sourceSlot]
+        let targetInstanceID = runtimeInstancesBySlot[targetSlot]
+
+        runtimeInstancesBySlot[sourceSlot] = targetInstanceID
+        runtimeInstancesBySlot[targetSlot] = sourceInstanceID
+        if let sourceInstanceID {
+            runtimeSlotsByInstance[sourceInstanceID] = targetSlot
+        }
+        if let targetInstanceID {
+            runtimeSlotsByInstance[targetInstanceID] = sourceSlot
+        }
+    }
+
+    private func cancelLongPressRuntime(for keyID: Int) {
+        longPressTasks[keyID]?.cancel()
+        longPressTasks[keyID] = nil
+        longPressResetKeyIDs.remove(keyID)
+    }
+
+    private func pauseRuntimeInstance(_ instanceID: RuntimeInstanceID) {
+        sub2APITimers[instanceID]?.invalidate()
+        sub2APITimers[instanceID] = nil
+        sub2APIFetchTasks[instanceID]?.cancel()
+        sub2APIFetchTasks[instanceID] = nil
+        sub2APIGroupListTasks[instanceID]?.cancel()
+        sub2APIGroupListTasks[instanceID] = nil
+        sub2APIGroupListRefreshTasks[instanceID]?.cancel()
+        sub2APIGroupListRefreshTasks[instanceID] = nil
+
+        mihoyoGameTimers[instanceID]?.invalidate()
+        mihoyoGameTimers[instanceID] = nil
+        mihoyoGameFetchTasks[instanceID]?.cancel()
+        mihoyoGameFetchTasks[instanceID] = nil
+    }
+
+    private func pauseCurrentPageRuntime() {
+        cancelAllLongPressTasks()
+        for (slot, instanceID) in runtimeInstancesBySlot where slot.pageID == interactionState.currentPageID {
+            pauseRuntimeInstance(instanceID)
+        }
+    }
+
+    private func pauseAllRuntimeInstances() {
+        cancelAllLongPressTasks()
+        for instanceID in runtimeSlotsByInstance.keys {
+            pauseRuntimeInstance(instanceID)
+        }
+    }
+
+    private func resumeCurrentPageRuntime() {
+        guard canRunInternalRefresh else {
+            return
+        }
+
+        reconcileRuntimeInstancesWithInteractionState()
+        ensureCurrentPageRuntimeInstances()
+        for (slot, instanceID) in runtimeInstancesBySlot where slot.pageID == interactionState.currentPageID {
+            resumeRuntimeInstance(instanceID)
+        }
+    }
+
+    private func resumeRuntimeInstance(_ instanceID: RuntimeInstanceID) {
+        switch runtimeKindsByInstance[instanceID] {
+        case .sub2API:
+            resumeSub2APIRuntime(instanceID)
+        case .mihoyoGame:
+            resumeMihoyoGameRuntime(instanceID)
+        case nil:
+            return
+        }
+    }
+
+    private func isSub2APITokenPaused(for instanceID: RuntimeInstanceID) -> Bool {
+        sub2APITokenPausedInstances.contains(instanceID)
+    }
+
+    private func pauseSub2APIForTokenError(instanceID: RuntimeInstanceID) {
+        sub2APITokenPausedInstances.insert(instanceID)
+        stopSub2APITimer(for: instanceID, preservesNextFire: false)
+        sub2APIGroupListRefreshTasks[instanceID]?.cancel()
+        sub2APIGroupListRefreshTasks[instanceID] = nil
+        sub2APIGroupListRefreshFireNanoseconds[instanceID] = nil
+    }
+
+    private func resumeSub2APIAfterBearerChange(for keyID: Int) {
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else {
+            return
+        }
+
+        sub2APITokenPausedInstances.remove(instanceID)
+    }
+
+    private func resolveCurrentSub2APISlot(
+        for instanceID: RuntimeInstanceID
+    ) -> (slot: RuntimeSlotID, config: DeckKeySub2APIConfiguration)? {
+        guard let slot = runtimeSlotsByInstance[instanceID],
+              slot.pageID == interactionState.currentPageID,
+              interactionState.configuration(for: slot.keyID)?.function == .sub2API
+        else {
+            return nil
+        }
+
+        return (slot, interactionState.sub2APIConfiguration(for: slot.keyID))
     }
 
     private func fetchSub2API(for keyID: Int) {
-        let config = interactionState.sub2APIConfiguration(for: keyID)
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else {
+            return
+        }
+
+        fetchSub2API(for: instanceID)
+    }
+
+    private func fetchSub2API(for instanceID: RuntimeInstanceID) {
         guard canRunInternalRefresh,
-              interactionState.configuration(for: keyID)?.function == .sub2API,
-              !isSub2APITokenPaused(for: keyID),
-              !config.baseURL.isEmpty,
-              config.targetGroupID > 0,
-              !config.bearerKey.isEmpty
+              let resolved = resolveCurrentSub2APISlot(for: instanceID),
+              !isSub2APITokenPaused(for: instanceID),
+              !resolved.config.baseURL.isEmpty,
+              resolved.config.targetGroupID > 0,
+              !resolved.config.bearerKey.isEmpty
         else {
             return
         }
 
-        sub2APIFetchTasks[keyID]?.cancel()
-        let pageID = interactionState.currentPageID
+        stopSub2APITimer(for: instanceID, preservesNextFire: false)
+        sub2APIFetchTasks[instanceID]?.cancel()
+        let pageID = resolved.slot.pageID
         let fetcher = sub2APIFetcher
-        let baseURL = config.baseURL
-        let targetGroupID = config.targetGroupID
-        let bearerKey = config.bearerKey
-        sub2APIFetchTasks[keyID] = Task { @MainActor [weak self] in
-            let result = await fetcher.fetchCapacitySummary(baseURL: baseURL, targetGroupID: targetGroupID, bearerKey: bearerKey)
+        let baseURL = resolved.config.baseURL
+        let targetGroupID = resolved.config.targetGroupID
+        let bearerKey = resolved.config.bearerKey
+        sub2APIFetchTasks[instanceID] = Task { @MainActor [weak self] in
+            let result = await fetcher.fetchCapacitySummary(
+                baseURL: baseURL,
+                targetGroupID: targetGroupID,
+                bearerKey: bearerKey
+            )
             guard !Task.isCancelled else { return }
 
-            guard let self else { return }
-            let latestConfig = self.interactionState.sub2APIConfiguration(for: keyID)
-            guard self.interactionState.currentPageID == pageID,
-                  self.interactionState.configuration(for: keyID)?.function == .sub2API,
-                  latestConfig.baseURL == baseURL,
-                  latestConfig.targetGroupID == targetGroupID,
-                  latestConfig.bearerKey == bearerKey
+            guard let self,
+                  let latest = self.resolveCurrentSub2APISlot(for: instanceID),
+                  latest.slot.pageID == pageID,
+                  latest.config.baseURL == baseURL,
+                  latest.config.targetGroupID == targetGroupID,
+                  latest.config.bearerKey == bearerKey
             else {
                 return
             }
 
-            self.interactionState.setSub2APILastResult(result, for: keyID)
+            self.sub2APIFetchTasks[instanceID] = nil
+            self.interactionState.setSub2APILastResult(result, for: latest.slot.keyID)
             self.persistCurrentConfiguration()
             if result.isTokenUnavailable {
-                self.pauseSub2APIForTokenError(keyID: keyID, pageID: pageID)
+                self.pauseSub2APIForTokenError(instanceID: instanceID)
             }
-            self.syncKeyDisplay(keyID: keyID) { [weak self] (result: H200DeckSyncResult) in
-                guard case .success = result else {
+            self.syncKeyDisplay(keyID: latest.slot.keyID) { [weak self] (syncResult: H200DeckSyncResult) in
+                guard case .success = syncResult else {
                     return
                 }
 
                 guard let self,
                       self.canRunInternalRefresh,
-                      !self.isSub2APITokenPaused(for: keyID, pageID: pageID)
+                      let latest = self.resolveCurrentSub2APISlot(for: instanceID),
+                      latest.config.baseURL == baseURL,
+                      latest.config.targetGroupID == targetGroupID,
+                      latest.config.bearerKey == bearerKey,
+                      !self.isSub2APITokenPaused(for: instanceID)
                 else {
                     return
                 }
 
-                self.scheduleNextSub2APIRefresh(for: keyID)
+                self.scheduleNextSub2APIRefresh(for: instanceID)
             }
         }
     }
 
     private func fetchSub2APIGroupList(for keyID: Int) {
-        let config = interactionState.sub2APIConfiguration(for: keyID)
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else {
+            return
+        }
+
+        fetchSub2APIGroupList(for: instanceID)
+    }
+
+    private func fetchSub2APIGroupList(for instanceID: RuntimeInstanceID) {
         guard canRunInternalRefresh,
-              interactionState.configuration(for: keyID)?.function == .sub2API,
-              !isSub2APITokenPaused(for: keyID)
+              let resolved = resolveCurrentSub2APISlot(for: instanceID),
+              !isSub2APITokenPaused(for: instanceID)
         else {
             return
         }
 
-        guard !config.baseURL.isEmpty, !config.bearerKey.isEmpty else {
+        guard !resolved.config.baseURL.isEmpty, !resolved.config.bearerKey.isEmpty else {
             interactionState.setSub2APIGroupListState(
                 .networkError("请先填写 Base URL 和 Bearer Key"),
-                for: keyID
+                for: resolved.slot.keyID
             )
             return
         }
 
-        sub2APIGroupListTasks[keyID]?.cancel()
-        interactionState.setSub2APIGroupListState(.loading, for: keyID)
-        sub2APIGroupListLastRequestNanoseconds[keyID] = DispatchTime.now().uptimeNanoseconds
-        let pageID = interactionState.currentPageID
+        stopSub2APIGroupListRefresh(for: instanceID, preservesNextFire: false)
+        sub2APIGroupListTasks[instanceID]?.cancel()
+        interactionState.setSub2APIGroupListState(.loading, for: resolved.slot.keyID)
+        sub2APIGroupListLastRequestNanoseconds[instanceID] = nowNanoseconds
+        let pageID = resolved.slot.pageID
         let fetcher = sub2APIFetcher
-        let baseURL = config.baseURL
-        let bearerKey = config.bearerKey
-        sub2APIGroupListTasks[keyID] = Task { @MainActor [weak self] in
+        let baseURL = resolved.config.baseURL
+        let bearerKey = resolved.config.bearerKey
+        sub2APIGroupListTasks[instanceID] = Task { @MainActor [weak self] in
             let result = await fetcher.fetchCapacityGroups(baseURL: baseURL, bearerKey: bearerKey)
             guard !Task.isCancelled else { return }
 
-            guard let self else { return }
-            let latestConfig = self.interactionState.sub2APIConfiguration(for: keyID)
-            guard self.interactionState.currentPageID == pageID,
-                  self.interactionState.configuration(for: keyID)?.function == .sub2API,
-                  latestConfig.baseURL == baseURL,
-                  latestConfig.bearerKey == bearerKey
+            guard let self,
+                  let latest = self.resolveCurrentSub2APISlot(for: instanceID),
+                  latest.slot.pageID == pageID,
+                  latest.config.baseURL == baseURL,
+                  latest.config.bearerKey == bearerKey
             else {
                 return
             }
 
+            self.sub2APIGroupListTasks[instanceID] = nil
             let groupListState: DeckKeySub2APIGroupListState
             switch result {
             case let .success(items):
@@ -1023,83 +1280,162 @@ final class H200ConnectionModel: ObservableObject {
             }
 
             if result.isTokenUnavailable {
-                self.pauseSub2APIForTokenError(keyID: keyID, pageID: pageID)
+                self.pauseSub2APIForTokenError(instanceID: instanceID)
             }
-            self.interactionState.setSub2APIGroupListState(groupListState, for: keyID)
+            self.interactionState.setSub2APIGroupListState(groupListState, for: latest.slot.keyID)
         }
     }
 
     private func scheduleSub2APIGroupListRefresh(for keyID: Int) {
-        let config = interactionState.sub2APIConfiguration(for: keyID)
-        guard canRunInternalRefresh,
-              interactionState.configuration(for: keyID)?.function == .sub2API,
-              !isSub2APITokenPaused(for: keyID),
-              !config.baseURL.isEmpty,
-              !config.bearerKey.isEmpty
-        else {
-            sub2APIGroupListRefreshTasks[keyID]?.cancel()
-            sub2APIGroupListRefreshTasks[keyID] = nil
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else {
             return
         }
 
-        let now = DispatchTime.now().uptimeNanoseconds
+        scheduleSub2APIGroupListRefresh(for: instanceID)
+    }
+
+    private func scheduleSub2APIGroupListRefresh(for instanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              let resolved = resolveCurrentSub2APISlot(for: instanceID),
+              !isSub2APITokenPaused(for: instanceID),
+              !resolved.config.baseURL.isEmpty,
+              !resolved.config.bearerKey.isEmpty
+        else {
+            stopSub2APIGroupListRefresh(for: instanceID, preservesNextFire: false)
+            return
+        }
+
+        let now = nowNanoseconds
         let minimumInterval = sub2APIGroupListMinimumIntervalNanoseconds
-        guard let lastRequest = sub2APIGroupListLastRequestNanoseconds[keyID],
+        guard let lastRequest = sub2APIGroupListLastRequestNanoseconds[instanceID],
               now < lastRequest + minimumInterval
         else {
-            sub2APIGroupListRefreshTasks[keyID]?.cancel()
-            sub2APIGroupListRefreshTasks[keyID] = nil
-            fetchSub2APIGroupList(for: keyID)
+            stopSub2APIGroupListRefresh(for: instanceID, preservesNextFire: false)
+            fetchSub2APIGroupList(for: instanceID)
             return
         }
 
-        let delayNanoseconds = lastRequest + minimumInterval - now
-        let pageID = interactionState.currentPageID
-        sub2APIGroupListRefreshTasks[keyID]?.cancel()
-        sub2APIGroupListRefreshTasks[keyID] = Task { @MainActor [weak self] in
+        scheduleSub2APIGroupListRefresh(for: instanceID, fireAt: lastRequest + minimumInterval)
+    }
+
+    private func scheduleSub2APIGroupListRefresh(
+        for instanceID: RuntimeInstanceID,
+        fireAt fireNanoseconds: UInt64
+    ) {
+        guard canRunInternalRefresh,
+              resolveCurrentSub2APISlot(for: instanceID) != nil,
+              !isSub2APITokenPaused(for: instanceID)
+        else {
+            return
+        }
+
+        stopSub2APIGroupListRefresh(for: instanceID, preservesNextFire: true)
+        sub2APIGroupListRefreshFireNanoseconds[instanceID] = fireNanoseconds
+        let now = nowNanoseconds
+        guard fireNanoseconds > now else {
+            sub2APIGroupListRefreshFireNanoseconds[instanceID] = nil
+            fetchSub2APIGroupList(for: instanceID)
+            return
+        }
+
+        let delayNanoseconds = fireNanoseconds - now
+        sub2APIGroupListRefreshTasks[instanceID] = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: delayNanoseconds)
             guard !Task.isCancelled else {
                 return
             }
 
-            guard self?.interactionState.currentPageID == pageID else {
-                return
-            }
-            self?.sub2APIGroupListRefreshTasks[keyID] = nil
-            self?.fetchSub2APIGroupList(for: keyID)
+            self?.sub2APIGroupListRefreshTasks[instanceID] = nil
+            self?.sub2APIGroupListRefreshFireNanoseconds[instanceID] = nil
+            self?.fetchSub2APIGroupList(for: instanceID)
+        }
+    }
+
+    private func stopSub2APIGroupListRefresh(
+        for instanceID: RuntimeInstanceID,
+        preservesNextFire: Bool
+    ) {
+        sub2APIGroupListRefreshTasks[instanceID]?.cancel()
+        sub2APIGroupListRefreshTasks[instanceID] = nil
+        if !preservesNextFire {
+            sub2APIGroupListRefreshFireNanoseconds[instanceID] = nil
+        }
+    }
+
+    private func resumeSub2APIRuntime(_ instanceID: RuntimeInstanceID) {
+        guard let resolved = resolveCurrentSub2APISlot(for: instanceID),
+              !isSub2APITokenPaused(for: instanceID)
+        else {
+            return
+        }
+
+        if let groupListFireNanoseconds = sub2APIGroupListRefreshFireNanoseconds[instanceID] {
+            scheduleSub2APIGroupListRefresh(for: instanceID, fireAt: groupListFireNanoseconds)
+        }
+
+        if let nextFireNanoseconds = sub2APINextFireNanoseconds[instanceID] {
+            scheduleSub2APIRefresh(for: instanceID, fireAt: nextFireNanoseconds)
+        } else if resolved.config.lastResult != nil {
+            scheduleNextSub2APIRefresh(for: instanceID)
+        } else {
+            fetchSub2API(for: instanceID)
         }
     }
 
     private func fetchMihoyoGameStatus(for keyID: Int) {
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else {
+            return
+        }
+
+        fetchMihoyoGameStatus(for: instanceID)
+    }
+
+    private func resolveCurrentMihoyoGameSlot(
+        for instanceID: RuntimeInstanceID
+    ) -> (slot: RuntimeSlotID, game: MihoyoGame, config: DeckKeyMihoyoGameConfiguration)? {
+        guard let slot = runtimeSlotsByInstance[instanceID],
+              slot.pageID == interactionState.currentPageID,
+              let game = interactionState.mihoyoGame(for: slot.keyID)
+        else {
+            return nil
+        }
+
+        return (slot, game, interactionState.mihoyoGameConfiguration(for: slot.keyID))
+    }
+
+    private func fetchMihoyoGameStatus(for instanceID: RuntimeInstanceID) {
         guard canRunInternalRefresh,
-              let game = interactionState.mihoyoGame(for: keyID)
+              let resolved = resolveCurrentMihoyoGameSlot(for: instanceID)
         else {
             return
         }
 
         guard let session = mihoyoSession else {
-            if interactionState.setMihoyoGameLastResult(.loginRequired, for: keyID) {
-                syncKeyDisplay(keyID: keyID)
+            if interactionState.setMihoyoGameLastResult(.loginRequired, for: resolved.slot.keyID) {
+                syncKeyDisplay(keyID: resolved.slot.keyID)
             }
             return
         }
 
-        mihoyoGameFetchTasks[keyID]?.cancel()
-        let pageID = interactionState.currentPageID
+        mihoyoGameFetchTasks[instanceID]?.cancel()
+        let pageID = resolved.slot.pageID
         let service = mihoyoGameService
-        mihoyoGameFetchTasks[keyID] = Task { @MainActor [weak self] in
+        let game = resolved.game
+        mihoyoGameFetchTasks[instanceID] = Task { @MainActor [weak self] in
             let result = await service.fetchDailyStatus(game: game, session: session)
             guard !Task.isCancelled else { return }
 
-            guard let self else { return }
-            guard self.interactionState.currentPageID == pageID,
+            guard let self,
+                  let latest = self.resolveCurrentMihoyoGameSlot(for: instanceID),
+                  latest.slot.pageID == pageID,
                   self.mihoyoSession == session,
-                  self.interactionState.mihoyoGame(for: keyID) == game
+                  latest.game == game
             else {
                 return
             }
 
-            self.interactionState.setMihoyoGameLastResult(result, for: keyID)
+            self.mihoyoGameFetchTasks[instanceID] = nil
+            self.interactionState.setMihoyoGameLastResult(result, for: latest.slot.keyID)
             switch result {
             case let .loginExpired(message):
                 self.invalidateMihoyoSession(
@@ -1116,7 +1452,7 @@ final class H200ConnectionModel: ObservableObject {
             case .success, .noBoundRole, .networkError:
                 break
             }
-            self.syncKeyDisplay(keyID: keyID)
+            self.syncKeyDisplay(keyID: latest.slot.keyID)
         }
     }
 
@@ -1127,7 +1463,7 @@ final class H200ConnectionModel: ObservableObject {
         mihoyoSession = nil
         mihoyoSessionStore.clearSession()
         mihoyoLoginState = loginState
-        cancelAllMihoyoGameTimers()
+        cancelAllMihoyoGameTimers(preservesNextFire: false)
         cancelAllMihoyoGameFetchTasks()
         markAllMihoyoKeys(result: keyResult)
     }
@@ -1148,7 +1484,7 @@ final class H200ConnectionModel: ObservableObject {
         mihoyoSession = nil
         mihoyoSessionStore.clearSession()
         mihoyoLoginState = .failed(message)
-        cancelAllMihoyoGameTimers()
+        cancelAllMihoyoGameTimers(preservesNextFire: false)
         cancelAllMihoyoGameFetchTasks()
         markAllMihoyoKeys(result: .loginRequired)
     }
@@ -1157,7 +1493,7 @@ final class H200ConnectionModel: ObservableObject {
         mihoyoSession = nil
         mihoyoSessionStore.clearSession()
         mihoyoLoginState = .expired(message)
-        cancelAllMihoyoGameTimers()
+        cancelAllMihoyoGameTimers(preservesNextFire: false)
         cancelAllMihoyoGameFetchTasks()
         markAllMihoyoKeys(result: .loginRequired)
     }
@@ -1200,12 +1536,14 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
-    private func scheduleNextSub2APIRefresh(for keyID: Int) {
-        stopSub2APITimer(for: keyID)
-        let config = interactionState.sub2APIConfiguration(for: keyID)
+    private func scheduleNextSub2APIRefresh(for instanceID: RuntimeInstanceID) {
+        guard let resolved = resolveCurrentSub2APISlot(for: instanceID) else {
+            return
+        }
+
+        let config = resolved.config
         guard canRunInternalRefresh,
-              interactionState.configuration(for: keyID)?.function == .sub2API,
-              !isSub2APITokenPaused(for: keyID),
+              !isSub2APITokenPaused(for: instanceID),
               !config.baseURL.isEmpty,
               config.targetGroupID > 0,
               !config.bearerKey.isEmpty,
@@ -1214,69 +1552,152 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        let interval = TimeInterval(config.refreshInterval) * sub2APIRefreshSecondDuration
-        sub2APITimers[keyID] = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+        let intervalNanoseconds = UInt64(TimeInterval(config.refreshInterval) * sub2APIRefreshSecondDuration * 1_000_000_000)
+        scheduleSub2APIRefresh(for: instanceID, fireAt: nowNanoseconds + intervalNanoseconds)
+    }
+
+    private func scheduleSub2APIRefresh(for instanceID: RuntimeInstanceID, fireAt fireNanoseconds: UInt64) {
+        stopSub2APITimer(for: instanceID, preservesNextFire: true)
+        guard canRunInternalRefresh,
+              resolveCurrentSub2APISlot(for: instanceID) != nil,
+              !isSub2APITokenPaused(for: instanceID)
+        else {
+            return
+        }
+
+        sub2APINextFireNanoseconds[instanceID] = fireNanoseconds
+        let now = nowNanoseconds
+        guard fireNanoseconds > now else {
+            sub2APINextFireNanoseconds[instanceID] = nil
+            fetchSub2API(for: instanceID)
+            return
+        }
+
+        let interval = TimeInterval(fireNanoseconds - now) / 1_000_000_000
+        sub2APITimers[instanceID] = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.sub2APITimers[keyID] = nil
-                self?.fetchSub2API(for: keyID)
+                self?.sub2APITimers[instanceID] = nil
+                self?.sub2APINextFireNanoseconds[instanceID] = nil
+                self?.fetchSub2API(for: instanceID)
             }
         }
     }
 
-    private func stopSub2APITimer(for keyID: Int) {
-        sub2APITimers[keyID]?.invalidate()
-        sub2APITimers[keyID] = nil
+    private func stopSub2APITimer(for instanceID: RuntimeInstanceID, preservesNextFire: Bool) {
+        sub2APITimers[instanceID]?.invalidate()
+        sub2APITimers[instanceID] = nil
+        if !preservesNextFire {
+            sub2APINextFireNanoseconds[instanceID] = nil
+        }
     }
 
     private func restartSub2APITimer(for keyID: Int) {
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else {
+            return
+        }
+
         guard canRunInternalRefresh,
-              !isSub2APITokenPaused(for: keyID)
+              !isSub2APITokenPaused(for: instanceID),
+              interactionState.sub2APIConfiguration(for: keyID).lastResult != nil
         else {
             return
         }
 
-        guard interactionState.sub2APIConfiguration(for: keyID).lastResult != nil else {
-            return
-        }
-
-        scheduleNextSub2APIRefresh(for: keyID)
+        scheduleNextSub2APIRefresh(for: instanceID)
     }
 
     private func startMihoyoGameTimer(for keyID: Int) {
-        stopMihoyoGameTimer(for: keyID)
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else {
+            return
+        }
+
+        scheduleNextMihoyoGameRefresh(for: instanceID)
+    }
+
+    private func scheduleNextMihoyoGameRefresh(for instanceID: RuntimeInstanceID) {
         guard canRunInternalRefresh,
               mihoyoSession != nil,
-              interactionState.mihoyoGame(for: keyID) != nil
+              let resolved = resolveCurrentMihoyoGameSlot(for: instanceID)
         else {
             return
         }
 
-        let config = interactionState.mihoyoGameConfiguration(for: keyID)
-        let interval = TimeInterval(config.refreshIntervalMinutes) * mihoyoGameRefreshMinuteDuration
-        mihoyoGameTimers[keyID] = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+        let intervalNanoseconds = UInt64(
+            TimeInterval(resolved.config.refreshIntervalMinutes)
+                * mihoyoGameRefreshMinuteDuration
+                * 1_000_000_000
+        )
+        scheduleMihoyoGameRefresh(for: instanceID, fireAt: nowNanoseconds + intervalNanoseconds)
+    }
+
+    private func scheduleMihoyoGameRefresh(for instanceID: RuntimeInstanceID, fireAt fireNanoseconds: UInt64) {
+        stopMihoyoGameTimer(for: instanceID, preservesNextFire: true)
+        guard canRunInternalRefresh,
+              mihoyoSession != nil,
+              resolveCurrentMihoyoGameSlot(for: instanceID) != nil
+        else {
+            return
+        }
+
+        mihoyoGameNextFireNanoseconds[instanceID] = fireNanoseconds
+        let now = nowNanoseconds
+        guard fireNanoseconds > now else {
+            mihoyoGameNextFireNanoseconds[instanceID] = nil
+            fetchMihoyoGameStatus(for: instanceID)
+            scheduleNextMihoyoGameRefresh(for: instanceID)
+            return
+        }
+
+        let interval = TimeInterval(fireNanoseconds - now) / 1_000_000_000
+        mihoyoGameTimers[instanceID] = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.fetchMihoyoGameStatus(for: keyID)
+                self?.mihoyoGameTimers[instanceID] = nil
+                self?.mihoyoGameNextFireNanoseconds[instanceID] = nil
+                self?.fetchMihoyoGameStatus(for: instanceID)
+                self?.scheduleNextMihoyoGameRefresh(for: instanceID)
             }
         }
     }
 
-    private func stopMihoyoGameTimer(for keyID: Int) {
-        mihoyoGameTimers[keyID]?.invalidate()
-        mihoyoGameTimers[keyID] = nil
+    private func stopMihoyoGameTimer(for instanceID: RuntimeInstanceID, preservesNextFire: Bool) {
+        mihoyoGameTimers[instanceID]?.invalidate()
+        mihoyoGameTimers[instanceID] = nil
+        if !preservesNextFire {
+            mihoyoGameNextFireNanoseconds[instanceID] = nil
+        }
     }
 
     private func restartMihoyoGameTimer(for keyID: Int) {
-        startMihoyoGameTimer(for: keyID)
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else {
+            return
+        }
+
+        stopMihoyoGameTimer(for: instanceID, preservesNextFire: false)
+        scheduleNextMihoyoGameRefresh(for: instanceID)
     }
 
-    private func restartRuntime(for keyID: Int) {
-        switch interactionState.configuration(for: keyID)?.function.scheduledRuntime {
-        case .some(.sub2API):
-            restartSub2APITimer(for: keyID)
-        case .some(.mihoyoGame):
-            restartMihoyoGameTimer(for: keyID)
-        case nil:
+    private func resumeMihoyoGameRuntime(_ instanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              let resolved = resolveCurrentMihoyoGameSlot(for: instanceID)
+        else {
             return
+        }
+
+        guard mihoyoSession != nil else {
+            if interactionState.setMihoyoGameLastResult(.loginRequired, for: resolved.slot.keyID) {
+                syncKeyDisplay(keyID: resolved.slot.keyID)
+            }
+            return
+        }
+
+        if let nextFireNanoseconds = mihoyoGameNextFireNanoseconds[instanceID] {
+            scheduleMihoyoGameRefresh(for: instanceID, fireAt: nextFireNanoseconds)
+        } else {
+            scheduleNextMihoyoGameRefresh(for: instanceID)
+        }
+
+        if resolved.config.lastResult == nil {
+            fetchMihoyoGameStatus(for: instanceID)
         }
     }
 
@@ -1407,43 +1828,11 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func cancelCurrentPageRuntime() {
-        cancelAllLongPressTasks()
-        cancelAllSub2APITimers()
-        cancelAllSub2APIFetchTasks()
-        cancelAllSub2APIGroupListTasks()
-        cancelAllMihoyoGameTimers()
-        cancelAllMihoyoGameFetchTasks()
+        pauseCurrentPageRuntime()
     }
 
     private func startCurrentPageRuntime() {
-        guard canRunInternalRefresh else {
-            return
-        }
-
-        if mihoyoSession != nil {
-            startAssignedMihoyoGameTimers()
-        }
-        refreshAssignedSub2APIStatuses()
-    }
-
-    private func cancelRuntime(for keyID: Int, clearsSub2APITokenPause: Bool = true) {
-        longPressTasks[keyID]?.cancel()
-        longPressTasks[keyID] = nil
-        longPressResetKeyIDs.remove(keyID)
-        stopSub2APITimer(for: keyID)
-        sub2APIFetchTasks[keyID]?.cancel()
-        sub2APIFetchTasks[keyID] = nil
-        sub2APIGroupListTasks[keyID]?.cancel()
-        sub2APIGroupListTasks[keyID] = nil
-        sub2APIGroupListRefreshTasks[keyID]?.cancel()
-        sub2APIGroupListRefreshTasks[keyID] = nil
-        sub2APIGroupListLastRequestNanoseconds[keyID] = nil
-        if clearsSub2APITokenPause {
-            clearSub2APITokenPause(for: keyID)
-        }
-        stopMihoyoGameTimer(for: keyID)
-        mihoyoGameFetchTasks[keyID]?.cancel()
-        mihoyoGameFetchTasks[keyID] = nil
+        resumeCurrentPageRuntime()
     }
 
     private func finishDisplaySync(_ result: H200DeckSyncResult, generation: Int) {
@@ -1468,41 +1857,15 @@ final class H200ConnectionModel: ObservableObject {
         longPressResetKeyIDs.removeAll()
     }
 
-    private func cancelAllSub2APITimers() {
-        for timer in sub2APITimers.values {
-            timer.invalidate()
-        }
-
-        sub2APITimers.removeAll()
-    }
-
-    private func cancelAllSub2APIFetchTasks() {
-        for task in sub2APIFetchTasks.values {
-            task.cancel()
-        }
-
-        sub2APIFetchTasks.removeAll()
-    }
-
-    private func cancelAllSub2APIGroupListTasks() {
-        for task in sub2APIGroupListTasks.values {
-            task.cancel()
-        }
-        for task in sub2APIGroupListRefreshTasks.values {
-            task.cancel()
-        }
-
-        sub2APIGroupListTasks.removeAll()
-        sub2APIGroupListRefreshTasks.removeAll()
-        sub2APIGroupListLastRequestNanoseconds.removeAll()
-    }
-
-    private func cancelAllMihoyoGameTimers() {
+    private func cancelAllMihoyoGameTimers(preservesNextFire: Bool = false) {
         for timer in mihoyoGameTimers.values {
             timer.invalidate()
         }
 
         mihoyoGameTimers.removeAll()
+        if !preservesNextFire {
+            mihoyoGameNextFireNanoseconds.removeAll()
+        }
     }
 
     private func cancelAllMihoyoGameFetchTasks() {

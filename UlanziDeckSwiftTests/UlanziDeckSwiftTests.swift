@@ -1256,6 +1256,209 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func sub2APITokenPauseIsClearedWhenInstanceIsDestroyed() async throws {
+        let fetcher = FakeSub2APIFetcher(
+            results: [.invalidToken, .invalidToken],
+            defaultResult: .invalidToken
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        loadedState.setSub2APITargetGroupID(1215, for: 3)
+        loadedState.setSub2APIBearerKey("stale-token", for: 3)
+        loadedState.setSub2APIRefreshInterval(5, for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 0.01
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .invalidToken
+        }
+
+        model.clearKeyFunction(keyID: 3)
+        #expect(model.interactionState.configuration(for: 3)?.sub2API.lastResult == nil)
+        model.selectKey(keyID: 3)
+        model.assignSelectedFunction(.sub2API)
+        model.setSelectedSub2APIBaseURL("api.example.com")
+        model.setSelectedSub2APIBearerKey("stale-token")
+        model.setSelectedSub2APITargetGroupID(1215)
+
+        try await Self.waitUntil {
+            fetcher.requests.count == 2
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .invalidToken
+        }
+
+        #expect(fetcher.requests == [
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "stale-token"),
+            FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "stale-token"),
+        ])
+    }
+
+    @MainActor
+    @Test func sub2APITimerKeepsRemainingDelayAfterSwap() async throws {
+        let firstItem = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3050)
+        let secondItem = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3040)
+        let fetcher = FakeSub2APIFetcher(
+            results: [.success(item: firstItem), .success(item: secondItem)],
+            defaultResult: .success(item: secondItem)
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        loadedState.setSub2APITargetGroupID(1215, for: 3)
+        loadedState.setSub2APIBearerKey("token", for: 3)
+        loadedState.setSub2APIRefreshInterval(5, for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 0.02
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .success(item: firstItem)
+        }
+        try await Task.sleep(nanoseconds: 40_000_000)
+
+        model.swapSquareKeyConfigurations(sourceKeyID: 3, targetKeyID: 4)
+        try await Task.sleep(nanoseconds: 80_000_000)
+
+        #expect(fetcher.requests.count >= 2)
+        #expect(model.interactionState.configuration(for: 3)?.function != .sub2API)
+        #expect(model.interactionState.configuration(for: 4)?.sub2API.lastResult == .success(item: secondItem))
+    }
+
+    @MainActor
+    @Test func sub2APIDisplaySyncCompletionDoesNotScheduleAfterInstanceIsDestroyed() async throws {
+        let item = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3050)
+        let fetcher = FakeSub2APIFetcher(
+            results: [.success(item: item)],
+            defaultResult: .success(item: item)
+        )
+        let syncer = FakeH200DeckSyncer(packageDelayNanoseconds: 160_000_000)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 0.01
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 3)
+        model.assignSelectedFunction(.sub2API)
+        model.setSelectedSub2APIBaseURL("api.example.com")
+        model.setSelectedSub2APIBearerKey("token")
+        model.setSelectedSub2APITargetGroupID(1215)
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .success(item: item)
+        }
+
+        model.assignSelectedFunction(.tally)
+        try await Task.sleep(nanoseconds: 260_000_000)
+
+        #expect(fetcher.requests.count == 1)
+        #expect(model.interactionState.configuration(for: 3)?.function == .tally)
+    }
+
+    @MainActor
+    @Test func sub2APIGroupListDelayedRefreshFollowsInstanceAfterSwap() async throws {
+        let oldPool = Self.sub2APICapacityItem(groupID: 1197, groupName: "FREE", availableConcurrency: 10)
+        let newPool = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLUS", availableConcurrency: 3050)
+        let fetcher = FakeSub2APIFetcher(
+            groupListResults: [.success(items: [oldPool]), .success(items: [newPool])],
+            defaultGroupListResult: .success(items: [newPool])
+        )
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(),
+            sub2APIFetcher: fetcher,
+            sub2APIGroupListMinimumIntervalNanoseconds: 120_000_000
+        )
+
+        model.checkOnLaunch()
+        model.selectKey(keyID: 3)
+        model.assignSelectedFunction(.sub2API)
+        model.setSelectedSub2APIBaseURL("api.example.com")
+        model.setSelectedSub2APIBearerKey("old-token")
+        try await Self.waitUntil {
+            fetcher.groupListRequests.count == 1
+                && model.interactionState.sub2APIConfiguration(for: 3).groupListState == .success(items: [oldPool])
+        }
+
+        model.setSelectedSub2APIBearerKey("new-token")
+        model.swapSquareKeyConfigurations(sourceKeyID: 3, targetKeyID: 4)
+
+        try await Self.waitUntil {
+            fetcher.groupListRequests.count == 2
+                && model.interactionState.sub2APIConfiguration(for: 4).groupListState == .success(items: [newPool])
+        }
+
+        #expect(fetcher.groupListRequests == [
+            FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "old-token"),
+            FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "new-token"),
+        ])
+    }
+
+    @MainActor
+    @Test func sub2APIPageNavigationPausesTimerAndRefreshesWhenReturningAfterDueTime() async throws {
+        let firstItem = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3050)
+        let secondItem = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3040)
+        let fetcher = FakeSub2APIFetcher(
+            results: [.success(item: firstItem), .success(item: secondItem)],
+            defaultResult: .success(item: secondItem)
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        loadedState.setSub2APITargetGroupID(1215, for: 3)
+        loadedState.setSub2APIBearerKey("token", for: 3)
+        loadedState.setSub2APIRefreshInterval(5, for: 3)
+        loadedState.assign(.pageFolder, to: 4)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 0.02
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .success(item: firstItem)
+        }
+        try await Task.sleep(nanoseconds: 40_000_000)
+
+        model.navigateKey(keyID: 4)
+        try await Task.sleep(nanoseconds: 120_000_000)
+        #expect(fetcher.requests.count == 1)
+
+        model.navigateKey(keyID: 1)
+        try await Self.waitUntil {
+            fetcher.requests.count >= 2
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .success(item: secondItem)
+        }
+    }
+
+    @MainActor
     @Test func staleSub2APITokenFailureIsIgnoredAfterSwitchingFunction() async throws {
         let restoredItem = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLU", availableConcurrency: 3050)
         let fetcher = FakeSub2APIFetcher(
@@ -3596,6 +3799,43 @@ struct UlanziDeckSwiftTests {
         #expect(model.interactionState.configuration(for: 6)?.mihoyoGame.lastResult == .success(secondStatus))
         model.clearKeyFunction(keyID: 6)
         #expect(model.interactionState.configuration(for: 6)?.mihoyoGame.lastResult == nil)
+    }
+
+    @MainActor
+    @Test func mihoyoGameTimerKeepsRemainingDelayAfterSwap() async throws {
+        let session = Self.mihoyoSession()
+        let firstStatus = Self.mihoyoStatus(game: .starRail, currentStamina: 94, maxStamina: 300, dailyCurrent: 200, dailyMax: 500)
+        let secondStatus = Self.mihoyoStatus(game: .starRail, currentStamina: 120, maxStamina: 300, dailyCurrent: 500, dailyMax: 500)
+        let mihoyoService = FakeMihoyoGameService(
+            fetchResults: [.success(firstStatus), .success(secondStatus)],
+            defaultFetchResult: .success(secondStatus)
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.starRailStatus, to: 6)
+        loadedState.setMihoyoGameRefreshIntervalMinutes(1, for: 6)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            mihoyoGameService: mihoyoService,
+            mihoyoSessionStore: FakeMihoyoSessionStore(loadedSession: session),
+            mihoyoGameRefreshMinuteDuration: 0.1
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            mihoyoService.fetchRequests.count == 1
+                && model.interactionState.configuration(for: 6)?.mihoyoGame.lastResult == .success(firstStatus)
+        }
+        try await Task.sleep(nanoseconds: 40_000_000)
+
+        model.swapSquareKeyConfigurations(sourceKeyID: 6, targetKeyID: 5)
+        try await Task.sleep(nanoseconds: 80_000_000)
+
+        #expect(mihoyoService.fetchRequests.count >= 2)
+        #expect(model.interactionState.configuration(for: 6)?.function != .starRailStatus)
+        #expect(model.interactionState.configuration(for: 5)?.mihoyoGame.lastResult == .success(secondStatus))
     }
 
     @MainActor

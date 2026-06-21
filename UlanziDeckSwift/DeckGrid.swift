@@ -903,6 +903,22 @@ nonisolated struct DeckGridInteractionState: Equatable {
     }
 
     @discardableResult
+    mutating func clearSub2APIRuntimeState(for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID) else {
+            return false
+        }
+
+        let currentConfiguration = configurations[keyID, default: .tallyDefault].sub2API
+        guard currentConfiguration.lastResult != nil || currentConfiguration.groupListState != .idle else {
+            return false
+        }
+
+        configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
+        configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
+        return true
+    }
+
+    @discardableResult
     mutating func setSub2APIGroupListState(_ state: DeckKeySub2APIGroupListState, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].function == .sub2API
@@ -923,6 +939,18 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         configurations[keyID, default: .tallyDefault].mihoyoGame.lastResult = result
+        return true
+    }
+
+    @discardableResult
+    mutating func clearMihoyoGameRuntimeState(for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].mihoyoGame.lastResult != nil
+        else {
+            return false
+        }
+
+        configurations[keyID, default: .tallyDefault].mihoyoGame.lastResult = nil
         return true
     }
 
