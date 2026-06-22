@@ -607,6 +607,7 @@ struct UlanziDeckSwiftTests {
         #expect(state.display(for: layout.keys[4]).fileButtonContent?.backgroundPNGData == blurredIconPNGData)
 
         state.assign(.openFolder, to: 6)
+        let defaultFolderBackgroundPNGData = state.display(for: layout.keys[5]).folderButtonContent?.backgroundPNGData
         state.setButtonVisualConfiguration(DeckKeyVisualConfiguration(backgroundPNGData: customBackgroundPNGData), for: 6)
         var folderVisual = state.buttonVisualConfiguration(for: 6) ?? DeckKeyVisualConfiguration()
         folderVisual.backgroundPNGData = nil
@@ -615,8 +616,8 @@ struct UlanziDeckSwiftTests {
         state.setButtonVisualConfiguration(folderVisual, for: 6)
 
         let restoredFolderDisplay = state.display(for: layout.keys[5])
-        #expect(restoredFolderDisplay.folderButtonContent?.backgroundPNGData == nil)
-        #expect(restoredFolderDisplay.buttonVisualContent.backgroundAssetName == FolderButtonContent.backgroundAssetName)
+        #expect(restoredFolderDisplay.folderButtonContent?.backgroundPNGData == defaultFolderBackgroundPNGData)
+        #expect(restoredFolderDisplay.buttonVisualContent.backgroundAssetName == nil)
         #expect(!restoredFolderDisplay.buttonVisualContent.hasCustomBackground)
     }
 
@@ -704,15 +705,84 @@ struct UlanziDeckSwiftTests {
         #expect(restored.canOpen)
     }
 
-    @Test func fileIconSnapshotStoresDirectAndBlurredLongEdge196Images() throws {
+    @Test func fileIconSnapshotStoresDirectAndBlurredLongEdge512ImagesWithoutUpscaling() throws {
+        let largeIcon = Self.twoToneIconImage(size: NSSize(width: 800, height: 400))
+        let largeSnapshot = try #require(FileIconSnapshot.snapshotData(for: largeIcon))
+        let largeDirectImage = try #require(NSBitmapImageRep(data: largeSnapshot.iconPNGData))
+        let largeBlurredImage = try #require(NSBitmapImageRep(data: largeSnapshot.blurredIconPNGData))
+
+        #expect(max(largeDirectImage.pixelsWide, largeDirectImage.pixelsHigh) == 512)
+        #expect(max(largeBlurredImage.pixelsWide, largeBlurredImage.pixelsHigh) == 512)
+        #expect(largeSnapshot.iconPNGData != largeSnapshot.blurredIconPNGData)
+
         let icon = Self.twoToneIconImage()
         let snapshot = try #require(FileIconSnapshot.snapshotData(for: icon))
         let directImage = try #require(NSBitmapImageRep(data: snapshot.iconPNGData))
         let blurredImage = try #require(NSBitmapImageRep(data: snapshot.blurredIconPNGData))
 
-        #expect(max(directImage.pixelsWide, directImage.pixelsHigh) == 196)
-        #expect(max(blurredImage.pixelsWide, blurredImage.pixelsHigh) == 196)
+        #expect(directImage.pixelsWide == 80)
+        #expect(directImage.pixelsHigh == 40)
+        #expect(blurredImage.pixelsWide == 80)
+        #expect(blurredImage.pixelsHigh == 40)
         #expect(snapshot.iconPNGData != snapshot.blurredIconPNGData)
+    }
+
+    @Test func defaultBackgroundFunctionsCreateInstanceSnapshotsAndClearThemOnDeletion() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        let cases: [(DeckKeyFunction, Int)] = [
+            (.openFolder, 2),
+            (.connectSMBServer, 3),
+            (.genshinStatus, 4),
+            (.starRailStatus, 5),
+            (.zenlessZoneStatus, 6),
+            (.pageFolder, 7),
+        ]
+
+        for (function, keyID) in cases {
+            let didAssign = state.assign(function, to: keyID)
+            #expect(didAssign)
+            let configuration = try #require(state.configuration(for: keyID))
+            let directBackground = try #require(configuration.defaultButtonBackgroundPNGData)
+            let blurredBackground = try #require(configuration.defaultButtonBlurredBackgroundPNGData)
+
+            #expect(!configuration.visual.hasCustomBackground)
+            #expect(directBackground != blurredBackground)
+            let didEnableBlur = state.setButtonVisualBlurEnabled(true, for: keyID)
+            #expect(didEnableBlur)
+            #expect(state.display(for: layout.keys[keyID - 1]).buttonVisualContent.backgroundPNGData == blurredBackground)
+
+            let didClearFunction = state.clearFunction(keyID: keyID)
+            #expect(didClearFunction)
+            let clearedConfiguration = try #require(state.configuration(for: keyID))
+            #expect(clearedConfiguration.function == .none)
+            #expect(clearedConfiguration.defaultButtonBackgroundPNGData == nil)
+            #expect(clearedConfiguration.defaultButtonBlurredBackgroundPNGData == nil)
+        }
+    }
+
+    @Test func defaultBackgroundBlurAndDimmingAreIndependentPerInstance() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.connectSMBServer, to: 2)
+        state.assign(.connectSMBServer, to: 3)
+        let firstDirectBackground = try #require(state.configuration(for: 2)?.defaultButtonBackgroundPNGData)
+        let firstBlurredBackground = try #require(state.configuration(for: 2)?.defaultButtonBlurredBackgroundPNGData)
+        let secondDirectBackground = try #require(state.configuration(for: 3)?.defaultButtonBackgroundPNGData)
+
+        let didEnableBlur = state.setButtonVisualBlurEnabled(true, for: 2)
+        let didDisableDimming = state.setButtonVisualDimmingEnabled(false, for: 3)
+        #expect(didEnableBlur)
+        #expect(didDisableDimming)
+
+        let firstDisplay = state.display(for: layout.keys[1])
+        let secondDisplay = state.display(for: layout.keys[2])
+
+        #expect(firstDisplay.buttonVisualContent.backgroundPNGData == firstBlurredBackground)
+        #expect(firstDisplay.buttonVisualContent.backgroundPNGData != firstDirectBackground)
+        #expect(firstDisplay.buttonVisualContent.dimsBackground)
+        #expect(secondDisplay.buttonVisualContent.backgroundPNGData == secondDirectBackground)
+        #expect(!secondDisplay.buttonVisualContent.dimsBackground)
     }
 
     @Test func connectSMBServerFunctionDisplaysNameAndPersistsNormalizedAddress() {
@@ -2669,8 +2739,8 @@ struct UlanziDeckSwiftTests {
 
         #expect(opener.openedPaths == ["/Users/ibobby/Documents"])
         #expect(model.interactionState.openFolderConfiguration(for: 4).bookmarkData == refreshedBookmarkData)
-        #expect(model.interactionState.openFolderConfiguration(for: 4).backgroundPNGData == backgroundPNGData)
-        #expect(store.savedStates.last?.openFolderConfiguration(for: 4).backgroundPNGData == backgroundPNGData)
+        #expect(model.interactionState.buttonVisualConfiguration(for: 4)?.backgroundPNGData == backgroundPNGData)
+        #expect(store.savedStates.last?.buttonVisualConfiguration(for: 4)?.backgroundPNGData == backgroundPNGData)
         #expect(syncer.sentDisplays.count == sentDisplayCount)
         #expect(syncer.partialDisplays.count == partialDisplayCount)
         #expect(model.interactionState.selectedKeyID == 4)
@@ -3250,11 +3320,12 @@ struct UlanziDeckSwiftTests {
 
         let png = try H200ButtonIconRenderer().pngData(for: display)
         let image = try #require(NSBitmapImageRep(data: png))
-        let cornerColor = try #require(image.colorAt(x: 1, y: 1)?.usingColorSpace(.deviceRGB))
+        let centerColor = try #require(image.colorAt(x: 50, y: 50)?.usingColorSpace(.deviceRGB))
 
         #expect(display.title == "文件夹")
         #expect(display.pageFolderButtonContent?.displayName == "文件夹")
-        #expect(cornerColor.redComponent + cornerColor.greenComponent + cornerColor.blueComponent < 0.01)
+        #expect(display.pageFolderButtonContent?.backgroundPNGData != nil)
+        #expect(centerColor.alphaComponent > 0.999)
     }
 
     @Test func iconRendererUsesBackTextForPageBackKey() throws {
@@ -3364,7 +3435,7 @@ struct UlanziDeckSwiftTests {
         #expect(color.alphaComponent > 0.999)
     }
 
-    @Test func iconRendererUsesMihoyoBlurredBackgrounds() throws {
+    @Test func iconRendererUsesMihoyoDefaultBackgrounds() throws {
         let layout = DeckGridLayout.h200Prototype
         let cases: [(DeckKeyFunction, MihoyoGame, Int, Int, Int, Int)] = [
             (.genshinStatus, .genshin, 119, 200, 4, 4),
@@ -4312,14 +4383,13 @@ struct UlanziDeckSwiftTests {
         return pngData
     }
 
-    private static func twoToneIconImage() -> NSImage {
-        let size = NSSize(width: 80, height: 40)
+    private static func twoToneIconImage(size: NSSize = NSSize(width: 80, height: 40)) -> NSImage {
         let image = NSImage(size: size)
         image.lockFocus()
         NSColor.systemRed.setFill()
-        NSRect(x: 0, y: 0, width: 40, height: 40).fill()
+        NSRect(x: 0, y: 0, width: size.width / 2, height: size.height).fill()
         NSColor.systemBlue.setFill()
-        NSRect(x: 40, y: 0, width: 40, height: 40).fill()
+        NSRect(x: size.width / 2, y: 0, width: size.width / 2, height: size.height).fill()
         image.unlockFocus()
         return image
     }

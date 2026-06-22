@@ -244,8 +244,6 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
         self.blurredBackgroundPNGData = blurredBackgroundPNGData
         self.dimsBackground = dimsBackground
         self.usesBlurredBackground = usesBlurredBackground
-            && backgroundPNGData != nil
-            && blurredBackgroundPNGData != nil
     }
 
     var canUseBlurredBackground: Bool {
@@ -283,9 +281,6 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
         blurredBackgroundPNGData = try container.decodeIfPresent(Data.self, forKey: .blurredBackgroundPNGData)
         usesBlurredBackground = try container.decodeIfPresent(Bool.self, forKey: .usesBlurredBackground) ?? false
         dimsBackground = try container.decodeIfPresent(Bool.self, forKey: .dimsBackground) ?? true
-        if !canUseBlurredBackground {
-            usesBlurredBackground = false
-        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -293,7 +288,7 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
         try container.encode(name, forKey: .name)
         try container.encodeIfPresent(backgroundPNGData, forKey: .backgroundPNGData)
         try container.encodeIfPresent(blurredBackgroundPNGData, forKey: .blurredBackgroundPNGData)
-        try container.encode(usesBlurredBackground && canUseBlurredBackground, forKey: .usesBlurredBackground)
+        try container.encode(usesBlurredBackground, forKey: .usesBlurredBackground)
         try container.encode(dimsBackground, forKey: .dimsBackground)
     }
 
@@ -924,20 +919,24 @@ nonisolated enum DeckKeyMihoyoGameRefreshConfiguration {
 
 nonisolated struct DeckKeyMihoyoGameConfiguration: Codable, Equatable {
     var refreshIntervalMinutes: Int
+    var visual: DeckKeyVisualConfiguration
 
     /// 最近一次查询的结果。不参与持久化，反序列化时使用空值。
     var lastResult: MihoyoGameStatusResult?
 
     init(
         refreshIntervalMinutes: Int = DeckKeyMihoyoGameRefreshConfiguration.defaultIntervalMinutes,
-        lastResult: MihoyoGameStatusResult? = nil
+        lastResult: MihoyoGameStatusResult? = nil,
+        visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration()
     ) {
         self.refreshIntervalMinutes = DeckKeyMihoyoGameRefreshConfiguration.clamped(refreshIntervalMinutes)
+        self.visual = visual
         self.lastResult = lastResult
     }
 
     enum CodingKeys: CodingKey {
         case refreshIntervalMinutes
+        case visual
     }
 
     init(from decoder: Decoder) throws {
@@ -946,12 +945,15 @@ nonisolated struct DeckKeyMihoyoGameConfiguration: Codable, Equatable {
             try container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes)
                 ?? DeckKeyMihoyoGameRefreshConfiguration.defaultIntervalMinutes
         )
+        visual = try container.decodeIfPresent(DeckKeyVisualConfiguration.self, forKey: .visual)
+            ?? DeckKeyVisualConfiguration()
         lastResult = nil
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
+        try container.encode(visual, forKey: .visual)
     }
 }
 
@@ -1139,6 +1141,9 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     @discardableResult
     mutating func setButtonVisualConfiguration(_ visual: DeckKeyVisualConfiguration) -> Bool {
         self.visual = visual
+        if self.visual.usesBlurredBackground && !buttonVisualCanUseBlurredBackground {
+            self.visual.usesBlurredBackground = false
+        }
         return true
     }
 
@@ -1160,18 +1165,34 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
 
     var defaultButtonBackgroundPNGData: Data? {
         switch function {
+        case .openFolder:
+            return openFolder.visual.backgroundPNGData
         case .openFile:
             return openFile.visual.backgroundPNGData
-        case .none, .tally, .openFolder, .connectSMBServer, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .pageFolder, .pageBack:
+        case .connectSMBServer:
+            return smbServer.visual.backgroundPNGData
+        case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
+            return mihoyoGame.visual.backgroundPNGData
+        case .pageFolder:
+            return pageFolder.visual.backgroundPNGData
+        case .none, .tally, .brightness, .sub2API, .pageBack:
             return nil
         }
     }
 
     var defaultButtonBlurredBackgroundPNGData: Data? {
         switch function {
+        case .openFolder:
+            return openFolder.visual.blurredBackgroundPNGData
         case .openFile:
             return openFile.visual.blurredBackgroundPNGData
-        case .none, .tally, .openFolder, .connectSMBServer, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .pageFolder, .pageBack:
+        case .connectSMBServer:
+            return smbServer.visual.blurredBackgroundPNGData
+        case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
+            return mihoyoGame.visual.blurredBackgroundPNGData
+        case .pageFolder:
+            return pageFolder.visual.blurredBackgroundPNGData
+        case .none, .tally, .brightness, .sub2API, .pageBack:
             return nil
         }
     }

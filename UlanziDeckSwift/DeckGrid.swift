@@ -93,7 +93,6 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         var smbServerButtonContent: SMBServerButtonContent?
         var pageFolderButtonContent: PageFolderButtonContent?
         var pageBackButtonContent: PageBackButtonContent?
-        var buttonBackgroundAssetName: String?
         var buttonBackgroundUsesFittedImage = true
         let hasCustomDisplayName = !configuration.visual.name.isEmpty
 
@@ -111,12 +110,11 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 title = configuration.visual.displayName(fallback: "\(configuration.tally.value)")
                 subtitle = "默认 \(configuration.tally.defaultValue)"
             case .openFolder:
-                buttonBackgroundAssetName = FolderButtonContent.backgroundAssetName
                 let content = FolderButtonContent(
                     visual: ButtonVisualContent(
                         displayName: configuration.visual.displayName(fallback: configuration.openFolder.automaticDisplayName),
                         backgroundPNGData: configuration.selectedButtonBackgroundPNGData,
-                        backgroundAssetName: buttonBackgroundAssetName,
+                        backgroundAssetName: nil,
                         usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
                         dimsBackground: configuration.visual.dimsBackground,
                         hasCustomDisplayName: hasCustomDisplayName,
@@ -142,12 +140,11 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 subtitle = configuration.openFile.path ?? ""
                 fileButtonContent = content
             case .connectSMBServer:
-                buttonBackgroundAssetName = SMBServerButtonContent.backgroundAssetName
                 let content = SMBServerButtonContent(
                     visual: ButtonVisualContent(
                         displayName: configuration.visual.displayName(fallback: configuration.smbServer.automaticDisplayName),
                         backgroundPNGData: configuration.selectedButtonBackgroundPNGData,
-                        backgroundAssetName: buttonBackgroundAssetName,
+                        backgroundAssetName: nil,
                         usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
                         dimsBackground: configuration.visual.dimsBackground,
                         hasCustomDisplayName: hasCustomDisplayName,
@@ -158,12 +155,11 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 subtitle = configuration.smbServer.address
                 smbServerButtonContent = content
             case .pageFolder:
-                buttonBackgroundAssetName = PageFolderButtonContent.backgroundAssetName
                 let content = PageFolderButtonContent(
                     visual: ButtonVisualContent(
                         displayName: configuration.visual.displayName(fallback: "文件夹"),
                         backgroundPNGData: configuration.selectedButtonBackgroundPNGData,
-                        backgroundAssetName: buttonBackgroundAssetName,
+                        backgroundAssetName: nil,
                         usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
                         dimsBackground: configuration.visual.dimsBackground,
                         hasCustomDisplayName: hasCustomDisplayName,
@@ -208,7 +204,6 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                     subtitle = "未配置"
                 }
             case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
-                buttonBackgroundAssetName = configuration.function.game?.buttonBackgroundAssetName
                 buttonBackgroundUsesFittedImage = false
                 if case let .success(status) = configuration.mihoyoGame.lastResult {
                     title = configuration.visual.displayName(fallback: status.buttonTitle)
@@ -235,7 +230,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         let buttonVisualContent = ButtonVisualContent(
             displayName: title,
             backgroundPNGData: configuration.selectedButtonBackgroundPNGData,
-            backgroundAssetName: buttonBackgroundAssetName,
+            backgroundAssetName: nil,
             usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
             dimsBackground: configuration.visual.dimsBackground,
             hasCustomDisplayName: hasCustomDisplayName,
@@ -317,8 +312,6 @@ nonisolated struct ButtonVisualContent: Equatable {
 }
 
 nonisolated struct FolderButtonContent: Equatable {
-    static let backgroundAssetName = "FolderBackground"
-
     let visual: ButtonVisualContent
 
     var displayName: String { visual.displayName }
@@ -335,8 +328,6 @@ nonisolated struct FileButtonContent: Equatable {
 }
 
 nonisolated struct SMBServerButtonContent: Equatable {
-    static let backgroundAssetName = "SMBServerBackground"
-
     let visual: ButtonVisualContent
 
     var displayName: String { visual.displayName }
@@ -345,8 +336,6 @@ nonisolated struct SMBServerButtonContent: Equatable {
 }
 
 nonisolated struct PageFolderButtonContent: Equatable {
-    static let backgroundAssetName = "PageFolderBackground"
-
     let visual: ButtonVisualContent
 
     var displayName: String { visual.displayName }
@@ -632,6 +621,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
             normalizedConfiguration.displayMode = .function
         }
 
+        normalizedConfiguration.refreshDefaultButtonBackgroundSnapshot()
         return normalizedConfiguration
     }
 
@@ -1074,6 +1064,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
             configurations[keyID, default: .tallyDefault].visual = configuration.visual
         }
         configurations[keyID, default: .tallyDefault].openFolder = configuration
+        configurations[keyID, default: .tallyDefault].refreshDefaultButtonBackgroundSnapshot()
         return true
     }
 
@@ -1166,17 +1157,17 @@ nonisolated struct DeckGridInteractionState: Equatable {
                 configurations: Self.childPageConfigurations(for: layout)
             )
             selectedKeyID = keyID
-            configurations[keyID] = DeckKeyConfiguration(
-                function: .pageFolder,
-                pageFolder: DeckKeyPageFolderConfiguration(pageID: childPageID)
-            )
+            configurations[keyID] = Self.defaultConfiguration(for: .pageFolder, pageID: childPageID)
             return true
         }
 
         removeChildPageIfNeeded(for: keyID)
+        let previousFunction = configurations[keyID, default: .tallyDefault].function
         selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].clearDefaultButtonBackgroundSnapshot(for: previousFunction)
         configurations[keyID, default: .tallyDefault].displayMode = .function
         configurations[keyID, default: .tallyDefault].function = function
+        configurations[keyID, default: .tallyDefault].refreshDefaultButtonBackgroundSnapshot()
         return true
     }
 
@@ -1277,6 +1268,15 @@ nonisolated struct DeckGridInteractionState: Equatable {
         } while pages[pageID] != nil
 
         return pageID
+    }
+
+    private static func defaultConfiguration(for function: DeckKeyFunction, pageID: String? = nil) -> DeckKeyConfiguration {
+        var configuration = DeckKeyConfiguration(function: function)
+        if function == .pageFolder {
+            configuration.pageFolder = DeckKeyPageFolderConfiguration(pageID: pageID)
+        }
+        configuration.refreshDefaultButtonBackgroundSnapshot()
+        return configuration
     }
 
     private mutating func removeChildPageIfNeeded(for keyID: Int) {

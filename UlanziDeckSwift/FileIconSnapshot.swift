@@ -8,9 +8,8 @@ struct FileIconSnapshotData: Equatable {
     let blurredIconPNGData: Data
 }
 
-enum FileIconSnapshot {
-    static let targetLongEdge = 196
-    private static let preBlurLongEdge = 392
+nonisolated enum FileIconSnapshot {
+    static let targetLongEdge = 512
     private static let blurRadius = 14.0
     private static let ciContext = CIContext()
 
@@ -48,8 +47,8 @@ enum FileIconSnapshot {
             return nil
         }
 
-        let preBlurPixelSize = pixelSize(for: imageSize, targetLongEdge: preBlurLongEdge)
-        guard let sourceCGImage = renderCGImage(for: image, pixelSize: preBlurPixelSize) else {
+        let pixelSize = pixelSize(for: imageSize, targetLongEdge: targetLongEdge)
+        guard let sourceCGImage = renderCGImage(for: image, pixelSize: pixelSize) else {
             return nil
         }
 
@@ -63,8 +62,8 @@ enum FileIconSnapshot {
             return nil
         }
 
-        let blurredImage = NSImage(cgImage: blurredCGImage, size: NSSize(width: preBlurPixelSize.width, height: preBlurPixelSize.height))
-        return pngData(for: blurredImage, targetLongEdge: targetLongEdge)
+        let blurredImage = NSImage(cgImage: blurredCGImage, size: pixelSize)
+        return renderPNGData(for: blurredImage, pixelSize: pixelSize)
     }
 
     private static func renderPNGData(for image: NSImage, pixelSize: NSSize) -> Data? {
@@ -151,7 +150,8 @@ enum FileIconSnapshot {
             return .zero
         }
 
-        let scale = Double(targetLongEdge) / longEdge
+        let targetEdge = min(Double(targetLongEdge), longEdge)
+        let scale = targetEdge / longEdge
         return NSSize(
             width: max(1, (imageSize.width * scale).rounded()),
             height: max(1, (imageSize.height * scale).rounded())
