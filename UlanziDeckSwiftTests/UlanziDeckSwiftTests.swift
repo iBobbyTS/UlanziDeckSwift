@@ -3437,13 +3437,13 @@ struct UlanziDeckSwiftTests {
 
     @Test func iconRendererUsesMihoyoDefaultBackgrounds() throws {
         let layout = DeckGridLayout.h200Prototype
-        let cases: [(DeckKeyFunction, MihoyoGame, Int, Int, Int, Int)] = [
-            (.genshinStatus, .genshin, 119, 200, 4, 4),
-            (.starRailStatus, .starRail, 240, 240, 500, 500),
-            (.zenlessZoneStatus, .zenlessZoneZero, 320, 240, 400, 400),
+        let cases: [(DeckKeyFunction, MihoyoGame, Int, Int, Int, Int, MihoyoGameMetricColor)] = [
+            (.genshinStatus, .genshin, 119, 200, 4, 4, .green),
+            (.starRailStatus, .starRail, 240, 240, 500, 500, .red),
+            (.zenlessZoneStatus, .zenlessZoneZero, 320, 240, 400, 400, .red),
         ]
 
-        for (function, game, currentStamina, maxStamina, dailyCurrent, dailyMax) in cases {
+        for (function, game, currentStamina, maxStamina, dailyCurrent, dailyMax, staminaColor) in cases {
             let status = Self.mihoyoStatus(
                 game: game,
                 currentStamina: currentStamina,
@@ -3462,7 +3462,9 @@ struct UlanziDeckSwiftTests {
 
             #expect(display.mihoyoGame == game)
             #expect(display.mihoyoGameButtonContent?.staminaValue == "\(currentStamina)/\(maxStamina)")
+            #expect(display.mihoyoGameButtonContent?.staminaColor == staminaColor)
             #expect(display.mihoyoGameButtonContent?.dailyValue == "\(dailyCurrent)/\(dailyMax)")
+            #expect(display.mihoyoGameButtonContent?.dailyColor == .green)
             #expect(color.redComponent + color.greenComponent + color.blueComponent > 0.12)
             #expect(color.alphaComponent > 0.999)
         }
@@ -3722,9 +3724,91 @@ struct UlanziDeckSwiftTests {
             game: .zenlessZoneZero,
             staminaLabel: "电量",
             staminaValue: "320/240",
+            staminaColor: .red,
             dailyLabel: "每日活跃度",
-            dailyValue: "400/400"
+            dailyValue: "400/400",
+            dailyColor: .green
         ))
+    }
+
+    @Test func mihoyoStaminaDisplayColorUsesCapacityThresholds() {
+        for game in MihoyoGame.allCases {
+            #expect(Self.mihoyoStatus(
+                game: game,
+                currentStamina: 79,
+                maxStamina: 100
+            ).buttonContent.staminaColor == .green)
+            #expect(Self.mihoyoStatus(
+                game: game,
+                currentStamina: 80,
+                maxStamina: 100
+            ).buttonContent.staminaColor == .yellow)
+            #expect(Self.mihoyoStatus(
+                game: game,
+                currentStamina: 99,
+                maxStamina: 100
+            ).buttonContent.staminaColor == .yellow)
+            #expect(Self.mihoyoStatus(
+                game: game,
+                currentStamina: 100,
+                maxStamina: 100
+            ).buttonContent.staminaColor == .red)
+            #expect(Self.mihoyoStatus(
+                game: game,
+                currentStamina: 120,
+                maxStamina: 100
+            ).buttonContent.staminaColor == .red)
+        }
+    }
+
+    @Test func mihoyoDailyDisplayColorUsesGameSpecificRules() {
+        #expect(Self.mihoyoStatus(
+            game: .genshin,
+            dailyCurrent: 0,
+            dailyMax: 4
+        ).buttonContent.dailyColor == .red)
+        #expect(Self.mihoyoStatus(
+            game: .genshin,
+            dailyCurrent: 2,
+            dailyMax: 4
+        ).buttonContent.dailyColor == .yellow)
+        #expect(Self.mihoyoStatus(
+            game: .genshin,
+            dailyCurrent: 4,
+            dailyMax: 4
+        ).buttonContent.dailyColor == .green)
+
+        #expect(Self.mihoyoStatus(
+            game: .starRail,
+            dailyCurrent: 0,
+            dailyMax: 500
+        ).buttonContent.dailyColor == .red)
+        #expect(Self.mihoyoStatus(
+            game: .starRail,
+            dailyCurrent: 200,
+            dailyMax: 500
+        ).buttonContent.dailyColor == .yellow)
+        #expect(Self.mihoyoStatus(
+            game: .starRail,
+            dailyCurrent: 500,
+            dailyMax: 500
+        ).buttonContent.dailyColor == .green)
+
+        #expect(Self.mihoyoStatus(
+            game: .zenlessZoneZero,
+            dailyCurrent: 100,
+            dailyMax: 400
+        ).buttonContent.dailyColor == .red)
+        #expect(Self.mihoyoStatus(
+            game: .zenlessZoneZero,
+            dailyCurrent: 200,
+            dailyMax: 400
+        ).buttonContent.dailyColor == .yellow)
+        #expect(Self.mihoyoStatus(
+            game: .zenlessZoneZero,
+            dailyCurrent: 400,
+            dailyMax: 400
+        ).buttonContent.dailyColor == .green)
     }
 
     @Test func mihoyoJSONParsesNumericRetcodeWithoutTreatingItAsBool() throws {
@@ -3772,8 +3856,10 @@ struct UlanziDeckSwiftTests {
             game: .zenlessZoneZero,
             staminaLabel: "电量",
             staminaValue: "320/240",
+            staminaColor: .red,
             dailyLabel: "每日活跃度",
-            dailyValue: "400/400"
+            dailyValue: "400/400",
+            dailyColor: .green
         ))
 
         state.setMihoyoGameLastResult(.loginExpired("登录已失效"), for: 5)

@@ -567,7 +567,7 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             content.staminaValue,
             currentFont: valueFont,
             maximumFont: valueSuffixFont,
-            color: .white,
+            color: mihoyoGameMetricColor(for: content.staminaColor),
             rect: NSRect(x: rect.minX, y: top - labelHeight - valueHeight, width: rect.width, height: valueHeight),
             shadow: shadow
         )
@@ -589,10 +589,21 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             content.dailyValue,
             currentFont: valueFont,
             maximumFont: valueSuffixFont,
-            color: .white,
+            color: mihoyoGameMetricColor(for: content.dailyColor),
             rect: NSRect(x: rect.minX, y: top - totalHeight, width: rect.width, height: valueHeight),
             shadow: shadow
         )
+    }
+
+    private func mihoyoGameMetricColor(for color: MihoyoGameMetricColor) -> NSColor {
+        switch color {
+        case .green:
+            return NSColor(calibratedRed: 0.21, green: 0.73, blue: 0.36, alpha: 1)
+        case .yellow:
+            return NSColor(calibratedRed: 0.88, green: 0.65, blue: 0.15, alpha: 1)
+        case .red:
+            return NSColor(calibratedRed: 0.88, green: 0.23, blue: 0.20, alpha: 1)
+        }
     }
 
     private func textShadow() -> NSShadow {

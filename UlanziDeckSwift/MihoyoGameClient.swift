@@ -131,6 +131,14 @@ nonisolated struct MihoyoDailyStatus: Equatable, Sendable {
         Self.valueText(current: dailyCurrent, maximum: dailyMax)
     }
 
+    var staminaColor: MihoyoGameMetricColor {
+        Self.staminaColor(current: currentStamina, maximum: maxStamina)
+    }
+
+    var dailyColor: MihoyoGameMetricColor {
+        Self.dailyColor(game: game, current: dailyCurrent, maximum: dailyMax)
+    }
+
     var buttonTitle: String {
         "\(game.staminaShortName) \(staminaValueText)"
     }
@@ -144,8 +152,10 @@ nonisolated struct MihoyoDailyStatus: Equatable, Sendable {
             game: game,
             staminaLabel: game.staminaShortName,
             staminaValue: staminaValueText,
+            staminaColor: staminaColor,
             dailyLabel: game.dailyShortName,
-            dailyValue: dailyValueText
+            dailyValue: dailyValueText,
+            dailyColor: dailyColor
         )
     }
 
@@ -174,6 +184,45 @@ nonisolated struct MihoyoDailyStatus: Equatable, Sendable {
         }
     }
 
+    private static func staminaColor(current: Int?, maximum: Int?) -> MihoyoGameMetricColor {
+        guard let current, let maximum, maximum > 0 else {
+            return .yellow
+        }
+
+        if current >= maximum {
+            return .red
+        }
+
+        if current * 5 < maximum * 4 {
+            return .green
+        }
+
+        return .yellow
+    }
+
+    private static func dailyColor(game: MihoyoGame, current: Int?, maximum: Int?) -> MihoyoGameMetricColor {
+        guard let current else {
+            return .yellow
+        }
+
+        if let maximum, maximum > 0, current >= maximum {
+            return .green
+        }
+
+        switch game {
+        case .genshin, .starRail:
+            if current == 0 {
+                return .red
+            }
+        case .zenlessZoneZero:
+            if current == 100 {
+                return .red
+            }
+        }
+
+        return .yellow
+    }
+
     private static func durationText(seconds: Int) -> String {
         let days = seconds / 86_400
         let hours = (seconds % 86_400) / 3_600
@@ -191,12 +240,38 @@ nonisolated struct MihoyoDailyStatus: Equatable, Sendable {
     }
 }
 
+nonisolated enum MihoyoGameMetricColor: Equatable, Sendable {
+    case green
+    case yellow
+    case red
+}
+
 nonisolated struct MihoyoGameButtonContent: Equatable, Sendable {
     let game: MihoyoGame
     let staminaLabel: String
     let staminaValue: String
+    let staminaColor: MihoyoGameMetricColor
     let dailyLabel: String
     let dailyValue: String
+    let dailyColor: MihoyoGameMetricColor
+
+    init(
+        game: MihoyoGame,
+        staminaLabel: String,
+        staminaValue: String,
+        staminaColor: MihoyoGameMetricColor = .yellow,
+        dailyLabel: String,
+        dailyValue: String,
+        dailyColor: MihoyoGameMetricColor = .yellow
+    ) {
+        self.game = game
+        self.staminaLabel = staminaLabel
+        self.staminaValue = staminaValue
+        self.staminaColor = staminaColor
+        self.dailyLabel = dailyLabel
+        self.dailyValue = dailyValue
+        self.dailyColor = dailyColor
+    }
 }
 
 nonisolated enum MihoyoGameStatusResult: Equatable, Sendable {
