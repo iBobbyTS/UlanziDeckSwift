@@ -49,7 +49,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
         case .zenlessZoneStatus:
             return "绝区零状态"
         case .pageFolder:
-            return "文件夹"
+            return DeckKeyPageFolderConfiguration.defaultDisplayName
         case .pageBack:
             return "返回"
         }
@@ -78,7 +78,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
         case .zenlessZoneStatus:
             return "bolt"
         case .pageFolder:
-            return "folder.badge.plus"
+            return "folder"
         case .pageBack:
             return "arrow.uturn.left"
         }
@@ -958,16 +958,19 @@ nonisolated struct DeckKeyMihoyoGameConfiguration: Codable, Equatable {
 }
 
 nonisolated struct DeckKeyPageFolderConfiguration: Codable, Equatable {
+    static let defaultDisplayName = "功能夹"
+    private static let legacyDefaultDisplayName = "文件夹"
+
     var pageID: String?
     var visual: DeckKeyVisualConfiguration
 
-    init(pageID: String? = nil, visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration(name: "文件夹")) {
+    init(pageID: String? = nil, visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration(name: Self.defaultDisplayName)) {
         self.pageID = pageID
         self.visual = visual
     }
 
     var displayName: String {
-        visual.displayName(fallback: "文件夹")
+        visual.displayName(fallback: Self.defaultDisplayName)
     }
 
     enum CodingKeys: CodingKey {
@@ -979,13 +982,22 @@ nonisolated struct DeckKeyPageFolderConfiguration: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         pageID = try container.decodeIfPresent(String.self, forKey: .pageID)
         visual = try container.decodeIfPresent(DeckKeyVisualConfiguration.self, forKey: .visual)
-            ?? DeckKeyVisualConfiguration(name: "文件夹")
+            ?? DeckKeyVisualConfiguration(name: Self.defaultDisplayName)
+        visual = Self.migratingLegacyDefaultName(in: visual)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(pageID, forKey: .pageID)
         try container.encode(visual, forKey: .visual)
+    }
+
+    static func migratingLegacyDefaultName(in visual: DeckKeyVisualConfiguration) -> DeckKeyVisualConfiguration {
+        var migratedVisual = visual
+        if migratedVisual.name == legacyDefaultDisplayName {
+            migratedVisual.name = defaultDisplayName
+        }
+        return migratedVisual
     }
 }
 
@@ -1216,7 +1228,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return function.game?.shortDisplayName ?? "游戏"
         case .pageFolder:
-            return "文件夹"
+            return DeckKeyPageFolderConfiguration.defaultDisplayName
         case .pageBack:
             return "返回"
         }
@@ -1241,7 +1253,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case .connectSMBServer:
             return smbServer.visual
         case .pageFolder:
-            return pageFolder.visual
+            return DeckKeyPageFolderConfiguration.migratingLegacyDefaultName(in: pageFolder.visual)
         case .none, .tally, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .pageBack:
             return DeckKeyVisualConfiguration()
         }

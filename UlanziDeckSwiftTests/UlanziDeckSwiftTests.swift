@@ -199,19 +199,21 @@ struct UlanziDeckSwiftTests {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
 
+        #expect(DeckKeyFunction.pageFolder.title == "功能夹")
+        #expect(DeckKeyFunction.pageFolder.systemImageName == "folder")
         #expect(state.canAssignPageFolder(to: 2))
         let didAssignRootPageFolder = state.assign(.pageFolder, to: 2)
         #expect(didAssignRootPageFolder)
         let firstPageID = try #require(state.pageID(for: 2))
         let rootDisplay = state.display(for: layout.keys[1])
-        #expect(rootDisplay.pageFolderButtonContent?.displayName == "文件夹")
-        #expect(rootDisplay.title == "文件夹")
+        #expect(rootDisplay.pageFolderButtonContent?.displayName == "功能夹")
+        #expect(rootDisplay.title == "功能夹")
 
         let didEnterFirstPage = state.enterPageFolder(keyID: 2)
         #expect(didEnterFirstPage)
         #expect(state.currentPageID == firstPageID)
         #expect(state.currentPageDepth == 1)
-        #expect(state.navigationPathTitles == ["主页", "文件夹"])
+        #expect(state.navigationPathTitles == ["主页", "功能夹"])
         #expect(state.configuration(for: 1)?.function == .pageBack)
         #expect(state.configurations.filter { $0.key != 1 }.values.allSatisfy { $0.function == DeckKeyFunction.none })
 
@@ -229,6 +231,40 @@ struct UlanziDeckSwiftTests {
         #expect(!state.canAssignPageFolder(to: 4))
         let didRejectFourthLevelPageFolder = state.assign(.pageFolder, to: 4)
         #expect(!didRejectFourthLevelPageFolder)
+    }
+
+    @Test func legacyPageFolderDefaultNameMigratesToFeatureFolderName() throws {
+        let legacyData = Data("""
+        {
+          "function": "pageFolder",
+          "pageFolder": {
+            "pageID": "page-legacy",
+            "visual": {
+              "name": "文件夹"
+            }
+          }
+        }
+        """.utf8)
+        let configuration = try JSONDecoder().decode(DeckKeyConfiguration.self, from: legacyData)
+
+        #expect(configuration.pageFolder.displayName == "功能夹")
+        #expect(configuration.visual.displayName(fallback: configuration.automaticButtonDisplayName) == "功能夹")
+
+        let customData = Data("""
+        {
+          "function": "pageFolder",
+          "pageFolder": {
+            "pageID": "page-custom",
+            "visual": {
+              "name": "自定义夹"
+            }
+          }
+        }
+        """.utf8)
+        let customConfiguration = try JSONDecoder().decode(DeckKeyConfiguration.self, from: customData)
+
+        #expect(customConfiguration.pageFolder.displayName == "自定义夹")
+        #expect(customConfiguration.visual.displayName(fallback: customConfiguration.automaticButtonDisplayName) == "自定义夹")
     }
 
     @Test func pageFolderChildPageInheritsWideKeyDisplayModeWithoutFunction() throws {
@@ -752,6 +788,7 @@ struct UlanziDeckSwiftTests {
     @Test func defaultBackgroundFunctionsCreateInstanceSnapshotsAndClearThemOnDeletion() throws {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
+        var capturedBackgrounds: [DeckKeyFunction: Data] = [:]
         let cases: [(DeckKeyFunction, Int)] = [
             (.openFolder, 2),
             (.connectSMBServer, 3),
@@ -767,6 +804,7 @@ struct UlanziDeckSwiftTests {
             let configuration = try #require(state.configuration(for: keyID))
             let directBackground = try #require(configuration.defaultButtonBackgroundPNGData)
             let blurredBackground = try #require(configuration.defaultButtonBlurredBackgroundPNGData)
+            capturedBackgrounds[function] = directBackground
 
             #expect(!configuration.visual.hasCustomBackground)
             #expect(directBackground != blurredBackground)
@@ -781,6 +819,8 @@ struct UlanziDeckSwiftTests {
             #expect(clearedConfiguration.defaultButtonBackgroundPNGData == nil)
             #expect(clearedConfiguration.defaultButtonBlurredBackgroundPNGData == nil)
         }
+
+        #expect(capturedBackgrounds[.pageFolder] != capturedBackgrounds[.openFolder])
     }
 
     @Test func defaultBackgroundBlurAndDimmingAreIndependentPerInstance() throws {
@@ -2657,7 +2697,7 @@ struct UlanziDeckSwiftTests {
         }
         #expect(model.interactionState.currentPageID == DeckGridInteractionState.rootPageID)
         #expect(syncer.sentDisplays.last?.count == 14)
-        #expect(syncer.sentDisplays.last?[1].pageFolderButtonContent?.displayName == "文件夹")
+        #expect(syncer.sentDisplays.last?[1].pageFolderButtonContent?.displayName == "功能夹")
     }
 
     @MainActor
@@ -3342,12 +3382,18 @@ struct UlanziDeckSwiftTests {
 
         let png = try H200ButtonIconRenderer().pngData(for: display)
         let image = try #require(NSBitmapImageRep(data: png))
-        let centerColor = try #require(image.colorAt(x: 50, y: 50)?.usingColorSpace(.deviceRGB))
+        let cornerColor = try #require(image.colorAt(x: 2, y: 2)?.usingColorSpace(.deviceRGB))
+        let visibleBounds = try #require(Self.brightPixelBounds(in: image))
 
-        #expect(display.title == "文件夹")
-        #expect(display.pageFolderButtonContent?.displayName == "文件夹")
+        #expect(display.title == "功能夹")
+        #expect(display.pageFolderButtonContent?.displayName == "功能夹")
         #expect(display.pageFolderButtonContent?.backgroundPNGData != nil)
-        #expect(centerColor.alphaComponent > 0.999)
+        #expect(cornerColor.alphaComponent > 0.999)
+        #expect(cornerColor.redComponent < 0.01)
+        #expect(cornerColor.greenComponent < 0.01)
+        #expect(cornerColor.blueComponent < 0.01)
+        #expect(visibleBounds.width > 20)
+        #expect(visibleBounds.height > 20)
     }
 
     @Test func iconRendererUsesBackTextForPageBackKey() throws {

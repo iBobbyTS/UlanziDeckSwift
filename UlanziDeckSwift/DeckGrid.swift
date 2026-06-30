@@ -157,7 +157,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             case .pageFolder:
                 let content = PageFolderButtonContent(
                     visual: ButtonVisualContent(
-                        displayName: configuration.visual.displayName(fallback: "文件夹"),
+                        displayName: configuration.visual.displayName(fallback: DeckKeyPageFolderConfiguration.defaultDisplayName),
                         backgroundPNGData: configuration.selectedButtonBackgroundPNGData,
                         backgroundAssetName: nil,
                         usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
@@ -479,7 +479,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     var navigationPathTitles: [String] {
         navigationPathPageIDs().map { pageID in
-            pageID == Self.rootPageID ? "主页" : "文件夹"
+            pageID == Self.rootPageID ? "主页" : DeckKeyPageFolderConfiguration.defaultDisplayName
         }
     }
 
