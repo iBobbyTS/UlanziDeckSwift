@@ -558,8 +558,17 @@ nonisolated struct DeckGridInteractionState: Equatable {
         Dictionary(uniqueKeysWithValues: layout.keys.map { ($0.id, .tallyDefault) })
     }
 
-    private static func childPageConfigurations(for layout: DeckGridLayout) -> [Int: DeckKeyConfiguration] {
-        let emptyConfigurations = Dictionary(uniqueKeysWithValues: layout.keys.map { ($0.id, DeckKeyConfiguration.empty) })
+    private static func childPageConfigurations(
+        for layout: DeckGridLayout,
+        inheritingDisplayModesFrom parentConfigurations: [Int: DeckKeyConfiguration] = [:]
+    ) -> [Int: DeckKeyConfiguration] {
+        let emptyConfigurations = Dictionary(uniqueKeysWithValues: layout.keys.map { key in
+            var configuration = DeckKeyConfiguration.empty
+            if key.columnSpan > 1 {
+                configuration.displayMode = parentConfigurations[key.id]?.displayMode ?? .function
+            }
+            return (key.id, configuration)
+        })
         return ensureBackKey(in: emptyConfigurations, layout: layout)
     }
 
@@ -1154,7 +1163,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
             pages[childPageID] = DeckGridPage(
                 id: childPageID,
                 parentID: currentPageID,
-                configurations: Self.childPageConfigurations(for: layout)
+                configurations: Self.childPageConfigurations(
+                    for: layout,
+                    inheritingDisplayModesFrom: configurations
+                )
             )
             selectedKeyID = keyID
             configurations[keyID] = Self.defaultConfiguration(for: .pageFolder, pageID: childPageID)

@@ -231,6 +231,28 @@ struct UlanziDeckSwiftTests {
         #expect(!didRejectFourthLevelPageFolder)
     }
 
+    @Test func pageFolderChildPageInheritsWideKeyDisplayModeWithoutFunction() throws {
+        let layout = DeckGridLayout.h200Prototype
+        for displayMode in DeckKeyDisplayMode.allCases {
+            var state = DeckGridInteractionState(layout: layout)
+            if displayMode == .function {
+                state.assign(.openFolder, to: 14)
+            } else {
+                state.setDisplayMode(displayMode, for: 14)
+            }
+
+            let didAssignPageFolder = state.assign(.pageFolder, to: 2)
+            #expect(didAssignPageFolder)
+            let didEnterPage = state.enterPageFolder(keyID: 2)
+            #expect(didEnterPage)
+
+            let inheritedConfiguration = try #require(state.configuration(for: 14))
+            #expect(inheritedConfiguration.displayMode == displayMode)
+            #expect(inheritedConfiguration.function == .none)
+            #expect(inheritedConfiguration.openFolder.path == nil)
+        }
+    }
+
     @Test func pageBackCannotBeDeletedOrReassignedButCanMoveWithinSquareKeys() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
