@@ -122,7 +122,7 @@ struct RootView: View {
             }
         )
             .background {
-                WindowSizeConfigurator(
+                MainWindowConfigurator(
                     minimumContentSize: windowContentMinimumSize,
                     maximumContentSize: windowContentMaximumSize
                 )
@@ -151,7 +151,7 @@ struct RootView: View {
     }
 }
 
-private struct WindowSizeConfigurator: NSViewRepresentable {
+private struct MainWindowConfigurator: NSViewRepresentable {
     let minimumContentSize: CGSize
     let maximumContentSize: CGSize
 
@@ -176,6 +176,10 @@ private struct WindowSizeConfigurator: NSViewRepresentable {
 
         window.contentMinSize = minimumContentSize
         window.contentMaxSize = maximumContentSize
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.styleMask.insert(.fullSizeContentView)
+        window.isMovableByWindowBackground = true
     }
 }
 

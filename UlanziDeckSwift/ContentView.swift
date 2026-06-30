@@ -55,6 +55,7 @@ struct ContentView: View {
     private let layout = DeckGridLayout.h200Prototype
     private let previewLayoutMetrics = DeckPreviewLayoutMetrics.h200
     private let minimumWindowWidth: CGFloat = 880
+    private let titlebarControlReservedWidth: CGFloat = 64
     private let functionSidebarMinimumWidth: CGFloat = 250
     private let functionSidebarPreferredWidth: CGFloat = 270
     private let functionSidebarMaximumWidth: CGFloat = 288
@@ -157,7 +158,8 @@ struct ContentView: View {
 
             brightnessControl
         }
-        .padding(.horizontal, 28)
+        .padding(.leading, titlebarControlReservedWidth)
+        .padding(.trailing, 28)
         .padding(.vertical, 18)
     }
 
