@@ -1187,7 +1187,9 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return mihoyoGame.visual.backgroundPNGData
         case .pageFolder:
             return pageFolder.visual.backgroundPNGData
-        case .none, .tally, .brightness, .sub2API, .pageBack:
+        case .pageBack:
+            return visual.backgroundPNGData
+        case .none, .tally, .brightness, .sub2API:
             return nil
         }
     }
@@ -1204,7 +1206,9 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return mihoyoGame.visual.blurredBackgroundPNGData
         case .pageFolder:
             return pageFolder.visual.blurredBackgroundPNGData
-        case .none, .tally, .brightness, .sub2API, .pageBack:
+        case .pageBack:
+            return visual.blurredBackgroundPNGData
+        case .none, .tally, .brightness, .sub2API:
             return nil
         }
     }

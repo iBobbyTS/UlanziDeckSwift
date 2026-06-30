@@ -585,7 +585,9 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         var updatedConfigurations = configurations
-        updatedConfigurations[key.id] = .pageBack
+        var pageBackConfiguration = DeckKeyConfiguration.pageBack
+        pageBackConfiguration.refreshDefaultButtonBackgroundSnapshot()
+        updatedConfigurations[key.id] = pageBackConfiguration
         return updatedConfigurations
     }
 

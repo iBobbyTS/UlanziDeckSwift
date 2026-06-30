@@ -3402,12 +3402,16 @@ struct UlanziDeckSwiftTests {
         state.assign(.pageFolder, to: 2)
         state.enterPageFolder(keyID: 2)
         let display = state.display(for: layout.keys[0])
+        let configuration = try #require(state.configuration(for: 1))
 
         let png = try H200ButtonIconRenderer().pngData(for: display)
         let image = try #require(NSBitmapImageRep(data: png))
         let textBounds = try #require(Self.brightPixelBounds(in: image))
 
         #expect(display.pageBackButtonContent?.displayName == "返回")
+        #expect(configuration.function.systemImageName == "arrow.uturn.left")
+        #expect(configuration.defaultButtonBackgroundPNGData != nil)
+        #expect(display.buttonVisualContent.backgroundPNGData == configuration.defaultButtonBackgroundPNGData)
         #expect(textBounds.width > 20)
         #expect(textBounds.height > 10)
     }

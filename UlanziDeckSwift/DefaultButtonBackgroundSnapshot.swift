@@ -37,7 +37,9 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
         switch function {
         case .pageFolder:
             return "folder"
-        case .none, .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .pageBack:
+        case .pageBack:
+            return "arrow.uturn.left"
+        case .none, .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return nil
         }
     }
@@ -136,7 +138,9 @@ extension DeckKeyConfiguration {
             mihoyoGame.visual.replaceBackground(with: defaultVisual)
         case .pageFolder:
             pageFolder.visual.replaceBackground(with: defaultVisual)
-        case .none, .tally, .openFile, .brightness, .sub2API, .pageBack:
+        case .pageBack:
+            visual.replaceBackground(with: defaultVisual)
+        case .none, .tally, .openFile, .brightness, .sub2API:
             break
         }
 
@@ -153,7 +157,9 @@ extension DeckKeyConfiguration {
             mihoyoGame.visual.clearBackground()
         case .pageFolder:
             pageFolder.visual.clearBackground()
-        case .none, .tally, .openFile, .brightness, .sub2API, .pageBack:
+        case .pageBack:
+            visual.clearBackground()
+        case .none, .tally, .openFile, .brightness, .sub2API:
             break
         }
 
