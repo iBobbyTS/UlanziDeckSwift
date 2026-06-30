@@ -3780,9 +3780,14 @@ struct UlanziDeckSwiftTests {
 
         #expect(Self.mihoyoStatus(
             game: .starRail,
-            dailyCurrent: 0,
+            dailyCurrent: 100,
             dailyMax: 500
         ).buttonContent.dailyColor == .red)
+        #expect(Self.mihoyoStatus(
+            game: .starRail,
+            dailyCurrent: 101,
+            dailyMax: 500
+        ).buttonContent.dailyColor == .yellow)
         #expect(Self.mihoyoStatus(
             game: .starRail,
             dailyCurrent: 200,
@@ -3796,9 +3801,19 @@ struct UlanziDeckSwiftTests {
 
         #expect(Self.mihoyoStatus(
             game: .zenlessZoneZero,
+            dailyCurrent: 99,
+            dailyMax: 400
+        ).buttonContent.dailyColor == .red)
+        #expect(Self.mihoyoStatus(
+            game: .zenlessZoneZero,
             dailyCurrent: 100,
             dailyMax: 400
         ).buttonContent.dailyColor == .red)
+        #expect(Self.mihoyoStatus(
+            game: .zenlessZoneZero,
+            dailyCurrent: 101,
+            dailyMax: 400
+        ).buttonContent.dailyColor == .yellow)
         #expect(Self.mihoyoStatus(
             game: .zenlessZoneZero,
             dailyCurrent: 200,

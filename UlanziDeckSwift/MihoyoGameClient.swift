@@ -205,19 +205,19 @@ nonisolated struct MihoyoDailyStatus: Equatable, Sendable {
             return .yellow
         }
 
-        if let maximum, maximum > 0, current >= maximum {
-            return .green
-        }
-
         switch game {
-        case .genshin, .starRail:
+        case .genshin:
             if current == 0 {
                 return .red
             }
-        case .zenlessZoneZero:
-            if current == 100 {
+        case .starRail, .zenlessZoneZero:
+            if current <= 100 {
                 return .red
             }
+        }
+
+        if let maximum, maximum > 0, current >= maximum {
+            return .green
         }
 
         return .yellow
