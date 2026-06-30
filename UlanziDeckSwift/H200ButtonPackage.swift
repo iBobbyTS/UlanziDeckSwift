@@ -359,6 +359,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
             return
         }
+        if let content = display.webPageButtonContent {
+            drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
+            return
+        }
         if let content = display.smbServerButtonContent {
             drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
             return

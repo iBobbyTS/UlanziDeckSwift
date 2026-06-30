@@ -478,6 +478,27 @@ struct UlanziDeckSwiftTests {
         }
     }
 
+    @Test func webPageURLNormalizationDefaultsToHTTPSAndRejectsUnsupportedURLs() throws {
+        let hostOnly = try WebPageURL("example.com")
+        let schemeQualified = try WebPageURL("HTTP://example.com/path/")
+
+        #expect(hostOnly.url.absoluteString == "https://example.com")
+        #expect(schemeQualified.url.absoluteString == "http://example.com/path/")
+        #expect(hostOnly.resolvedURL(for: "/favicon.ico")?.absoluteString == "https://example.com/favicon.ico")
+
+        for value in ["", "ftp://example.com", "https://user@example.com", "https:///missing-host"] {
+            var didThrow = false
+            do {
+                _ = try WebPageURL(value)
+            } catch {
+                didThrow = true
+                #expect(error is WebPageURLError)
+            }
+
+            #expect(didThrow)
+        }
+    }
+
     @Test func sub2APIAvailabilityLevelUsesRequestedThresholds() {
         #expect(Sub2APIAvailabilityLevel(availableConcurrency: 500) == .healthy)
         #expect(Sub2APIAvailabilityLevel(availableConcurrency: 499) == .warning)
@@ -589,6 +610,63 @@ struct UlanziDeckSwiftTests {
         #expect(namedDisplay.fileButtonContent?.displayName == "报告")
     }
 
+    @Test func openWebPageFunctionDisplaysFetchedTitleAndIconAsDefaults() {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        let iconSnapshot = FileIconSnapshotData(
+            iconPNGData: Self.solidColorIconPNGData(color: .systemRed),
+            blurredIconPNGData: Self.solidColorIconPNGData(color: .systemBlue)
+        )
+
+        state.assign(.openWebPage, to: 5)
+        let defaultDisplay = state.display(for: layout.keys[4])
+
+        #expect(DeckKeyFunction.openWebPage.title == "打开网页")
+        #expect(DeckKeyFunction.openWebPage.systemImageName == "globe")
+        #expect(DeckKeyFunction.assignableCases.contains(.openWebPage))
+        #expect(defaultDisplay.title.isEmpty)
+        #expect(defaultDisplay.subtitle.isEmpty)
+        #expect(defaultDisplay.webPageButtonContent?.displayName == "")
+        #expect(defaultDisplay.webPageButtonContent?.backgroundPNGData != nil)
+
+        state.setWebPageURLString(" example.com ", for: 5)
+        let configuredDisplay = state.display(for: layout.keys[4])
+
+        #expect(state.webPageURLString(for: 5) == "example.com")
+        #expect(configuredDisplay.title.isEmpty)
+        #expect(configuredDisplay.subtitle == "example.com")
+        #expect(configuredDisplay.webPageButtonContent?.backgroundPNGData != nil)
+
+        let didApplyMetadata = state.setWebPageMetadata(
+            WebPageMetadata(title: " Example Site ", iconSnapshot: iconSnapshot),
+            for: 5,
+            matchingURLString: " example.com "
+        )
+        let metadataDisplay = state.display(for: layout.keys[4])
+
+        #expect(didApplyMetadata)
+        #expect(metadataDisplay.title == "Example Site")
+        #expect(metadataDisplay.webPageButtonContent?.displayName == "Example Site")
+        #expect(metadataDisplay.webPageButtonContent?.backgroundPNGData == iconSnapshot.iconPNGData)
+        #expect(metadataDisplay.buttonVisualContent.hasCustomDisplayName == false)
+        #expect(state.configuration(for: 5)?.buttonVisualConfiguration?.name == "")
+
+        state.setButtonVisualName(" 文档站 ", for: 5)
+        let namedDisplay = state.display(for: layout.keys[4])
+
+        #expect(namedDisplay.title == "文档站")
+        #expect(namedDisplay.webPageButtonContent?.displayName == "文档站")
+        #expect(namedDisplay.buttonVisualContent.hasCustomDisplayName)
+
+        state.setWebPageURLString(" example.org ", for: 5)
+        let changedURLDisplay = state.display(for: layout.keys[4])
+
+        #expect(state.openWebPageConfiguration(for: 5).title.isEmpty)
+        #expect(changedURLDisplay.title == "文档站")
+        #expect(changedURLDisplay.subtitle == "example.org")
+        #expect(changedURLDisplay.webPageButtonContent?.backgroundPNGData != iconSnapshot.iconPNGData)
+    }
+
     @Test func buttonVisualConfigurationAppliesToAllButtonFunctions() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
@@ -606,14 +684,15 @@ struct UlanziDeckSwiftTests {
         state.assign(.tally, to: 3)
         state.assign(.openFolder, to: 4)
         state.assign(.openFile, to: 5)
-        state.assign(.connectSMBServer, to: 6)
-        state.assign(.sub2API, to: 7)
-        state.assign(.genshinStatus, to: 8)
-        state.assign(.starRailStatus, to: 9)
-        state.assign(.zenlessZoneStatus, to: 10)
-        state.assign(.pageFolder, to: 11)
+        state.assign(.openWebPage, to: 6)
+        state.assign(.connectSMBServer, to: 7)
+        state.assign(.sub2API, to: 8)
+        state.assign(.genshinStatus, to: 9)
+        state.assign(.starRailStatus, to: 10)
+        state.assign(.zenlessZoneStatus, to: 11)
+        state.assign(.pageFolder, to: 12)
 
-        for keyID in 2...11 {
+        for keyID in 2...12 {
             state.setButtonVisualConfiguration(visual, for: keyID)
             let display = state.display(for: layout.keys[keyID - 1])
             #expect(display.title == "视觉")
@@ -624,7 +703,7 @@ struct UlanziDeckSwiftTests {
             #expect(display.buttonVisualContent.hasCustomBackground)
         }
 
-        let didEnterPage = state.enterPageFolder(keyID: 11)
+        let didEnterPage = state.enterPageFolder(keyID: 12)
         #expect(didEnterPage)
         state.setButtonVisualConfiguration(visual, for: 1)
         let backDisplay = state.display(for: layout.keys[0])
@@ -763,6 +842,95 @@ struct UlanziDeckSwiftTests {
         #expect(restored.canOpen)
     }
 
+    @Test func openWebPageConfigurationPersistsTitleAndIconSeparatelyFromCustomDisplayName() throws {
+        let iconSnapshot = FileIconSnapshotData(
+            iconPNGData: Self.solidColorIconPNGData(color: .systemBlue),
+            blurredIconPNGData: Self.solidColorIconPNGData(color: .systemRed)
+        )
+        let configuration = DeckKeyOpenWebPageConfiguration(
+            urlString: " example.com ",
+            title: " Example Site ",
+            iconSnapshot: iconSnapshot,
+            visual: DeckKeyVisualConfiguration(
+                name: " 自定义名称 ",
+                backgroundPNGData: iconSnapshot.iconPNGData,
+                blurredBackgroundPNGData: iconSnapshot.blurredIconPNGData,
+                usesBlurredBackground: true
+            )
+        )
+
+        let encoded = try JSONEncoder().encode(configuration)
+        let restored = try JSONDecoder().decode(DeckKeyOpenWebPageConfiguration.self, from: encoded)
+
+        #expect(restored.urlString == "example.com")
+        #expect(restored.title == "Example Site")
+        #expect(restored.visual.name.isEmpty)
+        #expect(restored.displayName == "Example Site")
+        #expect(restored.iconPNGData == iconSnapshot.iconPNGData)
+        #expect(restored.blurredIconPNGData == iconSnapshot.blurredIconPNGData)
+        #expect(restored.usesBlurredIcon)
+        #expect(restored.canOpen)
+        #expect(restored.url?.absoluteString == "https://example.com")
+
+        let legacyData = Data("""
+        {
+          "urlString": "https://example.com",
+          "visual": {
+            "name": "Legacy Title",
+            "backgroundPNGData": "\(iconSnapshot.iconPNGData.base64EncodedString())",
+            "blurredBackgroundPNGData": "\(iconSnapshot.blurredIconPNGData.base64EncodedString())"
+          }
+        }
+        """.utf8)
+        let legacyRestored = try JSONDecoder().decode(DeckKeyOpenWebPageConfiguration.self, from: legacyData)
+
+        #expect(legacyRestored.title == "Legacy Title")
+        #expect(legacyRestored.visual.name.isEmpty)
+        #expect(legacyRestored.displayName == "Legacy Title")
+    }
+
+    @Test func webPageMetadataFetcherRejectsOversizedOrUnexpectedResponses() async throws {
+        let iconURL = try #require(URL(string: "https://example.com/favicon.ico"))
+        WebPageMetadataURLProtocol.setStubs([
+            try #require(URL(string: "https://example.com/oversized")): WebPageMetadataURLProtocol.Stub(
+                statusCode: 200,
+                mimeType: "text/html",
+                contentLength: 10_000,
+                data: Data("<title>Too Large</title>".utf8)
+            ),
+            try #require(URL(string: "https://example.com/plain")): WebPageMetadataURLProtocol.Stub(
+                statusCode: 200,
+                mimeType: "text/plain",
+                data: Data("<title>Wrong Type</title>".utf8)
+            ),
+            try #require(URL(string: "https://example.com/ok")): WebPageMetadataURLProtocol.Stub(
+                statusCode: 200,
+                mimeType: "text/html",
+                data: Data("<title>Example Site</title>".utf8)
+            ),
+            iconURL: WebPageMetadataURLProtocol.Stub(
+                statusCode: 200,
+                mimeType: "text/plain",
+                data: Data("not an icon".utf8)
+            ),
+        ])
+        defer {
+            WebPageMetadataURLProtocol.setStubs([:])
+        }
+
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let fetcher = WebPageMetadataFetcher(
+            urlSession: URLSession(configuration: configuration),
+            maximumHTMLBytes: 32,
+            maximumIconBytes: 8
+        )
+
+        #expect(await fetcher.fetchMetadata(for: "https://example.com/oversized") == nil)
+        #expect(await fetcher.fetchMetadata(for: "https://example.com/plain") == nil)
+        #expect(await fetcher.fetchMetadata(for: "https://example.com/ok") == WebPageMetadata(title: "Example Site", iconSnapshot: nil))
+    }
+
     @Test func fileIconSnapshotStoresDirectAndBlurredLongEdge512ImagesWithoutUpscaling() throws {
         let largeIcon = Self.twoToneIconImage(size: NSSize(width: 800, height: 400))
         let largeSnapshot = try #require(FileIconSnapshot.snapshotData(for: largeIcon))
@@ -791,11 +959,12 @@ struct UlanziDeckSwiftTests {
         var capturedBackgrounds: [DeckKeyFunction: Data] = [:]
         let cases: [(DeckKeyFunction, Int)] = [
             (.openFolder, 2),
-            (.connectSMBServer, 3),
-            (.genshinStatus, 4),
-            (.starRailStatus, 5),
-            (.zenlessZoneStatus, 6),
-            (.pageFolder, 7),
+            (.openWebPage, 3),
+            (.connectSMBServer, 4),
+            (.genshinStatus, 5),
+            (.starRailStatus, 6),
+            (.zenlessZoneStatus, 7),
+            (.pageFolder, 8),
         ]
 
         for (function, keyID) in cases {
@@ -2223,6 +2392,178 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func selectingOpenWebPageSavesURLAndFetchesMetadataOnlyAfterSubmit() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore()
+        let iconSnapshot = FileIconSnapshotData(
+            iconPNGData: Self.solidColorIconPNGData(color: .systemRed),
+            blurredIconPNGData: Self.solidColorIconPNGData(color: .systemBlue)
+        )
+        let fetcher = FakeWebPageMetadataFetcher(results: [
+            WebPageMetadata(title: "Example Site", iconSnapshot: iconSnapshot),
+        ])
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            webPageMetadataFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openWebPage)
+        model.setSelectedWebPageURLString(" example.com ")
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(fetcher.requests.isEmpty)
+        #expect(model.interactionState.webPageURLString(for: 4) == "example.com")
+        #expect(model.interactionState.openWebPageConfiguration(for: 4).title.isEmpty)
+        #expect(syncer.partialDisplays.last?.first?.subtitle == "example.com")
+
+        model.submitSelectedWebPageURLString()
+
+        try await Self.waitUntil {
+            model.interactionState.openWebPageConfiguration(for: 4).title == "Example Site"
+                && syncer.partialDisplays.last?.first?.title == "Example Site"
+        }
+        #expect(fetcher.requests == ["example.com"])
+        #expect(model.interactionState.configuration(for: 4)?.function == DeckKeyFunction.openWebPage)
+        #expect(model.interactionState.webPageURLString(for: 4) == "example.com")
+        #expect(model.interactionState.configuration(for: 4)?.buttonVisualConfiguration?.name == "")
+        #expect(syncer.sentDisplays.count == 1)
+        #expect(syncer.partialDisplays.last?.map(\.id) == [4])
+        #expect(syncer.partialDisplays.last?.first?.subtitle == "example.com")
+        #expect(syncer.partialDisplays.last?.first?.webPageButtonContent?.backgroundPNGData == iconSnapshot.iconPNGData)
+        #expect(store.savedStates.last?.openWebPageConfiguration(for: 4).title == "Example Site")
+        #expect(store.savedStates.last?.openWebPageConfiguration(for: 4).iconPNGData == iconSnapshot.iconPNGData)
+        #expect(store.savedStates.last?.configuration(for: 4)?.buttonVisualConfiguration?.name == "")
+
+        let savedStateCount = store.savedStates.count
+        let partialDisplayCount = syncer.partialDisplays.count
+        model.setSelectedWebPageURLString("example.com")
+        model.submitSelectedWebPageURLString()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(fetcher.requests == ["example.com"])
+        #expect(store.savedStates.count == savedStateCount)
+        #expect(syncer.partialDisplays.count == partialDisplayCount)
+    }
+
+    @MainActor
+    @Test func staleWebPageMetadataDoesNotOverrideChangedURL() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore()
+        let oldIconSnapshot = FileIconSnapshotData(
+            iconPNGData: Self.solidColorIconPNGData(color: .systemRed),
+            blurredIconPNGData: Self.solidColorIconPNGData(color: .systemBlue)
+        )
+        let newIconSnapshot = FileIconSnapshotData(
+            iconPNGData: Self.solidColorIconPNGData(color: .systemGreen),
+            blurredIconPNGData: Self.solidColorIconPNGData(color: .systemOrange)
+        )
+        let fetcher = FakeWebPageMetadataFetcher(
+            results: [
+                WebPageMetadata(title: "Old Site", iconSnapshot: oldIconSnapshot),
+                WebPageMetadata(title: "New Site", iconSnapshot: newIconSnapshot),
+            ],
+            fetchDelayNanoseconds: 150_000_000
+        )
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            webPageMetadataFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openWebPage)
+        model.setSelectedWebPageURLString("old.example.com")
+        model.submitSelectedWebPageURLString()
+        try await Self.waitUntil {
+            fetcher.requests == ["old.example.com"]
+        }
+        model.setSelectedWebPageURLString("new.example.com")
+        model.submitSelectedWebPageURLString()
+
+        try await Self.waitUntil {
+            model.interactionState.openWebPageConfiguration(for: 4).title == "New Site"
+        }
+        #expect(fetcher.requests == ["old.example.com", "new.example.com"])
+        #expect(model.interactionState.webPageURLString(for: 4) == "new.example.com")
+        #expect(model.interactionState.openWebPageConfiguration(for: 4).iconPNGData == newIconSnapshot.iconPNGData)
+        #expect(store.savedStates.last?.openWebPageConfiguration(for: 4).title == "New Site")
+    }
+
+    @MainActor
+    @Test func navigatingPageCancelsPendingWebPageMetadataFetch() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore()
+        let fetcher = FakeWebPageMetadataFetcher(
+            results: [
+                WebPageMetadata(title: "Child Site", iconSnapshot: nil),
+                WebPageMetadata(title: "Root Site", iconSnapshot: nil),
+            ],
+            fetchDelaySequenceNanoseconds: [nil, 150_000_000]
+        )
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            webPageMetadataFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 2)
+        model.assignSelectedFunction(.pageFolder)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 1
+        }
+
+        model.navigateKey(keyID: 2)
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 2
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openWebPage)
+        model.setSelectedWebPageURLString("example.com")
+        model.submitSelectedWebPageURLString()
+        try await Self.waitUntil {
+            model.interactionState.openWebPageConfiguration(for: 4).title == "Child Site"
+        }
+
+        model.navigateKey(keyID: 1)
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 3
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openWebPage)
+        model.setSelectedWebPageURLString("example.com")
+        model.submitSelectedWebPageURLString()
+        try await Self.waitUntil {
+            fetcher.requests == ["example.com", "example.com"]
+        }
+
+        model.navigateKey(keyID: 2)
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 4
+        }
+        try await Task.sleep(nanoseconds: 250_000_000)
+
+        #expect(model.interactionState.currentPageDepth == 1)
+        #expect(model.interactionState.openWebPageConfiguration(for: 4).title == "Child Site")
+    }
+
+    @MainActor
     @Test func selectingConnectSMBServerFunctionSyncsAndPersistsNameAndAddress() async throws {
         let syncer = FakeH200DeckSyncer()
         let store = FakeDeckConfigurationStore()
@@ -3001,6 +3342,63 @@ struct UlanziDeckSwiftTests {
         try await Task.sleep(nanoseconds: 50_000_000)
 
         #expect(opener.openedPaths.isEmpty)
+        #expect(opener.openedConfigurations.isEmpty)
+    }
+
+    @MainActor
+    @Test func physicalButtonShortPressOpensConfiguredWebPageWithoutSyncingDisplay() async throws {
+        let opener = FakeWebPageOpener()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            webPageOpener: opener,
+            webPageMetadataFetcher: FakeWebPageMetadataFetcher()
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openWebPage)
+        model.setSelectedWebPageURLString("example.com")
+        let sentDisplayCount = syncer.sentDisplays.count
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(opener.openedURLs.map(\.absoluteString) == ["https://example.com"])
+        #expect(opener.openedConfigurations.map(\.urlString) == ["example.com"])
+        #expect(syncer.sentDisplays.count == sentDisplayCount)
+        #expect(model.interactionState.selectedKeyID == 4)
+    }
+
+    @MainActor
+    @Test func physicalButtonOpenWebPageWithoutURLDoesNothing() async throws {
+        let opener = FakeWebPageOpener()
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            webPageOpener: opener
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openWebPage)
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        try await Task.sleep(nanoseconds: 50_000_000)
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(opener.openedURLs.isEmpty)
         #expect(opener.openedConfigurations.isEmpty)
     }
 
@@ -4919,6 +5317,56 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
     }
 }
 
+private final class FakeWebPageMetadataFetcher: WebPageMetadataFetching, @unchecked Sendable {
+    private let lock = NSLock()
+    private var results: [WebPageMetadata]
+    private let defaultResult: WebPageMetadata?
+    private let fetchDelayNanoseconds: UInt64?
+    private var fetchDelaySequenceNanoseconds: [UInt64?]
+    private var storedRequests: [String] = []
+
+    var requests: [String] {
+        locked { storedRequests }
+    }
+
+    init(
+        results: [WebPageMetadata] = [],
+        defaultResult: WebPageMetadata? = nil,
+        fetchDelayNanoseconds: UInt64? = nil,
+        fetchDelaySequenceNanoseconds: [UInt64?] = []
+    ) {
+        self.results = results
+        self.defaultResult = defaultResult
+        self.fetchDelayNanoseconds = fetchDelayNanoseconds
+        self.fetchDelaySequenceNanoseconds = fetchDelaySequenceNanoseconds
+    }
+
+    func fetchMetadata(for urlString: String) async -> WebPageMetadata? {
+        let (result, delayNanoseconds) = locked {
+            storedRequests.append(urlString)
+            let delayNanoseconds = fetchDelaySequenceNanoseconds.isEmpty
+                ? fetchDelayNanoseconds
+                : fetchDelaySequenceNanoseconds.removeFirst()
+            guard !results.isEmpty else {
+                return (defaultResult, delayNanoseconds)
+            }
+
+            return (results.removeFirst(), delayNanoseconds)
+        }
+        if let delayNanoseconds {
+            try? await Task.sleep(nanoseconds: delayNanoseconds)
+        }
+
+        return result
+    }
+
+    private func locked<Value>(_ body: () -> Value) -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
 private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
     private let loadedState: DeckGridInteractionState?
     private let loadedBrightnessPercent: Int?
@@ -5136,6 +5584,20 @@ private final class FakeFinderFileOpener: FinderFileOpening {
             openedPaths.append(path)
         }
         return result
+    }
+}
+
+@MainActor
+private final class FakeWebPageOpener: WebPageOpening {
+    private(set) var openedURLs: [URL] = []
+    private(set) var openedConfigurations: [DeckKeyOpenWebPageConfiguration] = []
+
+    func openWebPage(_ configuration: DeckKeyOpenWebPageConfiguration) -> Bool {
+        openedConfigurations.append(configuration)
+        if let url = configuration.url {
+            openedURLs.append(url)
+        }
+        return true
     }
 }
 

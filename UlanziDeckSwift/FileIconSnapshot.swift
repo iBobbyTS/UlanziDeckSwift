@@ -3,9 +3,16 @@ import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
 
-struct FileIconSnapshotData: Equatable {
+struct FileIconSnapshotData: Sendable {
     let iconPNGData: Data
     let blurredIconPNGData: Data
+}
+
+extension FileIconSnapshotData: Equatable {
+    nonisolated static func == (lhs: FileIconSnapshotData, rhs: FileIconSnapshotData) -> Bool {
+        lhs.iconPNGData == rhs.iconPNGData
+            && lhs.blurredIconPNGData == rhs.blurredIconPNGData
+    }
 }
 
 nonisolated enum FileIconSnapshot {

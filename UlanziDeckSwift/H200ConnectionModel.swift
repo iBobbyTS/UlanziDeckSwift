@@ -26,6 +26,8 @@ final class H200ConnectionModel: ObservableObject {
     private let configurationStore: DeckConfigurationStoring
     private let folderOpener: FinderFolderOpening
     private let fileOpener: FinderFileOpening
+    private let webPageOpener: WebPageOpening
+    private let webPageMetadataFetcher: WebPageMetadataFetching
     private let smbServerConnector: SMBServerConnecting
     private let sub2APIFetcher: Sub2APIFetching
     private let mihoyoGameService: MihoyoGameServicing
@@ -55,6 +57,8 @@ final class H200ConnectionModel: ObservableObject {
     private var sub2APIGroupListRefreshFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var sub2APIGroupListLastRequestNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var sub2APITokenPausedInstances: Set<RuntimeInstanceID> = []
+    private var webPageMetadataTasks: [Int: Task<Void, Never>] = [:]
+    private var webPageMetadataFetchedURLStrings: [Int: String] = [:]
     private var mihoyoLoginTask: Task<Void, Never>?
     private var mihoyoGameTimers: [RuntimeInstanceID: Timer] = [:]
     private var mihoyoGameNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
@@ -73,6 +77,8 @@ final class H200ConnectionModel: ObservableObject {
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         folderOpener: FinderFolderOpening? = nil,
         fileOpener: FinderFileOpening? = nil,
+        webPageOpener: WebPageOpening? = nil,
+        webPageMetadataFetcher: WebPageMetadataFetching = WebPageMetadataFetcher(),
         smbServerConnector: SMBServerConnecting? = nil,
         sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher(),
         mihoyoGameService: MihoyoGameServicing = MihoyoGameClient(),
@@ -88,6 +94,8 @@ final class H200ConnectionModel: ObservableObject {
         self.configurationStore = configurationStore
         self.folderOpener = folderOpener ?? FinderFolderOpener()
         self.fileOpener = fileOpener ?? FinderFileOpener()
+        self.webPageOpener = webPageOpener ?? WebPageOpener()
+        self.webPageMetadataFetcher = webPageMetadataFetcher
         self.smbServerConnector = smbServerConnector ?? SMBServerConnector()
         self.sub2APIFetcher = sub2APIFetcher
         self.mihoyoGameService = mihoyoGameService
@@ -128,6 +136,9 @@ final class H200ConnectionModel: ObservableObject {
             task.cancel()
         }
         for task in sub2APIGroupListRefreshTasks.values {
+            task.cancel()
+        }
+        for task in webPageMetadataTasks.values {
             task.cancel()
         }
         for timer in mihoyoGameTimers.values {
@@ -181,6 +192,8 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
+        cancelWebPageMetadataTask(for: keyID)
+        webPageMetadataFetchedURLStrings[keyID] = nil
         destroyRuntimeInstance(for: keyID, clearsConfigurationRuntimeState: true)
         guard interactionState.clearFunction(keyID: keyID) else {
             return
@@ -201,6 +214,10 @@ final class H200ConnectionModel: ObservableObject {
         _ = ensureRuntimeInstance(for: targetKeyID)
         cancelLongPressRuntime(for: sourceKeyID)
         cancelLongPressRuntime(for: targetKeyID)
+        cancelWebPageMetadataTask(for: sourceKeyID)
+        cancelWebPageMetadataTask(for: targetKeyID)
+        webPageMetadataFetchedURLStrings[sourceKeyID] = nil
+        webPageMetadataFetchedURLStrings[targetKeyID] = nil
         guard interactionState.swapSquareConfigurations(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID) else {
             return
         }
@@ -242,6 +259,8 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         cancelCurrentPageRuntime()
+        cancelAllWebPageMetadataTasks()
+        webPageMetadataFetchedURLStrings.removeAll()
         guard interactionState.enterPageFolder(keyID: keyID) else {
             startCurrentPageRuntime()
             return
@@ -257,6 +276,8 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         cancelCurrentPageRuntime()
+        cancelAllWebPageMetadataTasks()
+        webPageMetadataFetchedURLStrings.removeAll()
         guard interactionState.goBackPage() else {
             startCurrentPageRuntime()
             return
@@ -309,6 +330,8 @@ final class H200ConnectionModel: ObservableObject {
             openFolder(for: keyID)
         case .openFile:
             openFile(for: keyID)
+        case .openWebPage:
+            openWebPage(for: keyID)
         case .connectSMBServer:
             connectSMBServer(for: keyID)
         case .refreshSub2API:
@@ -335,6 +358,8 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         let previousInstanceID = runtimeInstanceID(for: selectedKeyID)
+        cancelWebPageMetadataTask(for: selectedKeyID)
+        webPageMetadataFetchedURLStrings[selectedKeyID] = nil
         if interactionState.assign(function, to: selectedKeyID) {
             if let previousInstanceID {
                 destroyRuntimeInstance(previousInstanceID, clearsConfigurationRuntimeState: true)
@@ -473,6 +498,41 @@ final class H200ConnectionModel: ObservableObject {
 
     func setFileIconBlurEnabled(_ enabled: Bool, for keyID: Int) {
         setButtonVisualBlurEnabled(enabled, for: keyID)
+    }
+
+    func setSelectedWebPageURLString(_ urlString: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        let normalizedURLString = DeckKeyOpenWebPageConfiguration.normalizedURLString(urlString)
+        guard interactionState.openWebPageConfiguration(for: selectedKeyID).urlString != normalizedURLString else {
+            return
+        }
+
+        if interactionState.setWebPageURLString(urlString, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: selectedKeyID)
+            cancelWebPageMetadataTask(for: selectedKeyID)
+            webPageMetadataFetchedURLStrings[selectedKeyID] = nil
+        }
+    }
+
+    func submitSelectedWebPageURLString() {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        let urlString = interactionState.openWebPageConfiguration(for: selectedKeyID).urlString
+        fetchWebPageMetadata(for: selectedKeyID, urlString: urlString)
+    }
+
+    func previewWebPageTitle(_ title: String, for keyID: Int) {
+        previewButtonVisualName(title, for: keyID)
+    }
+
+    func setWebPageTitle(_ title: String, for keyID: Int) {
+        setButtonVisualName(title, for: keyID)
     }
 
     func setSelectedSMBServerAddress(_ address: String) {
@@ -906,6 +966,15 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    private func openWebPage(for keyID: Int) {
+        let configuration = interactionState.openWebPageConfiguration(for: keyID)
+        guard configuration.canOpen else {
+            return
+        }
+
+        _ = webPageOpener.openWebPage(configuration)
+    }
+
     private func connectSMBServer(for keyID: Int) {
         let address = interactionState.smbServerAddress(for: keyID)
         guard !address.isEmpty else {
@@ -913,6 +982,50 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         _ = smbServerConnector.connect(to: address)
+    }
+
+    private func fetchWebPageMetadata(for keyID: Int, urlString: String) {
+        cancelWebPageMetadataTask(for: keyID)
+        guard !urlString.isEmpty,
+              (try? WebPageURL(urlString)) != nil,
+              webPageMetadataFetchedURLStrings[keyID] != urlString,
+              interactionState.configuration(for: keyID)?.function == .openWebPage
+        else {
+            return
+        }
+
+        let fetcher = webPageMetadataFetcher
+        webPageMetadataTasks[keyID] = Task { @MainActor [weak self] in
+            let metadata = await fetcher.fetchMetadata(for: urlString)
+            guard !Task.isCancelled,
+                  let self
+            else {
+                return
+            }
+
+            self.webPageMetadataTasks[keyID] = nil
+            guard let metadata,
+                  self.interactionState.setWebPageMetadata(metadata, for: keyID, matchingURLString: urlString)
+            else {
+                return
+            }
+
+            self.persistCurrentConfiguration()
+            self.syncKeyDisplay(keyID: keyID)
+            self.webPageMetadataFetchedURLStrings[keyID] = urlString
+        }
+    }
+
+    private func cancelWebPageMetadataTask(for keyID: Int) {
+        webPageMetadataTasks[keyID]?.cancel()
+        webPageMetadataTasks[keyID] = nil
+    }
+
+    private func cancelAllWebPageMetadataTasks() {
+        for task in webPageMetadataTasks.values {
+            task.cancel()
+        }
+        webPageMetadataTasks.removeAll()
     }
 
     private var nowNanoseconds: UInt64 {

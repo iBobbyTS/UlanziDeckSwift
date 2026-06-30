@@ -28,13 +28,15 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "SMBServerBackground"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return function.game?.buttonBackgroundAssetName
-        case .none, .tally, .openFile, .brightness, .sub2API, .pageFolder, .pageBack:
+        case .none, .tally, .openFile, .openWebPage, .brightness, .sub2API, .pageFolder, .pageBack:
             return nil
         }
     }
 
     private static func systemSymbolName(for function: DeckKeyFunction) -> String? {
         switch function {
+        case .openWebPage:
+            return "globe"
         case .pageFolder:
             return "folder"
         case .pageBack:
@@ -132,6 +134,8 @@ extension DeckKeyConfiguration {
         switch function {
         case .openFolder:
             openFolder.visual.replaceBackground(with: defaultVisual)
+        case .openWebPage:
+            openWebPage.visual.replaceBackground(with: defaultVisual)
         case .connectSMBServer:
             smbServer.visual.replaceBackground(with: defaultVisual)
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
@@ -151,6 +155,8 @@ extension DeckKeyConfiguration {
         switch function ?? self.function {
         case .openFolder:
             openFolder.visual.clearBackground()
+        case .openWebPage:
+            openWebPage.visual.clearBackground()
         case .connectSMBServer:
             smbServer.visual.clearBackground()
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:

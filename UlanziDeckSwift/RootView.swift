@@ -11,6 +11,8 @@ struct RootView: View {
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         folderOpener: FinderFolderOpening? = nil,
         fileOpener: FinderFileOpening? = nil,
+        webPageOpener: WebPageOpening? = nil,
+        webPageMetadataFetcher: WebPageMetadataFetching = WebPageMetadataFetcher(),
         smbServerConnector: SMBServerConnecting? = nil,
         sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher(),
         mihoyoGameService: MihoyoGameServicing = MihoyoGameClient(),
@@ -22,6 +24,8 @@ struct RootView: View {
             configurationStore: configurationStore,
             folderOpener: folderOpener,
             fileOpener: fileOpener,
+            webPageOpener: webPageOpener,
+            webPageMetadataFetcher: webPageMetadataFetcher,
             smbServerConnector: smbServerConnector,
             sub2APIFetcher: sub2APIFetcher,
             mihoyoGameService: mihoyoGameService,
@@ -61,6 +65,12 @@ struct RootView: View {
             },
             onFilePathSelection: { configuration in
                 connectionModel.setSelectedFileConfiguration(configuration)
+            },
+            onWebPageURLChange: { urlString in
+                connectionModel.setSelectedWebPageURLString(urlString)
+            },
+            onWebPageURLSubmit: {
+                connectionModel.submitSelectedWebPageURLString()
             },
             onButtonVisualNamePreview: { keyID, name in
                 connectionModel.previewButtonVisualName(name, for: keyID)

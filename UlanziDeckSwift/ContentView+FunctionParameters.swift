@@ -150,6 +150,34 @@ extension ContentView {
                 chooseFile()
             }
 
+        case .openWebPage:
+            HStack(alignment: .top, spacing: 28) {
+                functionParameterColumn(for: configuration)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("网页地址")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        TextField("https://example.com", text: selectedWebPageURLBinding)
+                            .textFieldStyle(.roundedBorder)
+                            .focused($focusedParameterField, equals: .webPageURL)
+                            .onSubmit {
+                                focusedParameterField = nil
+                            }
+
+                        Text("按回车或结束编辑后会获取网页标题和图标。按下按钮时使用默认浏览器打开。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: 360, alignment: .leading)
+
+                Spacer()
+            }
+
         case .connectSMBServer:
             HStack(alignment: .top, spacing: 28) {
                 functionParameterColumn(for: configuration)
@@ -470,7 +498,7 @@ extension ContentView {
             FunctionSection(
                 title: "网站",
                 systemImageName: "globe",
-                functions: [.sub2API]
+                functions: [.openWebPage, .sub2API]
             ),
             FunctionSection(
                 title: "游戏",
@@ -545,6 +573,17 @@ extension ContentView {
         )
     }
 
+    var selectedWebPageURLBinding: Binding<String> {
+        Binding(
+            get: {
+                selectedConfiguration?.openWebPage.urlString ?? ""
+            },
+            set: { urlString in
+                onWebPageURLChange(urlString)
+            }
+        )
+    }
+
     func parameterFocusChanged(to newFocus: ParameterFocusField?) {
         let oldFocus = activeParameterFocusField
         guard oldFocus != newFocus else {
@@ -583,6 +622,8 @@ extension ContentView {
                 originalNormalizedText: visual.name,
                 text: visual.name
             )
+        case .webPageURL:
+            return
         }
     }
 
@@ -590,6 +631,8 @@ extension ContentView {
         switch field {
         case .buttonVisualName:
             commitButtonVisualNameDraft()
+        case .webPageURL:
+            onWebPageURLSubmit()
         case nil:
             return
         }

@@ -5,6 +5,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case tally
     case openFolder
     case openFile
+    case openWebPage
     case connectSMBServer
     case brightness
     case sub2API
@@ -18,6 +19,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
         .tally,
         .openFolder,
         .openFile,
+        .openWebPage,
         .connectSMBServer,
         .sub2API,
         .genshinStatus,
@@ -36,6 +38,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "打开文件夹"
         case .openFile:
             return "打开文件"
+        case .openWebPage:
+            return "打开网页"
         case .connectSMBServer:
             return "连接 SMB"
         case .brightness:
@@ -65,6 +69,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "folder"
         case .openFile:
             return "doc"
+        case .openWebPage:
+            return "globe"
         case .connectSMBServer:
             return "network"
         case .brightness:
@@ -92,7 +98,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return .starRail
         case .zenlessZoneStatus:
             return .zenlessZoneZero
-        case .none, .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API, .pageFolder, .pageBack:
+        case .none, .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .pageFolder, .pageBack:
             return nil
         }
     }
@@ -103,6 +109,7 @@ nonisolated enum DeckKeyPressRuntimeAction: Equatable {
     case incrementTally
     case openFolder
     case openFile
+    case openWebPage
     case connectSMBServer
     case refreshSub2API
     case refreshMihoyoGame
@@ -124,6 +131,8 @@ extension DeckKeyFunction {
             return .openFolder
         case .openFile:
             return .openFile
+        case .openWebPage:
+            return .openWebPage
         case .connectSMBServer:
             return .connectSMBServer
         case .sub2API:
@@ -145,7 +154,7 @@ extension DeckKeyFunction {
             return .sub2API
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .mihoyoGame
-        case .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .none, .pageFolder, .pageBack:
+        case .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .none, .pageFolder, .pageBack:
             return nil
         }
     }
@@ -654,6 +663,110 @@ nonisolated struct DeckKeyOpenFileConfiguration: Codable, Equatable {
     }
 }
 
+nonisolated struct DeckKeyOpenWebPageConfiguration: Codable, Equatable {
+    var urlString: String
+    var title: String
+    var visual: DeckKeyVisualConfiguration
+
+    init(urlString: String = "", title: String = "", iconSnapshot: FileIconSnapshotData? = nil, visual: DeckKeyVisualConfiguration? = nil) {
+        self.urlString = Self.normalizedURLString(urlString)
+        self.title = DeckKeyVisualConfiguration.normalizedName(title)
+        self.visual = visual ?? DeckKeyVisualConfiguration(
+            backgroundPNGData: iconSnapshot?.iconPNGData,
+            blurredBackgroundPNGData: iconSnapshot?.blurredIconPNGData
+        )
+    }
+
+    var iconPNGData: Data? {
+        get {
+            visual.backgroundPNGData
+        }
+        set {
+            visual.backgroundPNGData = newValue
+            if newValue == nil {
+                visual.blurredBackgroundPNGData = nil
+                visual.usesBlurredBackground = false
+            }
+        }
+    }
+
+    var blurredIconPNGData: Data? {
+        get {
+            visual.blurredBackgroundPNGData
+        }
+        set {
+            visual.blurredBackgroundPNGData = newValue
+            if newValue == nil {
+                visual.usesBlurredBackground = false
+            }
+        }
+    }
+
+    var usesBlurredIcon: Bool {
+        get {
+            visual.usesBlurredBackground
+        }
+        set {
+            visual.usesBlurredBackground = newValue && visual.canUseBlurredBackground
+        }
+    }
+
+    var displayName: String {
+        visual.displayName(fallback: automaticDisplayName)
+    }
+
+    var automaticDisplayName: String {
+        title
+    }
+
+    var url: URL? {
+        try? WebPageURL(urlString).url
+    }
+
+    var canOpen: Bool {
+        url != nil
+    }
+
+    enum CodingKeys: CodingKey {
+        case urlString
+        case title
+        case iconPNGData
+        case blurredIconPNGData
+        case usesBlurredIcon
+        case visual
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        urlString = Self.normalizedURLString(try container.decodeIfPresent(String.self, forKey: .urlString) ?? "")
+        let decodedTitle = DeckKeyVisualConfiguration.normalizedName(try container.decodeIfPresent(String.self, forKey: .title) ?? "")
+        if let visual = try container.decodeIfPresent(DeckKeyVisualConfiguration.self, forKey: .visual) {
+            var decodedVisual = visual
+            title = decodedTitle.isEmpty ? decodedVisual.name : decodedTitle
+            decodedVisual.name = ""
+            self.visual = decodedVisual
+        } else {
+            title = decodedTitle
+            visual = DeckKeyVisualConfiguration(
+                backgroundPNGData: try container.decodeIfPresent(Data.self, forKey: .iconPNGData),
+                blurredBackgroundPNGData: try container.decodeIfPresent(Data.self, forKey: .blurredIconPNGData),
+                usesBlurredBackground: try container.decodeIfPresent(Bool.self, forKey: .usesBlurredIcon) ?? false
+            )
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(urlString, forKey: .urlString)
+        try container.encode(title, forKey: .title)
+        try container.encode(visual, forKey: .visual)
+    }
+
+    static func normalizedURLString(_ rawValue: String) -> String {
+        rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
     var address: String
     var visual: DeckKeyVisualConfiguration
@@ -1007,6 +1120,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var tally: DeckKeyTallyConfiguration
     var openFolder: DeckKeyOpenFolderConfiguration
     var openFile: DeckKeyOpenFileConfiguration
+    var openWebPage: DeckKeyOpenWebPageConfiguration
     var smbServer: DeckKeySMBServerConfiguration
     var sub2API: DeckKeySub2APIConfiguration
     var mihoyoGame: DeckKeyMihoyoGameConfiguration
@@ -1019,6 +1133,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         tally: DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration(),
         openFile: DeckKeyOpenFileConfiguration(),
+        openWebPage: DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
@@ -1031,6 +1146,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         tally: DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration(),
         openFile: DeckKeyOpenFileConfiguration(),
+        openWebPage: DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
@@ -1043,6 +1159,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         tally: DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration(),
         openFile: DeckKeyOpenFileConfiguration(),
+        openWebPage: DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
@@ -1055,6 +1172,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         tally: DeckKeyTallyConfiguration = DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration = DeckKeyOpenFolderConfiguration(),
         openFile: DeckKeyOpenFileConfiguration = DeckKeyOpenFileConfiguration(),
+        openWebPage: DeckKeyOpenWebPageConfiguration = DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration = DeckKeySub2APIConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration(),
@@ -1066,6 +1184,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         self.tally = tally
         self.openFolder = openFolder
         self.openFile = openFile
+        self.openWebPage = openWebPage
         self.smbServer = smbServer
         self.sub2API = sub2API
         self.mihoyoGame = mihoyoGame
@@ -1079,6 +1198,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         tally: DeckKeyTallyConfiguration = DeckKeyTallyConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration = DeckKeyOpenFolderConfiguration(),
         openFile: DeckKeyOpenFileConfiguration = DeckKeyOpenFileConfiguration(),
+        openWebPage: DeckKeyOpenWebPageConfiguration = DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration = DeckKeySub2APIConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration(),
@@ -1090,6 +1210,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             tally: tally,
             openFolder: openFolder,
             openFile: openFile,
+            openWebPage: openWebPage,
             smbServer: smbServer,
             sub2API: sub2API,
             mihoyoGame: mihoyoGame,
@@ -1104,6 +1225,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case tally
         case openFolder
         case openFile
+        case openWebPage
         case smbServer
         case sub2API
         case mihoyoGame
@@ -1118,6 +1240,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         tally = try container.decodeIfPresent(DeckKeyTallyConfiguration.self, forKey: .tally) ?? DeckKeyTallyConfiguration()
         openFolder = try container.decodeIfPresent(DeckKeyOpenFolderConfiguration.self, forKey: .openFolder) ?? DeckKeyOpenFolderConfiguration()
         openFile = try container.decodeIfPresent(DeckKeyOpenFileConfiguration.self, forKey: .openFile) ?? DeckKeyOpenFileConfiguration()
+        openWebPage = try container.decodeIfPresent(DeckKeyOpenWebPageConfiguration.self, forKey: .openWebPage) ?? DeckKeyOpenWebPageConfiguration()
         smbServer = try container.decodeIfPresent(DeckKeySMBServerConfiguration.self, forKey: .smbServer) ?? DeckKeySMBServerConfiguration()
         sub2API = try container.decodeIfPresent(DeckKeySub2APIConfiguration.self, forKey: .sub2API) ?? DeckKeySub2APIConfiguration()
         mihoyoGame = try container.decodeIfPresent(DeckKeyMihoyoGameConfiguration.self, forKey: .mihoyoGame) ?? DeckKeyMihoyoGameConfiguration()
@@ -1127,6 +1250,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
                 function: function,
                 openFolder: openFolder,
                 openFile: openFile,
+                openWebPage: openWebPage,
                 smbServer: smbServer,
                 pageFolder: pageFolder
             )
@@ -1139,6 +1263,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         try container.encode(tally, forKey: .tally)
         try container.encode(openFolder, forKey: .openFolder)
         try container.encode(openFile, forKey: .openFile)
+        try container.encode(openWebPage, forKey: .openWebPage)
         try container.encode(smbServer, forKey: .smbServer)
         try container.encode(sub2API, forKey: .sub2API)
         try container.encode(mihoyoGame, forKey: .mihoyoGame)
@@ -1181,6 +1306,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return openFolder.visual.backgroundPNGData
         case .openFile:
             return openFile.visual.backgroundPNGData
+        case .openWebPage:
+            return openWebPage.visual.backgroundPNGData
         case .connectSMBServer:
             return smbServer.visual.backgroundPNGData
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
@@ -1200,6 +1327,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return openFolder.visual.blurredBackgroundPNGData
         case .openFile:
             return openFile.visual.blurredBackgroundPNGData
+        case .openWebPage:
+            return openWebPage.visual.blurredBackgroundPNGData
         case .connectSMBServer:
             return smbServer.visual.blurredBackgroundPNGData
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
@@ -1223,6 +1352,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return openFolder.automaticDisplayName
         case .openFile:
             return openFile.automaticDisplayName
+        case .openWebPage:
+            return openWebPage.automaticDisplayName
         case .connectSMBServer:
             return smbServer.automaticDisplayName
         case .brightness:
@@ -1242,6 +1373,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         function: DeckKeyFunction,
         openFolder: DeckKeyOpenFolderConfiguration,
         openFile: DeckKeyOpenFileConfiguration,
+        openWebPage: DeckKeyOpenWebPageConfiguration,
         smbServer: DeckKeySMBServerConfiguration,
         pageFolder: DeckKeyPageFolderConfiguration
     ) -> DeckKeyVisualConfiguration {
@@ -1253,6 +1385,11 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
                 name: openFile.visual.name,
                 usesBlurredBackground: openFile.visual.usesBlurredBackground,
                 dimsBackground: openFile.visual.dimsBackground
+            )
+        case .openWebPage:
+            return DeckKeyVisualConfiguration(
+                usesBlurredBackground: openWebPage.visual.usesBlurredBackground,
+                dimsBackground: openWebPage.visual.dimsBackground
             )
         case .connectSMBServer:
             return smbServer.visual

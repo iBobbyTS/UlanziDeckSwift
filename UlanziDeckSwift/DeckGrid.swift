@@ -65,6 +65,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let sub2APIButtonContent: Sub2APIButtonContent?
     let folderButtonContent: FolderButtonContent?
     let fileButtonContent: FileButtonContent?
+    let webPageButtonContent: WebPageButtonContent?
     let smbServerButtonContent: SMBServerButtonContent?
     let pageFolderButtonContent: PageFolderButtonContent?
     let pageBackButtonContent: PageBackButtonContent?
@@ -90,6 +91,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         var sub2APIButtonContent: Sub2APIButtonContent?
         var folderButtonContent: FolderButtonContent?
         var fileButtonContent: FileButtonContent?
+        var webPageButtonContent: WebPageButtonContent?
         var smbServerButtonContent: SMBServerButtonContent?
         var pageFolderButtonContent: PageFolderButtonContent?
         var pageBackButtonContent: PageBackButtonContent?
@@ -139,6 +141,21 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 title = content.displayName
                 subtitle = configuration.openFile.path ?? ""
                 fileButtonContent = content
+            case .openWebPage:
+                let content = WebPageButtonContent(
+                    visual: ButtonVisualContent(
+                        displayName: configuration.visual.displayName(fallback: configuration.openWebPage.displayName),
+                        backgroundPNGData: configuration.selectedButtonBackgroundPNGData,
+                        backgroundAssetName: nil,
+                        usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
+                        dimsBackground: configuration.visual.dimsBackground,
+                        hasCustomDisplayName: hasCustomDisplayName,
+                        hasCustomBackground: configuration.visual.hasCustomBackground
+                    )
+                )
+                title = content.displayName
+                subtitle = configuration.openWebPage.urlString
+                webPageButtonContent = content
             case .connectSMBServer:
                 let content = SMBServerButtonContent(
                     visual: ButtonVisualContent(
@@ -240,6 +257,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         self.sub2APIButtonContent = sub2APIButtonContent
         self.folderButtonContent = folderButtonContent
         self.fileButtonContent = fileButtonContent
+        self.webPageButtonContent = webPageButtonContent
         self.smbServerButtonContent = smbServerButtonContent
         self.pageFolderButtonContent = pageFolderButtonContent
         self.pageBackButtonContent = pageBackButtonContent
@@ -272,6 +290,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             sub2APIButtonContent: sub2APIButtonContent,
             folderButtonContent: folderButtonContent,
             fileButtonContent: fileButtonContent,
+            webPageButtonContent: webPageButtonContent,
             smbServerButtonContent: smbServerButtonContent,
             pageFolderButtonContent: pageFolderButtonContent,
             pageBackButtonContent: pageBackButtonContent,
@@ -294,6 +313,7 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let sub2APIButtonContent: Sub2APIButtonContent?
     let folderButtonContent: FolderButtonContent?
     let fileButtonContent: FileButtonContent?
+    let webPageButtonContent: WebPageButtonContent?
     let smbServerButtonContent: SMBServerButtonContent?
     let pageFolderButtonContent: PageFolderButtonContent?
     let pageBackButtonContent: PageBackButtonContent?
@@ -320,6 +340,14 @@ nonisolated struct FolderButtonContent: Equatable {
 }
 
 nonisolated struct FileButtonContent: Equatable {
+    let visual: ButtonVisualContent
+
+    var displayName: String { visual.displayName }
+    var backgroundPNGData: Data? { visual.backgroundPNGData }
+    var dimsBackground: Bool { visual.dimsBackground }
+}
+
+nonisolated struct WebPageButtonContent: Equatable {
     let visual: ButtonVisualContent
 
     var displayName: String { visual.displayName }
@@ -717,6 +745,14 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     func openFileConfiguration(for keyID: Int) -> DeckKeyOpenFileConfiguration {
         configurations[keyID, default: .tallyDefault].openFile
+    }
+
+    func webPageURLString(for keyID: Int) -> String {
+        configurations[keyID, default: .tallyDefault].openWebPage.urlString
+    }
+
+    func openWebPageConfiguration(for keyID: Int) -> DeckKeyOpenWebPageConfiguration {
+        configurations[keyID, default: .tallyDefault].openWebPage
     }
 
     func smbServerAddress(for keyID: Int) -> String {
@@ -1126,6 +1162,51 @@ nonisolated struct DeckGridInteractionState: Equatable {
     @discardableResult
     mutating func setFileIconBlurEnabled(_ enabled: Bool, for keyID: Int, selectsKey: Bool = true) -> Bool {
         setButtonVisualBlurEnabled(enabled, for: keyID, selectsKey: selectsKey)
+    }
+
+    @discardableResult
+    mutating func setWebPageURLString(_ urlString: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .openWebPage
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        let normalizedURLString = DeckKeyOpenWebPageConfiguration.normalizedURLString(urlString)
+        if configurations[keyID, default: .tallyDefault].openWebPage.urlString != normalizedURLString {
+            configurations[keyID, default: .tallyDefault].openWebPage.title = ""
+            configurations[keyID, default: .tallyDefault].openWebPage.iconPNGData = nil
+            configurations[keyID, default: .tallyDefault].openWebPage.blurredIconPNGData = nil
+        }
+        configurations[keyID, default: .tallyDefault].openWebPage.urlString = normalizedURLString
+        configurations[keyID, default: .tallyDefault].refreshDefaultButtonBackgroundSnapshot()
+        return true
+    }
+
+    @discardableResult
+    mutating func setWebPageMetadata(_ metadata: WebPageMetadata, for keyID: Int, matchingURLString urlString: String) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .openWebPage,
+              configurations[keyID, default: .tallyDefault].openWebPage.urlString == DeckKeyOpenWebPageConfiguration.normalizedURLString(urlString)
+        else {
+            return false
+        }
+
+        if let title = metadata.title {
+            configurations[keyID, default: .tallyDefault].openWebPage.title = DeckKeyVisualConfiguration.normalizedName(title)
+        }
+        if let iconSnapshot = metadata.iconSnapshot {
+            configurations[keyID, default: .tallyDefault].openWebPage.iconPNGData = iconSnapshot.iconPNGData
+            configurations[keyID, default: .tallyDefault].openWebPage.blurredIconPNGData = iconSnapshot.blurredIconPNGData
+            configurations[keyID, default: .tallyDefault].openWebPage.usesBlurredIcon = false
+        }
+        return true
+    }
+
+    @discardableResult
+    mutating func setWebPageTitle(_ title: String, for keyID: Int, selectsKey: Bool = true) -> Bool {
+        setButtonVisualName(title, for: keyID, selectsKey: selectsKey)
     }
 
     @discardableResult

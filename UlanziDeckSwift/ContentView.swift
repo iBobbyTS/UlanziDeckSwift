@@ -11,6 +11,7 @@ struct ContentView: View {
 
     enum ParameterFocusField: Hashable {
         case buttonVisualName
+        case webPageURL
     }
 
     struct ParameterNameDraft: Equatable {
@@ -32,6 +33,8 @@ struct ContentView: View {
     let onTallyDefaultValueChange: (Int) -> Void
     let onFolderPathSelection: (DeckKeyOpenFolderConfiguration) -> Void
     let onFilePathSelection: (DeckKeyOpenFileConfiguration) -> Void
+    let onWebPageURLChange: (String) -> Void
+    let onWebPageURLSubmit: () -> Void
     let onButtonVisualNamePreview: (Int, String) -> Void
     let onButtonVisualNameChange: (Int, String) -> Void
     let onButtonVisualChange: (Int, DeckKeyVisualConfiguration) -> Void
@@ -743,6 +746,8 @@ struct MihoyoQRCodeView: View {
         onTallyDefaultValueChange: { _ in },
         onFolderPathSelection: { _ in },
         onFilePathSelection: { _ in },
+        onWebPageURLChange: { _ in },
+        onWebPageURLSubmit: {},
         onButtonVisualNamePreview: { _, _ in },
         onButtonVisualNameChange: { _, _ in },
         onButtonVisualChange: { _, _ in },
