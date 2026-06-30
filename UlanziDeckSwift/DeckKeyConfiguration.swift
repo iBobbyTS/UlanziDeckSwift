@@ -1163,7 +1163,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
-        pageFolder: DeckKeyPageFolderConfiguration()
+        pageFolder: DeckKeyPageFolderConfiguration(),
+        visual: DeckKeyVisualConfiguration(dimsBackground: false)
     )
 
     init(
@@ -1365,7 +1366,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case .pageFolder:
             return DeckKeyPageFolderConfiguration.defaultDisplayName
         case .pageBack:
-            return "返回"
+            return ""
         }
     }
 
@@ -1395,7 +1396,9 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return smbServer.visual
         case .pageFolder:
             return DeckKeyPageFolderConfiguration.migratingLegacyDefaultName(in: pageFolder.visual)
-        case .none, .tally, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .pageBack:
+        case .pageBack:
+            return DeckKeyVisualConfiguration(dimsBackground: false)
+        case .none, .tally, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return DeckKeyVisualConfiguration()
         }
     }

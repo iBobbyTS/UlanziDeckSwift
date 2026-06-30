@@ -187,9 +187,11 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 subtitle = ""
                 pageFolderButtonContent = content
             case .pageBack:
-                let content = PageBackButtonContent(displayName: configuration.visual.displayName(fallback: "返回"))
+                let content = PageBackButtonContent(
+                    displayName: configuration.visual.displayName(fallback: configuration.automaticButtonDisplayName)
+                )
                 title = content.displayName
-                subtitle = "上一级"
+                subtitle = ""
                 pageBackButtonContent = content
             case .brightness:
                 title = configuration.visual.displayName(fallback: "")
@@ -608,7 +610,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
             return configurations
         }
 
-        guard let key = layout.keys.first(where: { $0.columnSpan == 1 }) else {
+        guard let key = defaultBackKey(in: layout) else {
             return configurations
         }
 
@@ -617,6 +619,11 @@ nonisolated struct DeckGridInteractionState: Equatable {
         pageBackConfiguration.refreshDefaultButtonBackgroundSnapshot()
         updatedConfigurations[key.id] = pageBackConfiguration
         return updatedConfigurations
+    }
+
+    private static func defaultBackKey(in layout: DeckGridLayout) -> DeckGridLayout.Key? {
+        layout.keys.first { $0.id == 13 && $0.columnSpan == 1 }
+            ?? layout.keys.last { $0.columnSpan == 1 }
     }
 
     private static func normalizedConfigurations(

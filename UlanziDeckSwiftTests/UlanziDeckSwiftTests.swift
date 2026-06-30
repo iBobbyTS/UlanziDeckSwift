@@ -214,8 +214,12 @@ struct UlanziDeckSwiftTests {
         #expect(state.currentPageID == firstPageID)
         #expect(state.currentPageDepth == 1)
         #expect(state.navigationPathTitles == ["主页", "功能夹"])
-        #expect(state.configuration(for: 1)?.function == .pageBack)
-        #expect(state.configurations.filter { $0.key != 1 }.values.allSatisfy { $0.function == DeckKeyFunction.none })
+        #expect(state.configuration(for: 13)?.function == .pageBack)
+        #expect(state.configurations.filter { $0.key != 13 }.values.allSatisfy { $0.function == DeckKeyFunction.none })
+        let backDisplay = state.display(for: layout.keys[12])
+        #expect(backDisplay.title.isEmpty)
+        #expect(backDisplay.pageBackButtonContent?.displayName == "")
+        #expect(backDisplay.buttonVisualContent.dimsBackground == false)
 
         let didAssignSecondLevelPageFolder = state.assign(.pageFolder, to: 2)
         #expect(didAssignSecondLevelPageFolder)
@@ -296,16 +300,16 @@ struct UlanziDeckSwiftTests {
         state.assign(.pageFolder, to: 2)
         state.enterPageFolder(keyID: 2)
 
-        #expect(state.configuration(for: 1)?.function == .pageBack)
-        #expect(!state.canDeleteFunction(keyID: 1))
-        let didClearBackKey = state.clearFunction(keyID: 1)
+        #expect(state.configuration(for: 13)?.function == .pageBack)
+        #expect(!state.canDeleteFunction(keyID: 13))
+        let didClearBackKey = state.clearFunction(keyID: 13)
         #expect(!didClearBackKey)
-        let didReassignBackKey = state.assign(.tally, to: 1)
+        let didReassignBackKey = state.assign(.tally, to: 13)
         #expect(!didReassignBackKey)
 
-        let didSwapBackKey = state.swapSquareConfigurations(sourceKeyID: 1, targetKeyID: 3)
+        let didSwapBackKey = state.swapSquareConfigurations(sourceKeyID: 13, targetKeyID: 3)
         #expect(didSwapBackKey)
-        #expect(state.configuration(for: 1)?.function == DeckKeyFunction.none)
+        #expect(state.configuration(for: 13)?.function == DeckKeyFunction.none)
         #expect(state.configuration(for: 3)?.function == .pageBack)
         let didClearMovedBackKey = state.clearFunction(keyID: 3)
         #expect(!didClearMovedBackKey)
@@ -705,8 +709,8 @@ struct UlanziDeckSwiftTests {
 
         let didEnterPage = state.enterPageFolder(keyID: 12)
         #expect(didEnterPage)
-        state.setButtonVisualConfiguration(visual, for: 1)
-        let backDisplay = state.display(for: layout.keys[0])
+        state.setButtonVisualConfiguration(visual, for: 13)
+        let backDisplay = state.display(for: layout.keys[12])
         #expect(backDisplay.title == "视觉")
         #expect(backDisplay.pageBackButtonContent?.displayName == "视觉")
         #expect(backDisplay.buttonVisualContent.backgroundPNGData == blurredBackgroundPNGData)
@@ -1181,7 +1185,7 @@ struct UlanziDeckSwiftTests {
         #expect(restored.configuration(for: 2)?.function == .pageFolder)
         let didEnterRestoredPage = restored.enterPageFolder(keyID: 2)
         #expect(didEnterRestoredPage)
-        #expect(restored.configuration(for: 1)?.function == .pageBack)
+        #expect(restored.configuration(for: 13)?.function == .pageBack)
         #expect(restored.configuration(for: 4)?.function == .openFolder)
         #expect(restored.folderPath(for: 4) == "/Users/ibobby/Documents/Nested")
     }
@@ -1752,7 +1756,7 @@ struct UlanziDeckSwiftTests {
         try await Task.sleep(nanoseconds: 120_000_000)
         #expect(fetcher.requests.count == 1)
 
-        model.navigateKey(keyID: 1)
+        model.navigateKey(keyID: 13)
         try await Self.waitUntil {
             fetcher.requests.count >= 2
                 && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .success(item: secondItem)
@@ -2541,7 +2545,7 @@ struct UlanziDeckSwiftTests {
             model.interactionState.openWebPageConfiguration(for: 4).title == "Child Site"
         }
 
-        model.navigateKey(keyID: 1)
+        model.navigateKey(keyID: 13)
         try await Self.waitUntil {
             syncer.sentDisplays.count == 3
         }
@@ -3001,9 +3005,10 @@ struct UlanziDeckSwiftTests {
             syncer.sentDisplays.count == 2
         }
         #expect(model.interactionState.currentPageDepth == 1)
-        #expect(model.interactionState.configuration(for: 1)?.function == .pageBack)
+        #expect(model.interactionState.configuration(for: 13)?.function == .pageBack)
         #expect(syncer.sentDisplays.last?.count == 14)
-        #expect(syncer.sentDisplays.last?.first?.pageBackButtonContent?.displayName == "返回")
+        #expect(syncer.sentDisplays.last?[12].pageBackButtonContent?.displayName == "")
+        #expect(syncer.sentDisplays.last?[12].buttonVisualContent.dimsBackground == false)
         #expect(store.savedStates.last?.currentPageID == DeckGridInteractionState.rootPageID)
     }
 
@@ -3030,8 +3035,8 @@ struct UlanziDeckSwiftTests {
             syncer.sentDisplays.count == 2
         }
 
-        syncer.emitInput(H200InputEvent(state: 1, index: 0, type: .button, action: .press))
-        syncer.emitInput(H200InputEvent(state: 0, index: 0, type: .button, action: .release))
+        syncer.emitInput(H200InputEvent(state: 1, index: 12, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 12, type: .button, action: .release))
 
         try await Self.waitUntil {
             syncer.sentDisplays.count == 3
@@ -3794,24 +3799,26 @@ struct UlanziDeckSwiftTests {
         #expect(visibleBounds.height > 20)
     }
 
-    @Test func iconRendererUsesBackTextForPageBackKey() throws {
+    @Test func iconRendererUsesDefaultBackIconWithoutTextOrDimming() throws {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
         state.assign(.pageFolder, to: 2)
         state.enterPageFolder(keyID: 2)
-        let display = state.display(for: layout.keys[0])
-        let configuration = try #require(state.configuration(for: 1))
+        let display = state.display(for: layout.keys[12])
+        let configuration = try #require(state.configuration(for: 13))
 
         let png = try H200ButtonIconRenderer().pngData(for: display)
         let image = try #require(NSBitmapImageRep(data: png))
-        let textBounds = try #require(Self.brightPixelBounds(in: image))
+        let iconBounds = try #require(Self.brightPixelBounds(in: image))
 
-        #expect(display.pageBackButtonContent?.displayName == "返回")
+        #expect(display.title.isEmpty)
+        #expect(display.pageBackButtonContent?.displayName == "")
         #expect(configuration.function.systemImageName == "arrow.uturn.left")
         #expect(configuration.defaultButtonBackgroundPNGData != nil)
         #expect(display.buttonVisualContent.backgroundPNGData == configuration.defaultButtonBackgroundPNGData)
-        #expect(textBounds.width > 20)
-        #expect(textBounds.height > 10)
+        #expect(display.buttonVisualContent.dimsBackground == false)
+        #expect(iconBounds.width > 20)
+        #expect(iconBounds.height > 20)
     }
 
     @Test func iconRendererUsesFileNameContentOnBlackBackground() throws {
