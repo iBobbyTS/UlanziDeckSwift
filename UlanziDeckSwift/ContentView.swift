@@ -71,6 +71,7 @@ struct ContentView: View {
                 workbench
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(.container, edges: .top)
         }
         .frame(minWidth: minimumWindowWidth, minHeight: 674)
         .background(Color(nsColor: .windowBackgroundColor))
@@ -298,8 +299,8 @@ struct ContentView: View {
     private var pageSelector: some View {
         HStack(spacing: 6) {
             if interactionState.isOnRootPage {
-                ForEach(interactionState.rootPageNavigationItems) { item in
-                    rootPageSelectorItem(item)
+                if let homeItem = interactionState.rootPageNavigationItems.first {
+                    rootPageSelectorItem(homeItem)
                 }
 
                 Button(action: onRootPageAddition) {
@@ -313,6 +314,10 @@ struct ContentView: View {
                 .disabled(!interactionState.canAddRootPage)
                 .help(interactionState.canAddRootPage ? "新增页面" : "最多允许 10 页")
                 .accessibilityLabel("新增页面")
+
+                ForEach(interactionState.rootPageNavigationItems.dropFirst()) { item in
+                    rootPageSelectorItem(item)
+                }
             } else {
                 ForEach(Array(interactionState.navigationPathTitles.enumerated()), id: \.offset) { index, title in
                     if index > 0 {

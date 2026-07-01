@@ -248,7 +248,11 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         if displayMode != .function {
-            destroyRuntimeInstance(for: keyID, clearsConfigurationRuntimeState: true)
+            if let instanceID = runtimeInstanceID(for: keyID) {
+                pauseRuntimeInstance(instanceID)
+            }
+        } else {
+            resumeCurrentPageRuntime()
         }
         reconcileRuntimeInstancesWithInteractionState()
         persistCurrentConfiguration()
@@ -1344,6 +1348,7 @@ final class H200ConnectionModel: ObservableObject {
     ) -> (slot: RuntimeSlotID, config: DeckKeySub2APIConfiguration)? {
         guard let slot = runtimeSlotsByInstance[instanceID],
               slot.pageID == interactionState.currentPageID,
+              interactionState.configuration(for: slot.keyID)?.displayMode == .function,
               interactionState.configuration(for: slot.keyID)?.function == .sub2API
         else {
             return nil
@@ -1597,6 +1602,7 @@ final class H200ConnectionModel: ObservableObject {
     ) -> (slot: RuntimeSlotID, game: MihoyoGame, config: DeckKeyMihoyoGameConfiguration)? {
         guard let slot = runtimeSlotsByInstance[instanceID],
               slot.pageID == interactionState.currentPageID,
+              interactionState.configuration(for: slot.keyID)?.displayMode == .function,
               let game = interactionState.mihoyoGame(for: slot.keyID)
         else {
             return nil

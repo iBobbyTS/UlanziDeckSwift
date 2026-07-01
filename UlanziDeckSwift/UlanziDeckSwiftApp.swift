@@ -44,6 +44,7 @@ struct UlanziDeckSwiftApp: App {
                 EmptyView()
             }
         }
+        .windowStyle(.hiddenTitleBar)
         .commands {
             if !singleInstanceAcquired {
                 CommandGroup(replacing: .newItem) {}

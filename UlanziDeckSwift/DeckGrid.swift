@@ -1475,9 +1475,6 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
         selectedKeyID = keyID
         pressedKeyIDs.remove(keyID)
-        if displayMode != .function {
-            configurations[keyID] = .empty
-        }
         configurations[keyID, default: .tallyDefault].displayMode = displayMode
         return true
     }

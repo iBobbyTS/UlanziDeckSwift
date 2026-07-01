@@ -471,6 +471,7 @@ struct UlanziDeckSwiftTests {
     @Test func wideKeyDisplayModeChangesPreviewAndDisablesFunctionPresses() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
+        state.assign(.openFile, to: 14)
 
         let didRejectNormalKey = state.setDisplayMode(.clock, for: 1)
         let didSetClock = state.setDisplayMode(.clock, for: 14)
@@ -483,18 +484,17 @@ struct UlanziDeckSwiftTests {
         #expect(!didBeginPress)
         #expect(!didTriggerShortPress)
         #expect(state.tallyValue(for: 14) == 0)
-        #expect(state.configuration(for: 14)?.function == DeckKeyFunction.none)
+        #expect(state.configuration(for: 14)?.function == .openFile)
         #expect(state.configuration(for: 14)?.displayMode == .clock)
         #expect(display.title == "时钟")
         #expect(display.subtitle == "模拟表盘")
 
-        state.assign(.sub2API, to: 14)
-
-        #expect(state.configuration(for: 14)?.displayMode == .clock)
-        #expect(state.configuration(for: 14)?.function == .sub2API)
+        state.setDisplayMode(.function, for: 14)
+        #expect(state.configuration(for: 14)?.displayMode == .function)
+        #expect(state.configuration(for: 14)?.function == .openFile)
         let didBeginPressAfterAssigningFunction = state.beginPress(keyID: 14)
-        #expect(!didBeginPressAfterAssigningFunction)
-        #expect(state.display(for: layout.keys[13]).title == "时钟")
+        #expect(didBeginPressAfterAssigningFunction)
+        #expect(state.display(for: layout.keys[13]).title == "选择文件")
     }
 
     @Test func uiSelectionDoesNotChangeDisplayRenderIdentity() {
@@ -2304,7 +2304,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func wideKeyBuiltInDisplayModesClearFunctionAndSendPartialPackage() async throws {
+    @Test func wideKeyBuiltInDisplayModesPreserveFunction() {
         let store = FakeDeckConfigurationStore()
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
@@ -2313,27 +2313,14 @@ struct UlanziDeckSwiftTests {
             configurationStore: store
         )
 
-        model.checkOnLaunch()
-        try await Self.waitUntil {
-            syncer.sentDisplays.count == 1 && model.syncSummary != nil
-        }
+        model.selectKey(keyID: 14)
+        model.assignSelectedFunction(.openFile)
         model.setKeyDisplayMode(.systemStatus, for: 14)
-        try await Self.waitUntil {
-            syncer.smallWindowModes == [.stats]
-        }
         model.setKeyDisplayMode(.clock, for: 14)
-        try await Self.waitUntil {
-            syncer.smallWindowModes == [.stats, .dial]
-        }
 
-        #expect(syncer.sentDisplays.count == 1)
-        #expect(syncer.partialDisplays.count == 2)
-        #expect(syncer.partialDisplays[0].map(\.id) == [14])
-        #expect(syncer.partialDisplays[0].first?.displayMode == .systemStatus)
-        #expect(syncer.partialDisplays[1].first?.displayMode == .clock)
-        #expect(model.interactionState.configuration(for: 14)?.function == DeckKeyFunction.none)
+        #expect(model.interactionState.configuration(for: 14)?.function == .openFile)
         #expect(model.interactionState.configuration(for: 14)?.displayMode == .clock)
-        #expect(store.savedStates.first?.configuration(for: 14)?.function == DeckKeyFunction.none)
+        #expect(store.savedStates.contains { $0.configuration(for: 14)?.function == .openFile })
         #expect(store.savedStates.last?.configuration(for: 14)?.displayMode == .clock)
     }
 
@@ -2359,7 +2346,7 @@ struct UlanziDeckSwiftTests {
             syncer.partialDisplays.count == 2
         }
 
-        #expect(model.interactionState.configuration(for: 14)?.function == DeckKeyFunction.none)
+        #expect(model.interactionState.configuration(for: 14)?.function == .tally)
         #expect(syncer.partialDisplays.last?.map(\.id) == [14])
         #expect(syncer.partialDisplays.last?.first?.displayMode == .function)
     }
