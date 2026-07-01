@@ -14,6 +14,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case zenlessZoneStatus
     case pageFolder
     case pageBack
+    case previousPage
+    case nextPage
 
     static let assignableCases: [DeckKeyFunction] = [
         .tally,
@@ -26,6 +28,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
         .starRailStatus,
         .zenlessZoneStatus,
         .pageFolder,
+        .previousPage,
+        .nextPage,
     ]
 
     var title: String {
@@ -56,6 +60,10 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return DeckKeyPageFolderConfiguration.defaultDisplayName
         case .pageBack:
             return "返回"
+        case .previousPage:
+            return "上一页"
+        case .nextPage:
+            return "下一页"
         }
     }
 
@@ -87,6 +95,10 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "folder"
         case .pageBack:
             return "arrow.uturn.left"
+        case .previousPage:
+            return "chevron.left"
+        case .nextPage:
+            return "chevron.right"
         }
     }
 
@@ -98,7 +110,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return .starRail
         case .zenlessZoneStatus:
             return .zenlessZoneZero
-        case .none, .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .pageFolder, .pageBack:
+        case .none, .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .pageFolder, .pageBack, .previousPage, .nextPage:
             return nil
         }
     }
@@ -115,6 +127,8 @@ nonisolated enum DeckKeyPressRuntimeAction: Equatable {
     case refreshMihoyoGame
     case enterPage
     case goBackPage
+    case previousRootPage
+    case nextRootPage
 }
 
 nonisolated enum DeckKeyScheduledRuntime: Equatable {
@@ -143,6 +157,10 @@ extension DeckKeyFunction {
             return .enterPage
         case .pageBack:
             return .goBackPage
+        case .previousPage:
+            return .previousRootPage
+        case .nextPage:
+            return .nextRootPage
         case .brightness, .none:
             return .none
         }
@@ -154,7 +172,7 @@ extension DeckKeyFunction {
             return .sub2API
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .mihoyoGame
-        case .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .none, .pageFolder, .pageBack:
+        case .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .none, .pageFolder, .pageBack, .previousPage, .nextPage:
             return nil
         }
     }
@@ -1319,6 +1337,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return visual.backgroundPNGData
         case .none, .tally, .brightness, .sub2API:
             return nil
+        case .previousPage, .nextPage:
+            return visual.backgroundPNGData
         }
     }
 
@@ -1340,6 +1360,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return visual.blurredBackgroundPNGData
         case .none, .tally, .brightness, .sub2API:
             return nil
+        case .previousPage, .nextPage:
+            return visual.blurredBackgroundPNGData
         }
     }
 
@@ -1367,6 +1389,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return DeckKeyPageFolderConfiguration.defaultDisplayName
         case .pageBack:
             return ""
+        case .previousPage, .nextPage:
+            return function.title
         }
     }
 
@@ -1398,7 +1422,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return DeckKeyPageFolderConfiguration.migratingLegacyDefaultName(in: pageFolder.visual)
         case .pageBack:
             return DeckKeyVisualConfiguration(dimsBackground: false)
-        case .none, .tally, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus:
+        case .none, .tally, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage:
             return DeckKeyVisualConfiguration()
         }
     }

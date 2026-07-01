@@ -28,7 +28,7 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "SMBServerBackground"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return function.game?.buttonBackgroundAssetName
-        case .none, .tally, .openFile, .openWebPage, .brightness, .sub2API, .pageFolder, .pageBack:
+        case .none, .tally, .openFile, .openWebPage, .brightness, .sub2API, .pageFolder, .pageBack, .previousPage, .nextPage:
             return nil
         }
     }
@@ -41,6 +41,10 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "folder"
         case .pageBack:
             return "arrow.uturn.left"
+        case .previousPage:
+            return "chevron.left"
+        case .nextPage:
+            return "chevron.right"
         case .none, .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return nil
         }
@@ -144,6 +148,8 @@ extension DeckKeyConfiguration {
             pageFolder.visual.replaceBackground(with: defaultVisual)
         case .pageBack:
             visual.replaceBackground(with: defaultVisual)
+        case .previousPage, .nextPage:
+            visual.replaceBackground(with: defaultVisual)
         case .none, .tally, .openFile, .brightness, .sub2API:
             break
         }
@@ -164,6 +170,8 @@ extension DeckKeyConfiguration {
         case .pageFolder:
             pageFolder.visual.clearBackground()
         case .pageBack:
+            visual.clearBackground()
+        case .previousPage, .nextPage:
             visual.clearBackground()
         case .none, .tally, .openFile, .brightness, .sub2API:
             break

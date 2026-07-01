@@ -235,6 +235,8 @@ final class H200ConnectionModel: ObservableObject {
             enterPageFolder(for: keyID)
         case .pageBack:
             goBackPage()
+        case .previousPage, .nextPage:
+            return
         default:
             return
         }
@@ -271,7 +273,7 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func goBackPage() {
-        guard interactionState.currentPageID != DeckGridInteractionState.rootPageID else {
+        guard !interactionState.isOnRootPage else {
             return
         }
 
@@ -279,6 +281,91 @@ final class H200ConnectionModel: ObservableObject {
         cancelAllWebPageMetadataTasks()
         webPageMetadataFetchedURLStrings.removeAll()
         guard interactionState.goBackPage() else {
+            startCurrentPageRuntime()
+            return
+        }
+
+        syncCurrentDisplays()
+        startCurrentPageRuntime()
+    }
+
+    func addRootPageAfterCurrent() {
+        guard interactionState.canAddRootPage else {
+            return
+        }
+
+        cancelCurrentPageRuntime()
+        cancelAllWebPageMetadataTasks()
+        webPageMetadataFetchedURLStrings.removeAll()
+        guard interactionState.addRootPageAfterCurrent() else {
+            startCurrentPageRuntime()
+            return
+        }
+
+        reconcileRuntimeInstancesWithInteractionState()
+        persistCurrentConfiguration()
+        syncCurrentDisplays()
+        startCurrentPageRuntime()
+    }
+
+    func deleteCurrentRootPage() {
+        guard interactionState.canDeleteCurrentRootPage else {
+            return
+        }
+
+        cancelCurrentPageRuntime()
+        cancelAllWebPageMetadataTasks()
+        webPageMetadataFetchedURLStrings.removeAll()
+        guard interactionState.deleteCurrentRootPage() else {
+            startCurrentPageRuntime()
+            return
+        }
+
+        reconcileRuntimeInstancesWithInteractionState()
+        persistCurrentConfiguration()
+        syncCurrentDisplays()
+        startCurrentPageRuntime()
+    }
+
+    func selectRootPage(pageID: String) {
+        guard interactionState.canGoToRootPage(id: pageID) else {
+            return
+        }
+
+        navigateRootPage {
+            $0.goToRootPage(id: pageID)
+        }
+    }
+
+    private func goToPreviousRootPage() {
+        guard interactionState.canGoToPreviousRootPage else {
+            return
+        }
+
+        navigateRootPage {
+            $0.goToPreviousRootPage()
+        }
+    }
+
+    private func goToNextRootPage() {
+        guard interactionState.canGoToNextRootPage else {
+            return
+        }
+
+        navigateRootPage {
+            $0.goToNextRootPage()
+        }
+    }
+
+    private func navigateRootPage(_ navigate: (inout DeckGridInteractionState) -> Bool) {
+        guard interactionState.isOnRootPage else {
+            return
+        }
+
+        cancelCurrentPageRuntime()
+        cancelAllWebPageMetadataTasks()
+        webPageMetadataFetchedURLStrings.removeAll()
+        guard navigate(&interactionState) else {
             startCurrentPageRuntime()
             return
         }
@@ -342,6 +429,10 @@ final class H200ConnectionModel: ObservableObject {
             enterPageFolder(for: keyID)
         case .goBackPage:
             goBackPage()
+        case .previousRootPage:
+            goToPreviousRootPage()
+        case .nextRootPage:
+            goToNextRootPage()
         case .none:
             return
         }
@@ -911,8 +1002,6 @@ final class H200ConnectionModel: ObservableObject {
             beginKeyPress(keyID: keyID)
         case .release:
             endKeyPress(keyID: keyID)
-        case .left, .right:
-            return
         }
     }
 

@@ -54,6 +54,15 @@ struct RootView: View {
             onKeySwap: { sourceKeyID, targetKeyID in
                 connectionModel.swapSquareKeyConfigurations(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID)
             },
+            onRootPageAddition: {
+                connectionModel.addRootPageAfterCurrent()
+            },
+            onRootPageSelection: { pageID in
+                connectionModel.selectRootPage(pageID: pageID)
+            },
+            onRootPageDeletion: {
+                connectionModel.deleteCurrentRootPage()
+            },
             onFunctionSelection: { function in
                 connectionModel.assignSelectedFunction(function)
             },

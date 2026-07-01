@@ -29,6 +29,9 @@ struct ContentView: View {
     let onKeyFunctionDeletion: (Int) -> Void
     let onKeyDisplayModeSelection: (Int, DeckKeyDisplayMode) -> Void
     let onKeySwap: (Int, Int) -> Void
+    let onRootPageAddition: () -> Void
+    let onRootPageSelection: (String) -> Void
+    let onRootPageDeletion: () -> Void
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
     let onFolderPathSelection: (DeckKeyOpenFolderConfiguration) -> Void
@@ -294,24 +297,86 @@ struct ContentView: View {
 
     private var pageSelector: some View {
         HStack(spacing: 6) {
-            ForEach(Array(interactionState.navigationPathTitles.enumerated()), id: \.offset) { index, title in
-                if index > 0 {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(.secondary)
+            if interactionState.isOnRootPage {
+                ForEach(interactionState.rootPageNavigationItems) { item in
+                    rootPageSelectorItem(item)
                 }
 
-                Text(title)
-                    .font(.caption.weight(index == interactionState.navigationPathTitles.count - 1 ? .bold : .semibold))
-                    .foregroundStyle(index == interactionState.navigationPathTitles.count - 1 ? Color.white : Color.secondary)
-                    .padding(.horizontal, 9)
-                    .frame(height: 22)
-                    .background(index == interactionState.navigationPathTitles.count - 1 ? Color.accentColor : Color.clear, in: Capsule())
+                Button(action: onRootPageAddition) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .bold))
+                        .frame(width: 22, height: 22)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(interactionState.canAddRootPage ? Color.secondary : Color.secondary.opacity(0.38))
+                .disabled(!interactionState.canAddRootPage)
+                .help(interactionState.canAddRootPage ? "新增页面" : "最多允许 10 页")
+                .accessibilityLabel("新增页面")
+            } else {
+                ForEach(Array(interactionState.navigationPathTitles.enumerated()), id: \.offset) { index, title in
+                    if index > 0 {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Text(title)
+                        .font(.caption.weight(index == interactionState.navigationPathTitles.count - 1 ? .bold : .semibold))
+                        .foregroundStyle(index == interactionState.navigationPathTitles.count - 1 ? Color.white : Color.secondary)
+                        .padding(.horizontal, 9)
+                        .frame(height: 22)
+                        .background(index == interactionState.navigationPathTitles.count - 1 ? Color.accentColor : Color.clear, in: Capsule())
+                }
             }
         }
         .padding(2)
         .frame(height: pageSelectorHeight)
         .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+    }
+
+    private func rootPageSelectorItem(_ item: RootPageNavigationItem) -> some View {
+        Button {
+            onRootPageSelection(item.id)
+        } label: {
+            Text(item.title)
+                .font(.caption.weight(item.isCurrent ? .bold : .semibold))
+                .foregroundStyle(item.isCurrent ? Color.white : Color.secondary)
+                .padding(.horizontal, 9)
+                .frame(height: 22)
+                .background(item.isCurrent ? Color.accentColor : Color.clear, in: Capsule())
+        }
+            .buttonStyle(.plain)
+            .contextMenu {
+                if item.canDelete {
+                    Button(role: .destructive) {
+                        confirmCurrentRootPageDeletion()
+                    } label: {
+                        Label("删除当前页面", systemImage: "trash")
+                    }
+                }
+            }
+            .accessibilityLabel("页面 \(item.title)")
+            .accessibilityValue(item.isCurrent ? "当前页面" : "未选中")
+    }
+
+    private func confirmCurrentRootPageDeletion() {
+        guard interactionState.canDeleteCurrentRootPage else {
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "删除当前页面？"
+        alert.informativeText = "该页面上的按键配置和其中的功能夹都会被删除。"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "删除")
+        alert.addButton(withTitle: "取消")
+        let response = alert.runModal()
+        guard response == .alertFirstButtonReturn else {
+            return
+        }
+
+        onRootPageDeletion()
     }
 
     private var functionSidebar: some View {
@@ -744,6 +809,9 @@ struct MihoyoQRCodeView: View {
         onKeyFunctionDeletion: { _ in },
         onKeyDisplayModeSelection: { _, _ in },
         onKeySwap: { _, _ in },
+        onRootPageAddition: {},
+        onRootPageSelection: { _ in },
+        onRootPageDeletion: {},
         onFunctionSelection: { _ in },
         onTallyDefaultValueChange: { _ in },
         onFolderPathSelection: { _ in },

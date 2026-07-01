@@ -56,7 +56,7 @@ extension ContentView {
     @ViewBuilder
     func parameterContent(for configuration: DeckKeyConfiguration) -> some View {
         switch configuration.function {
-        case .none, .brightness:
+        case .none, .brightness, .previousPage, .nextPage:
             HStack(alignment: .top, spacing: 28) {
                 functionParameterColumn(for: configuration)
 
@@ -493,7 +493,7 @@ extension ContentView {
             FunctionSection(
                 title: "页面",
                 systemImageName: "square.grid.2x2",
-                functions: [.pageFolder]
+                functions: [.pageFolder, .previousPage, .nextPage]
             ),
             FunctionSection(
                 title: "网站",

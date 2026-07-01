@@ -213,7 +213,7 @@ struct UlanziDeckSwiftTests {
         #expect(didEnterFirstPage)
         #expect(state.currentPageID == firstPageID)
         #expect(state.currentPageDepth == 1)
-        #expect(state.navigationPathTitles == ["主页", "功能夹"])
+        #expect(state.navigationPathTitles == ["1", "功能夹"])
         #expect(state.configuration(for: 13)?.function == .pageBack)
         #expect(state.configurations.filter { $0.key != 13 }.values.allSatisfy { $0.function == DeckKeyFunction.none })
         let backDisplay = state.display(for: layout.keys[12])
@@ -235,6 +235,135 @@ struct UlanziDeckSwiftTests {
         #expect(!state.canAssignPageFolder(to: 4))
         let didRejectFourthLevelPageFolder = state.assign(.pageFolder, to: 4)
         #expect(!didRejectFourthLevelPageFolder)
+    }
+
+    @Test func rootPagesCanBeAddedNavigatedAndDeletedWithLimits() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        #expect(state.rootPageNavigationItems.map(\.title) == ["1"])
+        #expect(state.canAddRootPage)
+        #expect(!state.canDeleteCurrentRootPage)
+
+        state.assign(.openFolder, to: 2)
+        let didAddSecondPage = state.addRootPageAfterCurrent()
+        #expect(didAddSecondPage)
+        #expect(state.rootPageNavigationItems.map(\.title) == ["1", "2"])
+        #expect(state.currentRootPageIndex == 1)
+        #expect(state.configuration(for: 2)?.function == DeckKeyFunction.none)
+        state.assign(.openFile, to: 2)
+
+        let didGoToFirstPage = state.goToPreviousRootPage()
+        #expect(didGoToFirstPage)
+        #expect(state.currentRootPageIndex == 0)
+        #expect(state.configuration(for: 2)?.function == .openFolder)
+        let didRejectPreviousBeforeFirstPage = state.goToPreviousRootPage()
+        #expect(!didRejectPreviousBeforeFirstPage)
+
+        let didGoToSecondPage = state.goToNextRootPage()
+        #expect(didGoToSecondPage)
+        #expect(state.currentRootPageIndex == 1)
+        #expect(state.configuration(for: 2)?.function == .openFile)
+        let didRejectNextAfterLastPage = state.goToNextRootPage()
+        #expect(!didRejectNextAfterLastPage)
+
+        let firstPageID = state.rootPageNavigationItems[0].id
+        let secondPageID = state.rootPageNavigationItems[1].id
+        let didGoToFirstPageByID = state.goToRootPage(id: firstPageID)
+        #expect(didGoToFirstPageByID)
+        #expect(state.currentRootPageIndex == 0)
+        #expect(state.configuration(for: 2)?.function == .openFolder)
+        let didRejectSelectingCurrentPage = state.goToRootPage(id: firstPageID)
+        let didRejectUnknownPage = state.goToRootPage(id: "missing-root-page")
+        #expect(!didRejectSelectingCurrentPage)
+        #expect(!didRejectUnknownPage)
+        let didGoToSecondPageByID = state.goToRootPage(id: secondPageID)
+        #expect(didGoToSecondPageByID)
+        #expect(state.currentRootPageIndex == 1)
+        #expect(state.configuration(for: 2)?.function == .openFile)
+
+        while state.canAddRootPage {
+            let didAddPage = state.addRootPageAfterCurrent()
+            #expect(didAddPage)
+        }
+        #expect(state.rootPageCount == DeckGridInteractionState.maximumRootPageCount)
+        let didRejectPageBeyondLimit = state.addRootPageAfterCurrent()
+        #expect(!didRejectPageBeyondLimit)
+
+        let didDeleteCurrentPage = state.deleteCurrentRootPage()
+        #expect(didDeleteCurrentPage)
+        #expect(state.rootPageCount == DeckGridInteractionState.maximumRootPageCount - 1)
+        #expect(state.currentRootPageIndex == DeckGridInteractionState.maximumRootPageCount - 2)
+
+        while state.canDeleteCurrentRootPage {
+            let didDeletePage = state.deleteCurrentRootPage()
+            #expect(didDeletePage)
+        }
+        #expect(state.rootPageCount == 1)
+        let didRejectDeletingOnlyPage = state.deleteCurrentRootPage()
+        #expect(!didRejectDeletingOnlyPage)
+    }
+
+    @Test func newRootPageInheritsOnlyWideKeyDisplayMode() throws {
+        let layout = DeckGridLayout.h200Prototype
+
+        var systemStatusState = DeckGridInteractionState(layout: layout)
+        systemStatusState.setDisplayMode(.systemStatus, for: 14)
+        let didAddSystemStatusPage = systemStatusState.addRootPageAfterCurrent()
+        #expect(didAddSystemStatusPage)
+        #expect(systemStatusState.configuration(for: 14)?.displayMode == .systemStatus)
+        #expect(systemStatusState.configuration(for: 14)?.function == DeckKeyFunction.none)
+
+        var clockState = DeckGridInteractionState(layout: layout)
+        clockState.setDisplayMode(.clock, for: 14)
+        let didAddClockPage = clockState.addRootPageAfterCurrent()
+        #expect(didAddClockPage)
+        #expect(clockState.configuration(for: 14)?.displayMode == .clock)
+        #expect(clockState.configuration(for: 14)?.function == DeckKeyFunction.none)
+
+        var functionState = DeckGridInteractionState(layout: layout)
+        functionState.assign(.openFile, to: 14)
+        #expect(functionState.configuration(for: 14)?.displayMode == .function)
+        let didAddFunctionPage = functionState.addRootPageAfterCurrent()
+        #expect(didAddFunctionPage)
+        #expect(functionState.configuration(for: 14)?.displayMode == .function)
+        #expect(functionState.configuration(for: 14)?.function == DeckKeyFunction.none)
+        #expect(functionState.configuration(for: 14)?.openFile.path == nil)
+    }
+
+    @Test func pageTurnFunctionsOnlyWorkOnRootPages() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        state.assign(.nextPage, to: 1)
+        state.assign(.previousPage, to: 2)
+        #expect(DeckKeyFunction.nextPage.title == "下一页")
+        #expect(DeckKeyFunction.previousPage.systemImageName == "chevron.left")
+        let didRejectNextWithOnePage = state.goToNextRootPage()
+        let didRejectPreviousWithOnePage = state.goToPreviousRootPage()
+        #expect(!didRejectNextWithOnePage)
+        #expect(!didRejectPreviousWithOnePage)
+
+        let didAddSecondPage = state.addRootPageAfterCurrent()
+        #expect(didAddSecondPage)
+        #expect(state.currentRootPageIndex == 1)
+        let didGoToFirstPage = state.goToPreviousRootPage()
+        #expect(didGoToFirstPage)
+        #expect(state.currentRootPageIndex == 0)
+        let didGoToSecondPage = state.goToNextRootPage()
+        #expect(didGoToSecondPage)
+        #expect(state.currentRootPageIndex == 1)
+
+        state.assign(.pageFolder, to: 3)
+        let folderPageID = try #require(state.pageID(for: 3))
+        let didEnterFolder = state.enterPageFolder(keyID: 3)
+        #expect(didEnterFolder)
+        #expect(state.currentPageID == folderPageID)
+        let didRejectPreviousInFolder = state.goToPreviousRootPage()
+        let didRejectNextInFolder = state.goToNextRootPage()
+        #expect(!didRejectPreviousInFolder)
+        #expect(!didRejectNextInFolder)
+        #expect(state.currentPageID == folderPageID)
     }
 
     @Test func legacyPageFolderDefaultNameMigratesToFeatureFolderName() throws {
@@ -361,8 +490,11 @@ struct UlanziDeckSwiftTests {
 
         state.assign(.sub2API, to: 14)
 
-        #expect(state.configuration(for: 14)?.displayMode == .function)
-        #expect(state.display(for: layout.keys[13]).title == "号池")
+        #expect(state.configuration(for: 14)?.displayMode == .clock)
+        #expect(state.configuration(for: 14)?.function == .sub2API)
+        let didBeginPressAfterAssigningFunction = state.beginPress(keyID: 14)
+        #expect(!didBeginPressAfterAssigningFunction)
+        #expect(state.display(for: layout.keys[13]).title == "时钟")
     }
 
     @Test func uiSelectionDoesNotChangeDisplayRenderIdentity() {
@@ -1156,7 +1288,8 @@ struct UlanziDeckSwiftTests {
 
         let restored = try #require(store.loadInteractionState(for: .h200Prototype))
         #expect(restored.currentPageID == DeckGridInteractionState.rootPageID)
-        #expect(restored.navigationPathTitles == ["主页"])
+        #expect(restored.navigationPathTitles == ["1"])
+        #expect(restored.rootPageNavigationItems.map(\.title) == ["1"])
         #expect(restored.configuration(for: 3)?.function == .openFolder)
         #expect(restored.openFolderConfiguration(for: 3).name == "文档")
         #expect(restored.configuration(for: 3)?.buttonVisualConfiguration?.name == "文档")
@@ -1181,11 +1314,49 @@ struct UlanziDeckSwiftTests {
         var restored = try #require(store.loadInteractionState(for: layout))
 
         #expect(restored.currentPageID == DeckGridInteractionState.rootPageID)
-        #expect(restored.navigationPathTitles == ["主页"])
+        #expect(restored.navigationPathTitles == ["1"])
         #expect(restored.configuration(for: 2)?.function == .pageFolder)
         let didEnterRestoredPage = restored.enterPageFolder(keyID: 2)
         #expect(didEnterRestoredPage)
         #expect(restored.configuration(for: 13)?.function == .pageBack)
+        #expect(restored.configuration(for: 4)?.function == .openFolder)
+        #expect(restored.folderPath(for: 4) == "/Users/ibobby/Documents/Nested")
+    }
+
+    @Test func userDefaultsStorePersistsRootPageOrderAndFolderTree() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let layout = DeckGridLayout.h200Prototype
+        let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: "deckConfiguration")
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.openFolder, to: 2)
+        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents/Root1"), for: 2)
+        let didAddSecondPage = state.addRootPageAfterCurrent()
+        #expect(didAddSecondPage)
+        state.assign(.pageFolder, to: 3)
+        let pageFolderID = try #require(state.pageID(for: 3))
+        let didEnterPageFolder = state.enterPageFolder(keyID: 3)
+        #expect(didEnterPageFolder)
+        state.assign(.openFolder, to: 4)
+        state.setFolderConfiguration(Self.folderConfiguration(path: "/Users/ibobby/Documents/Nested"), for: 4)
+
+        store.saveInteractionState(state, for: layout)
+        var restored = try #require(store.loadInteractionState(for: layout))
+
+        #expect(restored.currentPageID == DeckGridInteractionState.rootPageID)
+        #expect(restored.rootPageNavigationItems.map(\.title) == ["1", "2"])
+        #expect(restored.configuration(for: 2)?.function == .openFolder)
+        let didGoToSecondPage = restored.goToNextRootPage()
+        #expect(didGoToSecondPage)
+        #expect(restored.currentRootPageIndex == 1)
+        #expect(restored.configuration(for: 3)?.function == .pageFolder)
+        #expect(restored.pageID(for: 3) == pageFolderID)
+        let didEnterRestoredPageFolder = restored.enterPageFolder(keyID: 3)
+        #expect(didEnterRestoredPageFolder)
         #expect(restored.configuration(for: 4)?.function == .openFolder)
         #expect(restored.folderPath(for: 4) == "/Users/ibobby/Documents/Nested")
     }
@@ -3044,6 +3215,154 @@ struct UlanziDeckSwiftTests {
         #expect(model.interactionState.currentPageID == DeckGridInteractionState.rootPageID)
         #expect(syncer.sentDisplays.last?.count == 14)
         #expect(syncer.sentDisplays.last?[1].pageFolderButtonContent?.displayName == "功能夹")
+    }
+
+    @MainActor
+    @Test func selectingRootPageByLabelSendsFullPagePackage() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 2)
+        model.assignSelectedFunction(.openFolder)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 1
+        }
+        model.addRootPageAfterCurrent()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 2
+        }
+        let firstPageID = model.interactionState.rootPageNavigationItems[0].id
+
+        model.selectRootPage(pageID: firstPageID)
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 3
+        }
+
+        #expect(model.interactionState.currentRootPageIndex == 0)
+        #expect(model.interactionState.configuration(for: 2)?.function == .openFolder)
+        #expect(syncer.sentDisplays.last?.count == 14)
+        #expect(syncer.sentDisplays.last?[1].folderButtonContent?.displayName == "选择文件夹")
+    }
+
+    @MainActor
+    @Test func physicalButtonRootPageTurnSendsFullPagePackageOnlyOnRootPages() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore()
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+
+        model.selectKey(keyID: 2)
+        model.assignSelectedFunction(.nextPage)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 1
+        }
+        model.addRootPageAfterCurrent()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 2
+        }
+        model.selectKey(keyID: 1)
+        model.assignSelectedFunction(.previousPage)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 2
+        }
+
+        syncer.emitInput(H200InputEvent(state: 1, index: 0, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 0, type: .button, action: .release))
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 3
+        }
+        #expect(model.interactionState.currentRootPageIndex == 0)
+
+        syncer.emitInput(H200InputEvent(state: 1, index: 1, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 1, type: .button, action: .release))
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 4
+        }
+        #expect(model.interactionState.currentRootPageIndex == 1)
+
+        model.selectKey(keyID: 3)
+        model.assignSelectedFunction(.pageFolder)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 3
+        }
+        model.navigateKey(keyID: 3)
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 5
+        }
+        let folderPageID = model.interactionState.currentPageID
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.previousPage)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count == 4
+        }
+
+        let sentDisplayCountBeforeFolderPageTurn = syncer.sentDisplays.count
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+
+        try await Task.sleep(nanoseconds: 80_000_000)
+        #expect(model.interactionState.currentPageID == folderPageID)
+        #expect(syncer.sentDisplays.count == sentDisplayCountBeforeFolderPageTurn)
+    }
+
+    @MainActor
+    @Test func noOpRootPageTurnDoesNotCancelPendingWebPageMetadata() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let fetcher = FakeWebPageMetadataFetcher(
+            results: [
+                WebPageMetadata(title: "No-op Site", iconSnapshot: nil),
+            ],
+            fetchDelayNanoseconds: 120_000_000
+        )
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            webPageMetadataFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.openWebPage)
+        model.setSelectedWebPageURLString("example.com")
+        model.submitSelectedWebPageURLString()
+        try await Self.waitUntil {
+            fetcher.requests == ["example.com"]
+        }
+
+        model.selectKey(keyID: 1)
+        model.assignSelectedFunction(.previousPage)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count >= 2
+        }
+        let sentDisplayCountBeforeNoOpTurn = syncer.sentDisplays.count
+        syncer.emitInput(H200InputEvent(state: 1, index: 0, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 0, type: .button, action: .release))
+
+        try await Self.waitUntil {
+            model.interactionState.openWebPageConfiguration(for: 4).title == "No-op Site"
+        }
+        #expect(model.interactionState.currentRootPageIndex == 0)
+        #expect(syncer.sentDisplays.count == sentDisplayCountBeforeNoOpTurn)
+        #expect(fetcher.requests == ["example.com"])
     }
 
     @MainActor

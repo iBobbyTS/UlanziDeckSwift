@@ -220,8 +220,6 @@ nonisolated enum H200InputEventType: Equatable, Sendable {
 nonisolated enum H200InputAction: Equatable, Sendable {
     case press
     case release
-    case left
-    case right
 }
 
 nonisolated enum H200InputReportParser {
@@ -261,10 +259,6 @@ nonisolated enum H200InputReportParser {
         switch byte {
         case 0x01:
             return .press
-        case 0x02:
-            return .left
-        case 0x03:
-            return .right
         default:
             return .release
         }

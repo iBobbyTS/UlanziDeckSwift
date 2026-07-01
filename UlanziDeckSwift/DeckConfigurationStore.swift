@@ -56,7 +56,7 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
                     configurations: Dictionary(uniqueKeysWithValues: page.keys.map { ($0.id, $0.configuration) })
                 )
             }
-            return DeckGridInteractionState(layout: layout, pages: pages)
+            return DeckGridInteractionState(layout: layout, pages: pages, rootPageIDs: stored.rootPageIDs)
 
         default:
             return nil
@@ -76,7 +76,11 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
             return StoredDeckPage(id: page.id, parentID: page.parentID, keys: keys)
         }
 
-        let stored = StoredDeckConfiguration(layoutIdentifier: layout.identifier, pages: pages)
+        let stored = StoredDeckConfiguration(
+            layoutIdentifier: layout.identifier,
+            pages: pages,
+            rootPageIDs: state.rootPageIDs
+        )
         guard let data = try? encoder.encode(stored) else {
             return
         }
@@ -104,12 +108,14 @@ nonisolated private struct StoredDeckConfiguration: Codable, Equatable {
     let layoutIdentifier: String
     let keys: [StoredDeckKeyConfiguration]
     let pages: [StoredDeckPage]
+    let rootPageIDs: [String]
 
-    init(layoutIdentifier: String, pages: [StoredDeckPage]) {
+    init(layoutIdentifier: String, pages: [StoredDeckPage], rootPageIDs: [String]) {
         version = Self.currentVersion
         self.layoutIdentifier = layoutIdentifier
         keys = []
         self.pages = pages
+        self.rootPageIDs = rootPageIDs
     }
 
     enum CodingKeys: CodingKey {
@@ -117,6 +123,7 @@ nonisolated private struct StoredDeckConfiguration: Codable, Equatable {
         case layoutIdentifier
         case keys
         case pages
+        case rootPageIDs
     }
 
     init(from decoder: Decoder) throws {
@@ -125,6 +132,7 @@ nonisolated private struct StoredDeckConfiguration: Codable, Equatable {
         layoutIdentifier = try container.decode(String.self, forKey: .layoutIdentifier)
         keys = try container.decodeIfPresent([StoredDeckKeyConfiguration].self, forKey: .keys) ?? []
         pages = try container.decodeIfPresent([StoredDeckPage].self, forKey: .pages) ?? []
+        rootPageIDs = try container.decodeIfPresent([String].self, forKey: .rootPageIDs) ?? []
     }
 }
 
