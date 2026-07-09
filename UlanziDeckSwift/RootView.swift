@@ -3,34 +3,10 @@ import SwiftUI
 struct RootView: View {
     private let windowContentMinimumSize = CGSize(width: 880, height: 674)
     private let windowContentMaximumSize = CGSize(width: 1000, height: CGFloat.greatestFiniteMagnitude)
-    @StateObject private var connectionModel: H200ConnectionModel
+    @ObservedObject var connectionModel: H200ConnectionModel
 
-    init(
-        discovery: H200Discovering = H200HIDDiscovery(),
-        syncer: H200DeckSyncing = H200HIDDeckSyncer(),
-        configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
-        folderOpener: FinderFolderOpening? = nil,
-        fileOpener: FinderFileOpening? = nil,
-        webPageOpener: WebPageOpening? = nil,
-        webPageMetadataFetcher: WebPageMetadataFetching = WebPageMetadataFetcher(),
-        smbServerConnector: SMBServerConnecting? = nil,
-        sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher(),
-        mihoyoGameService: MihoyoGameServicing = MihoyoGameClient(),
-        mihoyoSessionStore: MihoyoSessionStoring = KeychainMihoyoSessionStore()
-    ) {
-        _connectionModel = StateObject(wrappedValue: H200ConnectionModel(
-            discovery: discovery,
-            syncer: syncer,
-            configurationStore: configurationStore,
-            folderOpener: folderOpener,
-            fileOpener: fileOpener,
-            webPageOpener: webPageOpener,
-            webPageMetadataFetcher: webPageMetadataFetcher,
-            smbServerConnector: smbServerConnector,
-            sub2APIFetcher: sub2APIFetcher,
-            mihoyoGameService: mihoyoGameService,
-            mihoyoSessionStore: mihoyoSessionStore
-        ))
+    init(connectionModel: H200ConnectionModel) {
+        self.connectionModel = connectionModel
     }
 
     var body: some View {
@@ -136,15 +112,6 @@ struct RootView: View {
                     maximumContentSize: windowContentMaximumSize
                 )
             }
-            .task {
-                connectionModel.checkOnLaunch()
-            }
-            .onAppear {
-                BrightnessAdjustmentRuntime.shared.register(connectionModel)
-            }
-            .onDisappear {
-                BrightnessAdjustmentRuntime.shared.unregister(connectionModel)
-            }
             .alert(item: $connectionModel.alert) { alert in
                 Alert(
                     title: Text(alert.title),
@@ -193,7 +160,10 @@ private struct MainWindowConfigurator: NSViewRepresentable {
 }
 
 #Preview {
-    RootView(discovery: PreviewH200Discovery(), syncer: PreviewH200DeckSyncer())
+    RootView(connectionModel: H200ConnectionModel(
+        discovery: PreviewH200Discovery(),
+        syncer: PreviewH200DeckSyncer()
+    ))
 }
 
 private struct PreviewH200Discovery: H200Discovering {

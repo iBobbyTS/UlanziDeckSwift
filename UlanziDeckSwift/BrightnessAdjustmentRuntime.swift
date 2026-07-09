@@ -8,7 +8,13 @@ protocol BrightnessAdjusting: AnyObject {
 }
 
 @MainActor
-final class BrightnessAdjustmentRuntime {
+protocol BrightnessAdjustmentRegistering: AnyObject {
+    func register(_ adjuster: BrightnessAdjusting)
+    func unregister(_ adjuster: BrightnessAdjusting)
+}
+
+@MainActor
+final class BrightnessAdjustmentRuntime: BrightnessAdjustmentRegistering {
     static let shared = BrightnessAdjustmentRuntime()
 
     private weak var adjuster: BrightnessAdjusting?

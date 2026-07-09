@@ -7,16 +7,20 @@
 
 import SwiftUI
 import AppKit
+import Combine
 
 @main
 struct UlanziDeckSwiftApp: App {
+    private static let mainWindowID = "main-window"
     private let singleInstanceAcquired: Bool
     private let duplicateApplicationAlert: DuplicateApplicationAlert?
+    @StateObject private var appState: UlanziDeckAppState
 
     init() {
         if Self.isRunningTests {
             singleInstanceAcquired = true
             duplicateApplicationAlert = nil
+            _appState = StateObject(wrappedValue: UlanziDeckAppState())
             return
         }
 
@@ -24,19 +28,26 @@ struct UlanziDeckSwiftApp: App {
         case .acquired:
             singleInstanceAcquired = true
             duplicateApplicationAlert = nil
+            _appState = StateObject(wrappedValue: UlanziDeckAppState())
         case let .blockedByExistingApplication(existingApplication):
             singleInstanceAcquired = false
             duplicateApplicationAlert = DuplicateApplicationAlert(existingApplication: existingApplication)
+            _appState = StateObject(wrappedValue: UlanziDeckAppState(isEnabled: false))
         case .blockedByUnknownApplication:
             singleInstanceAcquired = false
             duplicateApplicationAlert = DuplicateApplicationAlert(existingApplication: nil)
+            _appState = StateObject(wrappedValue: UlanziDeckAppState(isEnabled: false))
         }
     }
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("Ulanzi Deck", id: Self.mainWindowID) {
             if singleInstanceAcquired {
-                RootView()
+                if let connectionModel = appState.connectionModel {
+                    RootView(connectionModel: connectionModel)
+                } else {
+                    EmptyView()
+                }
             } else if let duplicateApplicationAlert {
                 DuplicateApplicationAlertPresenter(alert: duplicateApplicationAlert)
                     .frame(width: 0, height: 0)
@@ -50,10 +61,72 @@ struct UlanziDeckSwiftApp: App {
                 CommandGroup(replacing: .newItem) {}
             }
         }
+
+        MenuBarExtra("Ulanzi Deck", systemImage: "rectangle.connected.to.line.below") {
+            MenuBarContent(mainWindowID: Self.mainWindowID)
+        }
     }
 
     static var isRunningTests: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+}
+
+@MainActor
+final class UlanziDeckAppState: ObservableObject {
+    @Published private(set) var connectionModel: H200ConnectionModel?
+
+    private let brightnessRuntime: BrightnessAdjustmentRegistering
+
+    init(
+        isEnabled: Bool = true,
+        brightnessRuntime: BrightnessAdjustmentRegistering? = nil,
+        connectionModelFactory: (@MainActor () -> H200ConnectionModel)? = nil
+    ) {
+        self.brightnessRuntime = brightnessRuntime ?? BrightnessAdjustmentRuntime.shared
+        guard isEnabled else {
+            return
+        }
+
+        let connectionModel = connectionModelFactory?() ?? H200ConnectionModel()
+        self.connectionModel = connectionModel
+        self.brightnessRuntime.register(connectionModel)
+        connectionModel.checkOnLaunch()
+    }
+
+    isolated deinit {
+        guard let connectionModel else {
+            return
+        }
+
+        brightnessRuntime.unregister(connectionModel)
+    }
+}
+
+private struct MenuBarContent: View {
+    @Environment(\.openWindow) private var openWindow
+    let mainWindowID: String
+
+    var body: some View {
+        Button("打开主窗口") {
+            openMainWindow()
+        }
+
+        Divider()
+
+        Button("退出 Ulanzi Deck") {
+            NSApplication.shared.terminate(nil)
+        }
+    }
+
+    private func openMainWindow() {
+        openWindow(id: mainWindowID)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async {
+            NSApplication.shared.windows
+                .first { $0.identifier?.rawValue == mainWindowID || $0.title == "Ulanzi Deck" }?
+                .makeKeyAndOrderFront(nil)
+        }
     }
 }
 

@@ -125,6 +125,91 @@ struct UlanziDeckSwiftTests {
         #expect(UlanziDeckSwiftApp.isRunningTests)
     }
 
+    @MainActor
+    @Test func appStateCreatesConnectionModelAndRegistersBrightnessRuntimeWhenEnabled() async throws {
+        let discovery = FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())])
+        let syncer = FakeH200DeckSyncer()
+        let brightnessRuntime = FakeBrightnessAdjustmentRuntime()
+        var createdModelCount = 0
+        weak var weakConnectionModel: H200ConnectionModel?
+        var appState: UlanziDeckAppState? = UlanziDeckAppState(
+            brightnessRuntime: brightnessRuntime,
+            connectionModelFactory: {
+                createdModelCount += 1
+                let model = H200ConnectionModel(
+                    discovery: discovery,
+                    syncer: syncer,
+                    configurationStore: FakeDeckConfigurationStore()
+                )
+                weakConnectionModel = model
+                return model
+            }
+        )
+
+        let connectionModel = try #require(appState?.connectionModel)
+
+        #expect(createdModelCount == 1)
+        #expect(connectionModel === weakConnectionModel)
+        #expect(brightnessRuntime.registeredAdjusters == [ObjectIdentifier(connectionModel)])
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1
+                && connectionModel.status == .connected(Self.protocolInterfaceIdentity())
+        }
+
+        appState = nil
+
+        #expect(brightnessRuntime.unregisteredAdjusters == [ObjectIdentifier(connectionModel)])
+        #expect(weakConnectionModel != nil)
+    }
+
+    @MainActor
+    @Test func appStateSkipsConnectionModelAndBrightnessRuntimeWhenDisabled() {
+        let brightnessRuntime = FakeBrightnessAdjustmentRuntime()
+        var createdModelCount = 0
+        var appState: UlanziDeckAppState? = UlanziDeckAppState(
+            isEnabled: false,
+            brightnessRuntime: brightnessRuntime,
+            connectionModelFactory: {
+                createdModelCount += 1
+                return H200ConnectionModel(
+                    discovery: FakeH200Discovery(results: [.notConnected]),
+                    syncer: FakeH200DeckSyncer(),
+                    configurationStore: FakeDeckConfigurationStore()
+                )
+            }
+        )
+
+        #expect(appState?.connectionModel == nil)
+        #expect(createdModelCount == 0)
+        #expect(brightnessRuntime.registeredAdjusters.isEmpty)
+
+        appState = nil
+
+        #expect(brightnessRuntime.unregisteredAdjusters.isEmpty)
+    }
+
+    @MainActor
+    @Test func destroyingRootViewDoesNotDestroyAppStateConnectionModel() throws {
+        let appState = UlanziDeckAppState(
+            brightnessRuntime: FakeBrightnessAdjustmentRuntime(),
+            connectionModelFactory: {
+                H200ConnectionModel(
+                    discovery: FakeH200Discovery(results: [.notConnected]),
+                    syncer: FakeH200DeckSyncer(),
+                    configurationStore: FakeDeckConfigurationStore()
+                )
+            }
+        )
+        let connectionModel = try #require(appState.connectionModel)
+        var rootView: RootView? = RootView(connectionModel: connectionModel)
+
+        #expect(rootView?.connectionModel === connectionModel)
+
+        rootView = nil
+
+        #expect(appState.connectionModel === connectionModel)
+    }
+
     @Test func previewGridMetricsKeepsWideKeyRowAligned() {
         let layout = DeckGridLayout.h200Prototype
         let metrics = DeckPreviewGridMetrics.h200
@@ -5857,6 +5942,20 @@ private final class FakeExistingApplicationLocator: ExistingApplicationLocating 
         }
 
         return results.removeFirst()
+    }
+}
+
+@MainActor
+private final class FakeBrightnessAdjustmentRuntime: BrightnessAdjustmentRegistering {
+    private(set) var registeredAdjusters: [ObjectIdentifier] = []
+    private(set) var unregisteredAdjusters: [ObjectIdentifier] = []
+
+    func register(_ adjuster: BrightnessAdjusting) {
+        registeredAdjusters.append(ObjectIdentifier(adjuster))
+    }
+
+    func unregister(_ adjuster: BrightnessAdjusting) {
+        unregisteredAdjusters.append(ObjectIdentifier(adjuster))
     }
 }
 
