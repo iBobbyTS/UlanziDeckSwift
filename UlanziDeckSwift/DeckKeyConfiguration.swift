@@ -790,7 +790,7 @@ nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
     var visual: DeckKeyVisualConfiguration
 
     init(address: String = "", name: String = "", visual: DeckKeyVisualConfiguration? = nil) {
-        self.address = Self.normalizedAddress(address)
+        self.address = Self.validatedAddress(address) ?? ""
         self.visual = visual ?? DeckKeyVisualConfiguration(name: name)
     }
 
@@ -816,11 +816,13 @@ nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
     }
 
     var fullURLString: String? {
-        guard !address.isEmpty else {
+        guard let validatedAddress = Self.validatedAddress(address),
+              !validatedAddress.isEmpty
+        else {
             return nil
         }
 
-        return "smb://\(address)"
+        return "smb://\(validatedAddress)"
     }
 
     enum CodingKeys: CodingKey {
@@ -831,7 +833,9 @@ nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        address = Self.normalizedAddress(try container.decodeIfPresent(String.self, forKey: .address) ?? "")
+        address = Self.validatedAddress(
+            try container.decodeIfPresent(String.self, forKey: .address) ?? ""
+        ) ?? ""
         visual = try container.decodeIfPresent(DeckKeyVisualConfiguration.self, forKey: .visual)
             ?? DeckKeyVisualConfiguration(name: try container.decodeIfPresent(String.self, forKey: .name) ?? "")
     }
@@ -855,6 +859,116 @@ nonisolated struct DeckKeySMBServerConfiguration: Codable, Equatable {
         }
 
         return address
+    }
+
+    static func validatedAddress(_ rawValue: String) -> String? {
+        let address = normalizedAddress(rawValue)
+        guard !address.isEmpty else {
+            return ""
+        }
+
+        guard !containsUserInfo(in: address),
+              let components = URLComponents(string: "smb://\(address)"),
+              components.scheme?.lowercased() == "smb",
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              let host = components.host,
+              !host.isEmpty,
+              isValidDecodedHost(host),
+              isValidAuthority(in: address),
+              components.url != nil
+        else {
+            return nil
+        }
+
+        return address
+    }
+
+    static func containsUserInfo(in rawValue: String) -> Bool {
+        let address = normalizedAddress(rawValue)
+        guard !address.isEmpty else {
+            return false
+        }
+
+        if let components = URLComponents(string: "smb://\(address)"),
+           components.user != nil || components.password != nil {
+            return true
+        }
+
+        let authority = authority(in: address)
+        let decodedAuthority = fullyRemovingPercentEncoding(from: String(authority))
+        return decodedAuthority.contains("@")
+    }
+
+    private static func fullyRemovingPercentEncoding(from value: String) -> String {
+        var decodedValue = value
+        while let nextValue = decodedValue.removingPercentEncoding,
+              nextValue != decodedValue {
+            decodedValue = nextValue
+        }
+        return decodedValue
+    }
+
+    private static func authority(in address: String) -> Substring {
+        address.prefix { character in
+            character != "/" && character != "?" && character != "#"
+        }
+    }
+
+    private static func isValidDecodedHost(_ host: String) -> Bool {
+        guard !host.contains("@"),
+              !host.contains("/"),
+              !host.contains("?"),
+              !host.contains("#")
+        else {
+            return false
+        }
+
+        if host.hasPrefix("[") && host.hasSuffix("]") {
+            return host.count > 2
+        }
+
+        return !host.contains(":")
+    }
+
+    private static func isValidAuthority(in address: String) -> Bool {
+        let authority = authority(in: address)
+        guard !authority.isEmpty else {
+            return false
+        }
+
+        let portText: Substring?
+        if authority.first == "[" {
+            guard let closingBracket = authority.firstIndex(of: "]") else {
+                return false
+            }
+            let suffix = authority[authority.index(after: closingBracket)...]
+            guard suffix.isEmpty || suffix.first == ":" else {
+                return false
+            }
+            portText = suffix.isEmpty ? nil : suffix.dropFirst()
+        } else {
+            let components = authority.split(separator: ":", omittingEmptySubsequences: false)
+            guard components.count <= 2 else {
+                return false
+            }
+            portText = components.count == 2 ? components[1] : nil
+        }
+
+        guard let portText else {
+            return true
+        }
+        guard !portText.isEmpty,
+              portText.allSatisfy(\.isNumber),
+              let port = Int(portText),
+              (1...65_535).contains(port)
+        else {
+            return false
+        }
+
+        return true
     }
 
     static func normalizedName(_ rawValue: String) -> String {
@@ -918,6 +1032,7 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     var targetGroupID: Int
     var refreshInterval: Int
     var bearerKey: String
+    var credentialID: String?
     var customServiceName: String
     var customGroupName: String
 
@@ -932,6 +1047,7 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         targetGroupID: Int = 0,
         refreshInterval: Int = 30,
         bearerKey: String = "",
+        credentialID: String? = nil,
         customServiceName: String = "",
         customGroupName: String = "",
         lastResult: Sub2APICapacityResult? = nil,
@@ -941,6 +1057,7 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         self.targetGroupID = targetGroupID
         self.refreshInterval = refreshInterval
         self.bearerKey = bearerKey
+        self.credentialID = credentialID ?? (bearerKey.isEmpty ? nil : UUID().uuidString)
         self.customServiceName = customServiceName
         self.customGroupName = customGroupName
         self.lastResult = lastResult
@@ -1003,6 +1120,7 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         case targetGroupID
         case refreshInterval
         case bearerKey
+        case credentialID
         case customServiceName
         case customGroupName
     }
@@ -1013,6 +1131,8 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         targetGroupID = try container.decodeIfPresent(Int.self, forKey: .targetGroupID) ?? 0
         refreshInterval = try container.decodeIfPresent(Int.self, forKey: .refreshInterval) ?? 30
         bearerKey = try container.decodeIfPresent(String.self, forKey: .bearerKey) ?? ""
+        credentialID = try container.decodeIfPresent(String.self, forKey: .credentialID)
+            ?? (bearerKey.isEmpty ? nil : UUID().uuidString)
         customServiceName = try container.decodeIfPresent(String.self, forKey: .customServiceName) ?? ""
         customGroupName = try container.decodeIfPresent(String.self, forKey: .customGroupName) ?? ""
         lastResult = nil
@@ -1024,7 +1144,7 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         try container.encode(baseURL, forKey: .baseURL)
         try container.encode(targetGroupID, forKey: .targetGroupID)
         try container.encode(refreshInterval, forKey: .refreshInterval)
-        try container.encode(bearerKey, forKey: .bearerKey)
+        try container.encodeIfPresent(credentialID, forKey: .credentialID)
         try container.encode(customServiceName, forKey: .customServiceName)
         try container.encode(customGroupName, forKey: .customGroupName)
     }

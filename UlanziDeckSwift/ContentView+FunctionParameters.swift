@@ -299,7 +299,7 @@ extension ContentView {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
-                        TextField("Bearer Key", text: selectedSub2APIBearerKeyBinding)
+                        SecureField("Bearer Key", text: selectedSub2APIBearerKeyBinding)
                             .textFieldStyle(.roundedBorder)
                     }
 

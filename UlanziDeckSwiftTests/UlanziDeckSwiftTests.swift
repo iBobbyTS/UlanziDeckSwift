@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Darwin
+import Security
 import Testing
 @testable import UlanziDeckSwift
 
@@ -1254,6 +1255,45 @@ struct UlanziDeckSwiftTests {
         #expect(state.configuration(for: 5)?.smbServer.fullURLString == "smb://server.local/share")
     }
 
+    @Test func smbServerAddressRejectsUserinfoAndDropsLegacyPlaintextCredential() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.connectSMBServer, to: 5)
+        let didSetValidAddress = state.setSMBServerAddress("nas.local/media", for: 5)
+
+        let didAcceptUserinfo = state.setSMBServerAddress("alice:secret@nas.local/media", for: 5)
+        let didAcceptEncodedUserinfo = state.setSMBServerAddress(
+            "alice%3Asecret%40nas.local/media",
+            for: 5
+        )
+        let didAcceptDoubleEncodedUserinfo = state.setSMBServerAddress(
+            "alice%253Asecret%2540nas.local/media",
+            for: 5
+        )
+        let decoded = try JSONDecoder().decode(
+            DeckKeySMBServerConfiguration.self,
+            from: Data(#"{"address":"alice:secret@nas.local/media"}"#.utf8)
+        )
+        let encoded = try JSONEncoder().encode(decoded)
+        let encodedJSON = try #require(String(data: encoded, encoding: .utf8))
+
+        #expect(didSetValidAddress)
+        #expect(!didAcceptUserinfo)
+        #expect(!didAcceptEncodedUserinfo)
+        #expect(!didAcceptDoubleEncodedUserinfo)
+        #expect(state.smbServerAddress(for: 5) == "nas.local/media")
+        #expect(DeckKeySMBServerConfiguration(address: "alice:secret@nas.local/media").address.isEmpty)
+        #expect(DeckKeySMBServerConfiguration(address: "alice%3Asecret%40nas.local/media").address.isEmpty)
+        #expect(DeckKeySMBServerConfiguration.validatedAddress("nas.local:445/media") == "nas.local:445/media")
+        #expect(DeckKeySMBServerConfiguration.validatedAddress("[fe80::1]:445/media") == "[fe80::1]:445/media")
+        #expect(DeckKeySMBServerConfiguration.validatedAddress("nas.local:0/media") == nil)
+        #expect(DeckKeySMBServerConfiguration.validatedAddress("nas.local:65536/media") == nil)
+        #expect(DeckKeySMBServerConfiguration.validatedAddress("nas.local:/media") == nil)
+        #expect(decoded.address.isEmpty)
+        #expect(!encodedJSON.contains("alice"))
+        #expect(!encodedJSON.contains("secret"))
+    }
+
     @Test func displayNameCommitCanAvoidChangingCurrentSelection() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
@@ -1446,7 +1486,7 @@ struct UlanziDeckSwiftTests {
         #expect(restored.folderPath(for: 4) == "/Users/ibobby/Documents/Nested")
     }
 
-    @Test func userDefaultsStoreIgnoresBrokenConfigurationData() throws {
+    @Test func userDefaultsStoreDeletesMalformedConfigurationThatMayContainPlaintextCredential() throws {
         let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer {
@@ -1454,10 +1494,1215 @@ struct UlanziDeckSwiftTests {
         }
 
         let storageKey = "deckConfiguration"
-        let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: storageKey)
-        defaults.set(Data("不是 JSON".utf8), forKey: storageKey)
+        let credentialID = "malformed-orphan"
+        let credentials = FakeSub2APICredentialStore()
+        try credentials.saveBearerKey("must-be-deleted", credentialID: credentialID)
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        let malformedPayload = Data(#"{"version":2,"layoutIdentifier":"h200Prototype","pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"sub2API","sub2API":{"bearerKey":"must-not-remain"}}}]}],"rootPageIDs":"wrong-type"}"#.utf8)
+        defaults.set(malformedPayload, forKey: storageKey)
+        defaults.set([credentialID], forKey: "\(storageKey).sub2APICredentialIDs")
 
         #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(defaults.data(forKey: storageKey) == nil)
+        #expect(credentials.savedBearerKeys[credentialID] == nil)
+        #expect(credentials.deletedCredentialIDs == [credentialID])
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [])
+    }
+
+    @Test func userDefaultsStoreDeletesMalformedSupportedVersionWithoutPlaintext() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let credentialID = "supported-malformed-owned"
+        let credentials = FakeSub2APICredentialStore()
+        try credentials.saveBearerKey("must-be-deleted", credentialID: credentialID)
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        let malformedPayload = Data(#"{"version":2,"layoutIdentifier":"h200Prototype","pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"sub2API","sub2API":{"credentialID":"supported-malformed-owned"}}}]}],"rootPageIDs":"wrong-type"}"#.utf8)
+        defaults.set(malformedPayload, forKey: storageKey)
+        defaults.set([credentialID], forKey: "\(storageKey).sub2APICredentialIDs")
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(defaults.data(forKey: storageKey) == nil)
+        #expect(credentials.savedBearerKeys[credentialID] == nil)
+        #expect(credentials.deletedCredentialIDs == [credentialID])
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [])
+    }
+
+    @Test func userDefaultsStoreDeletesUnsupportedVersionContainingPlaintextCredential() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let credentialID = "unsupported-orphan"
+        let credentials = FakeSub2APICredentialStore()
+        try credentials.saveBearerKey("must-be-deleted", credentialID: credentialID)
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        let unsupportedPayload = Data(#"{"version":99,"layoutIdentifier":"h200Prototype","keys":[{"id":3,"configuration":{"function":"sub2API","sub2API":{"bearerKey":"must-not-remain"}}}],"pages":[],"rootPageIDs":[]}"#.utf8)
+        defaults.set(unsupportedPayload, forKey: storageKey)
+        defaults.set([credentialID], forKey: "\(storageKey).sub2APICredentialIDs")
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(defaults.data(forKey: storageKey) == nil)
+        #expect(credentials.savedBearerKeys[credentialID] == nil)
+        #expect(credentials.deletedCredentialIDs == [credentialID])
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [])
+    }
+
+    @Test func userDefaultsStoreDeletesUndecodableFutureVersionContainingSMBPlaintextCredential() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let credentialID = "future-smb-orphan"
+        let credentials = FakeSub2APICredentialStore()
+        try credentials.saveBearerKey("must-be-deleted", credentialID: credentialID)
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        let unsupportedPayload = Data(#"{"version":99,"layoutIdentifier":"h200Prototype","pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"connectSMBServer","smbServer":{"address":"alice%3Asecret%40nas.local/media"}}}]}],"rootPageIDs":{"future":"root"}}"#.utf8)
+        defaults.set(unsupportedPayload, forKey: storageKey)
+        defaults.set([credentialID], forKey: "\(storageKey).sub2APICredentialIDs")
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(defaults.data(forKey: storageKey) == nil)
+        #expect(credentials.savedBearerKeys[credentialID] == nil)
+        #expect(credentials.deletedCredentialIDs == [credentialID])
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [])
+    }
+
+    @Test func userDefaultsStorePreservesSameLayoutPayloadWithUnknownVersion() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let credentialID = "future-version-owned"
+        let credentials = FakeSub2APICredentialStore()
+        try credentials.saveBearerKey("keep-secret", credentialID: credentialID)
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        let payload = Data(#"{"version":99,"layoutIdentifier":"h200Prototype","keys":[],"pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"sub2API","sub2API":{"credentialID":"future-version-owned"}}}]}],"rootPageIDs":["root"],"futureField":true}"#.utf8)
+        defaults.set(payload, forKey: storageKey)
+        defaults.set([credentialID], forKey: "\(storageKey).sub2APICredentialIDs")
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(defaults.data(forKey: storageKey) == payload)
+        #expect(credentials.savedBearerKeys[credentialID] == "keep-secret")
+        #expect(credentials.deletedCredentialIDs.isEmpty)
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [credentialID])
+    }
+
+    @Test func userDefaultsStorePreservesUndecodableSameLayoutPayloadWithUnknownVersion() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let credentialID = "future-schema-owned"
+        let credentials = FakeSub2APICredentialStore()
+        try credentials.saveBearerKey("keep-secret", credentialID: credentialID)
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        let payload = Data(#"{"version":99,"layoutIdentifier":"h200Prototype","keys":[],"pages":[],"rootPageIDs":{"future":"root"},"credentialID":"future-schema-owned"}"#.utf8)
+        defaults.set(payload, forKey: storageKey)
+        defaults.set([credentialID], forKey: "\(storageKey).sub2APICredentialIDs")
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(defaults.data(forKey: storageKey) == payload)
+        #expect(credentials.savedBearerKeys[credentialID] == "keep-secret")
+        #expect(credentials.deletedCredentialIDs.isEmpty)
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [credentialID])
+    }
+
+    @Test func userDefaultsStoreRetriesIndexedCredentialCleanupWhenConfigurationIsAbsent() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let credentialID = "retry-orphan"
+        let credentials = FakeSub2APICredentialStore(deleteError: .keychain(errSecInteractionNotAllowed))
+        try credentials.saveBearerKey("retry-secret", credentialID: credentialID)
+        defaults.set([credentialID], forKey: "\(storageKey).sub2APICredentialIDs")
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(credentials.savedBearerKeys[credentialID] == "retry-secret")
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [credentialID])
+
+        credentials.setDeleteError(nil)
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(credentials.savedBearerKeys[credentialID] == nil)
+        #expect(credentials.deletedCredentialIDs == [credentialID])
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [])
+    }
+
+    @Test func userDefaultsStorePreservesValidConfigurationForDifferentLayout() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let credentialID = "different-layout-owned"
+        let credentials = FakeSub2APICredentialStore()
+        try credentials.saveBearerKey("keep-secret", credentialID: credentialID)
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        let differentLayoutPayload = Data(#"{"version":2,"layoutIdentifier":"future-layout","keys":[],"pages":[],"rootPageIDs":[]}"#.utf8)
+        defaults.set(differentLayoutPayload, forKey: storageKey)
+        defaults.set([credentialID], forKey: "\(storageKey).sub2APICredentialIDs")
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(defaults.data(forKey: storageKey) == differentLayoutPayload)
+        #expect(credentials.savedBearerKeys[credentialID] == "keep-secret")
+        #expect(credentials.deletedCredentialIDs.isEmpty)
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [credentialID])
+    }
+
+    @Test func userDefaultsStoreMigratesLegacyPlaintextCredentialForDifferentLayout() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        defaults.set(
+            Data(#"{"version":2,"layoutIdentifier":"future-layout","keys":[],"pages":[{"id":"root","keys":[{"id":99,"configuration":{"function":"sub2API","sub2API":{"bearerKey":"foreign-legacy-secret"}}}]}],"rootPageIDs":["root"]}"#.utf8),
+            forKey: storageKey
+        )
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+        let credentialID = try #require(credentials.savedBearerKeys.first?.key)
+
+        #expect(rewrittenJSON.contains(#""layoutIdentifier":"future-layout""#))
+        #expect(!rewrittenJSON.contains("foreign-legacy-secret"))
+        #expect(!rewrittenJSON.contains("bearerKey"))
+        #expect(credentials.savedBearerKeys[credentialID] == "foreign-legacy-secret")
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [credentialID])
+    }
+
+    @Test func userDefaultsStoreSanitizesLegacySMBCredentialForDifferentKnownLayout() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: FakeSub2APICredentialStore()
+        )
+        defaults.set(
+            Data(#"{"version":2,"layoutIdentifier":"future-layout","keys":[],"pages":[{"id":"root","keys":[{"id":99,"configuration":{"function":"connectSMBServer","smbServer":{"address":"alice:secret@nas.local/media"}}}]}],"rootPageIDs":["root"]}"#.utf8),
+            forKey: storageKey
+        )
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+
+        #expect(rewrittenJSON.contains(#""layoutIdentifier":"future-layout""#))
+        #expect(!rewrittenJSON.contains("alice"))
+        #expect(!rewrittenJSON.contains("secret"))
+    }
+
+    @Test func userDefaultsStoreDeletesSensitiveDifferentLayoutPayloadWithUnknownVersion() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: FakeSub2APICredentialStore()
+        )
+        let bearerPayload = Data(#"{"version":99,"layoutIdentifier":"future-layout","keys":[],"pages":[{"id":"root","keys":[{"id":99,"configuration":{"function":"sub2API","sub2API":{"bearerKey":"future-secret"}}}]}],"rootPageIDs":["root"],"futureField":true}"#.utf8)
+        defaults.set(bearerPayload, forKey: storageKey)
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(defaults.data(forKey: storageKey) == nil)
+
+        let smbPayload = Data(#"{"version":99,"layoutIdentifier":"future-layout","keys":[],"pages":[{"id":"root","keys":[{"id":99,"configuration":{"function":"connectSMBServer","smbServer":{"address":"alice%3Asecret%40nas.local/media"}}}]}],"rootPageIDs":["root"],"futureField":true}"#.utf8)
+        defaults.set(smbPayload, forKey: storageKey)
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(defaults.data(forKey: storageKey) == nil)
+    }
+
+    @Test func userDefaultsStorePreservesNonSensitiveDifferentLayoutPayloadWithUnknownVersion() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: FakeSub2APICredentialStore()
+        )
+        let payload = Data(#"{"version":99,"layoutIdentifier":"future-layout","keys":[],"pages":[],"rootPageIDs":[],"futureField":true}"#.utf8)
+        defaults.set(payload, forKey: storageKey)
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(defaults.data(forKey: storageKey) == payload)
+    }
+
+    @Test func userDefaultsStoreNormalizesDuplicatePersistedKeyIDsWithoutCrashing() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: FakeSub2APICredentialStore()
+        )
+        defaults.set(Data(#"{"version":2,"layoutIdentifier":"h200Prototype","keys":[],"pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"none"}},{"id":3,"configuration":{"function":"tally","tally":{"defaultValue":7,"value":8}}}]}],"rootPageIDs":["root"]}"#.utf8), forKey: storageKey)
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+
+        #expect(restored.configuration(for: 3)?.function == .tally)
+        #expect(restored.tallyDefaultValue(for: 3) == 7)
+        #expect(restored.tallyValue(for: 3) == 8)
+    }
+
+    @Test func userDefaultsStorePrunesCredentialOwnerBeyondRootPageLimit() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let discardedCredentialID = "discarded-root-credential"
+        let credentials = FakeSub2APICredentialStore()
+        try credentials.saveBearerKey("previous-secret", credentialID: discardedCredentialID)
+        let initialSaveCallCount = credentials.saveCallCount
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        let rootPageIDs = [DeckGridInteractionState.rootPageID]
+            + (2...(DeckGridInteractionState.maximumRootPageCount + 1)).map { "root-\($0)" }
+        let discardedRootPageID = try #require(rootPageIDs.last)
+        var pages: [[String: Any]] = rootPageIDs.map { pageID in
+            [
+                "id": pageID,
+                "keys": [],
+            ]
+        }
+        pages[DeckGridInteractionState.maximumRootPageCount]["keys"] = [
+            [
+                "id": 3,
+                "configuration": [
+                    "function": "sub2API",
+                    "sub2API": [
+                        "credentialID": discardedCredentialID,
+                        "bearerKey": "must-not-migrate",
+                    ],
+                ],
+            ],
+        ]
+        let payload: [String: Any] = [
+            "version": 2,
+            "layoutIdentifier": DeckGridLayout.h200Prototype.identifier,
+            "keys": [],
+            "pages": pages,
+            "rootPageIDs": rootPageIDs,
+        ]
+        defaults.set(try JSONSerialization.data(withJSONObject: payload), forKey: storageKey)
+        defaults.set([discardedCredentialID], forKey: "\(storageKey).sub2APICredentialIDs")
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+
+        #expect(restored.rootPageCount == DeckGridInteractionState.maximumRootPageCount)
+        #expect(Set(restored.persistedPages.map(\.id)) == Set(rootPageIDs.prefix(DeckGridInteractionState.maximumRootPageCount)))
+        #expect(credentials.saveCallCount == initialSaveCallCount)
+        #expect(credentials.savedBearerKeys[discardedCredentialID] == nil)
+        #expect(credentials.deletedCredentialIDs == [discardedCredentialID])
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [])
+        #expect(!rewrittenJSON.contains(discardedRootPageID))
+        #expect(!rewrittenJSON.contains("must-not-migrate"))
+    }
+
+    @Test func userDefaultsStorePrunesOrphanAndCyclicCredentialOwners() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let discardedCredentialIDs = ["orphan-credential", "cycle-a-credential", "cycle-b-credential"]
+        let credentials = FakeSub2APICredentialStore()
+        for credentialID in discardedCredentialIDs {
+            try credentials.saveBearerKey("previous-\(credentialID)", credentialID: credentialID)
+        }
+        let initialSaveCallCount = credentials.saveCallCount
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        defaults.set(Data(#"""
+        {
+          "version": 2,
+          "layoutIdentifier": "h200Prototype",
+          "keys": [],
+          "pages": [
+            {"id": "root", "keys": []},
+            {"id": "orphan", "parentID": "missing", "keys": [
+              {"id": 3, "configuration": {"function": "sub2API", "sub2API": {"credentialID": "orphan-credential", "bearerKey": "must-not-migrate-orphan"}}}
+            ]},
+            {"id": "cycle-a", "parentID": "cycle-b", "keys": [
+              {"id": 2, "configuration": {"function": "pageFolder", "pageFolder": {"pageID": "cycle-b"}}},
+              {"id": 3, "configuration": {"function": "sub2API", "sub2API": {"credentialID": "cycle-a-credential", "bearerKey": "must-not-migrate-cycle-a"}}}
+            ]},
+            {"id": "cycle-b", "parentID": "cycle-a", "keys": [
+              {"id": 2, "configuration": {"function": "pageFolder", "pageFolder": {"pageID": "cycle-a"}}},
+              {"id": 3, "configuration": {"function": "sub2API", "sub2API": {"credentialID": "cycle-b-credential", "bearerKey": "must-not-migrate-cycle-b"}}}
+            ]}
+          ],
+          "rootPageIDs": ["root"]
+        }
+        """#.utf8), forKey: storageKey)
+        defaults.set(discardedCredentialIDs, forKey: "\(storageKey).sub2APICredentialIDs")
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+
+        #expect(restored.persistedPages.map(\.id) == [DeckGridInteractionState.rootPageID])
+        #expect(credentials.saveCallCount == initialSaveCallCount)
+        #expect(credentials.savedBearerKeys.isEmpty)
+        #expect(Set(credentials.deletedCredentialIDs) == Set(discardedCredentialIDs))
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [])
+        #expect(!rewrittenJSON.contains("must-not-migrate"))
+        #expect(!rewrittenJSON.contains("cycle-a"))
+        #expect(!rewrittenJSON.contains("cycle-b"))
+        #expect(!rewrittenJSON.contains("orphan"))
+    }
+
+    @Test func userDefaultsStoreKeepsReachablePageCredentialOwner() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let storageKey = "deckConfiguration"
+        let credentialID = "reachable-credential"
+        let credentials = FakeSub2APICredentialStore()
+        try credentials.saveBearerKey("previous-secret", credentialID: credentialID)
+        let initialSaveCallCount = credentials.saveCallCount
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        defaults.set(Data(#"""
+        {
+          "version": 2,
+          "layoutIdentifier": "h200Prototype",
+          "keys": [],
+          "pages": [
+            {"id": "root", "keys": [
+              {"id": 2, "configuration": {"function": "pageFolder", "pageFolder": {"pageID": "child"}}}
+            ]},
+            {"id": "child", "parentID": "root", "keys": [
+              {"id": 3, "configuration": {"function": "sub2API", "sub2API": {"credentialID": "reachable-credential", "bearerKey": "reachable-secret"}}}
+            ]}
+          ],
+          "rootPageIDs": ["root"]
+        }
+        """#.utf8), forKey: storageKey)
+        defaults.set([credentialID], forKey: "\(storageKey).sub2APICredentialIDs")
+
+        var restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let didEnterChild = restored.enterPageFolder(keyID: 2)
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+
+        #expect(Set(restored.persistedPages.map(\.id)) == Set(["root", "child"]))
+        #expect(didEnterChild)
+        #expect(restored.currentPageID == "child")
+        #expect(restored.sub2APIConfiguration(for: 3).credentialID == credentialID)
+        #expect(restored.sub2APIConfiguration(for: 3).bearerKey == "reachable-secret")
+        #expect(credentials.saveCallCount == initialSaveCallCount + 1)
+        #expect(credentials.savedBearerKeys[credentialID] == "reachable-secret")
+        #expect(credentials.deletedCredentialIDs.isEmpty)
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [credentialID])
+        #expect(!rewrittenJSON.contains("reachable-secret"))
+    }
+
+    @Test func sub2APIBearerKeyMigratesToPerConfigurationCredentialWithoutPersistingPlaintext() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        defaults.set(Data(#"{"version":2,"layoutIdentifier":"h200Prototype","keys":[],"pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"sub2API","sub2API":{"baseURL":"api.example.com","targetGroupID":1,"refreshInterval":30,"bearerKey":"legacy-secret"}}}]}],"rootPageIDs":["root"]}"#.utf8), forKey: storageKey)
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let configuration = try #require(restored.configuration(for: 3))
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+
+        #expect(configuration.sub2API.bearerKey == "legacy-secret")
+        let credentialID = try #require(configuration.sub2API.credentialID)
+        #expect(credentials.savedBearerKeys[credentialID] == "legacy-secret")
+        #expect(!rewrittenJSON.contains("legacy-secret"))
+        #expect(!rewrittenJSON.contains("bearerKey"))
+    }
+
+    @Test func failedSub2APIBearerMigrationDeletesPlaintextAndDoesNotUseSecret() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let credentials = FakeSub2APICredentialStore(saveError: .keychain(errSecAuthFailed))
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        defaults.set(Data(#"{"version":2,"layoutIdentifier":"h200Prototype","keys":[],"pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"sub2API","sub2API":{"baseURL":"api.example.com","targetGroupID":1,"refreshInterval":30,"bearerKey":"legacy-secret"}}}]}],"rootPageIDs":["root"]}"#.utf8), forKey: storageKey)
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+
+        #expect(restored.sub2APIConfiguration(for: 3).bearerKey.isEmpty)
+        #expect(restored.sub2APIConfiguration(for: 3).credentialID == nil)
+        #expect(!rewrittenJSON.contains("legacy-secret"))
+        #expect(!rewrittenJSON.contains("bearerKey"))
+    }
+
+    @Test func legacyV1DuplicateKeysMigrateOnlyLastRetainedBearerKey() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        defaults.set(Data(#"{"version":1,"layoutIdentifier":"h200Prototype","keys":[{"id":3,"configuration":{"function":"sub2API","sub2API":{"bearerKey":"discarded-v1"}}},{"id":3,"configuration":{"function":"sub2API","sub2API":{"bearerKey":"retained-v1"}}}]}"#.utf8), forKey: storageKey)
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+
+        #expect(restored.sub2APIConfiguration(for: 3).bearerKey == "retained-v1")
+        #expect(credentials.savedBearerKeys.values.sorted() == ["retained-v1"])
+        #expect(!rewrittenJSON.contains("discarded-v1"))
+        #expect(!rewrittenJSON.contains("retained-v1"))
+        #expect(!rewrittenJSON.contains("bearerKey"))
+    }
+
+    @Test func legacyV2DuplicateKeysMigrateOnlyLastRetainedBearerKey() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        defaults.set(Data(#"{"version":2,"layoutIdentifier":"h200Prototype","keys":[],"pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"sub2API","sub2API":{"bearerKey":"discarded-v2"}}},{"id":3,"configuration":{"function":"sub2API","sub2API":{"bearerKey":"retained-v2"}}}]}],"rootPageIDs":["root"]}"#.utf8), forKey: storageKey)
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+
+        #expect(restored.sub2APIConfiguration(for: 3).bearerKey == "retained-v2")
+        #expect(credentials.savedBearerKeys.values.sorted() == ["retained-v2"])
+    }
+
+    @Test func legacyV2DuplicatePagesMigrateOnlyLastRetainedPageCredentials() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        defaults.set(Data(#"{"version":2,"layoutIdentifier":"h200Prototype","keys":[],"pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"sub2API","sub2API":{"bearerKey":"discarded-page"}}}]},{"id":"root","keys":[{"id":4,"configuration":{"function":"sub2API","sub2API":{"bearerKey":"retained-page"}}}]}],"rootPageIDs":["root"]}"#.utf8), forKey: storageKey)
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+
+        #expect(restored.sub2APIConfiguration(for: 3).bearerKey.isEmpty)
+        #expect(restored.sub2APIConfiguration(for: 4).bearerKey == "retained-page")
+        #expect(credentials.savedBearerKeys.values.sorted() == ["retained-page"])
+    }
+
+    @Test func restoredCredentialIDsBecomeNonemptyAndIndependentAcrossPages() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let credentials = FakeSub2APICredentialStore()
+        try credentials.saveBearerKey("shared-secret", credentialID: "shared-id")
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        defaults.set(Data(#"{"version":2,"layoutIdentifier":"h200Prototype","keys":[],"pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"sub2API","sub2API":{"credentialID":"shared-id"}}},{"id":5,"configuration":{"function":"sub2API","sub2API":{"credentialID":"   "}}}]},{"id":"page-2","keys":[{"id":4,"configuration":{"function":"sub2API","sub2API":{"credentialID":"shared-id"}}}]}],"rootPageIDs":["root","page-2"]}"#.utf8), forKey: storageKey)
+
+        var restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let firstCredential = restored.sub2APIConfiguration(for: 3)
+        let emptyCredential = restored.sub2APIConfiguration(for: 5)
+        let didGoToNextRootPage = restored.goToNextRootPage()
+        #expect(didGoToNextRootPage)
+        let copiedCredential = restored.sub2APIConfiguration(for: 4)
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+
+        #expect(firstCredential.credentialID == "shared-id")
+        #expect(firstCredential.bearerKey == "shared-secret")
+        #expect(copiedCredential.credentialID != nil)
+        #expect(copiedCredential.credentialID != firstCredential.credentialID)
+        #expect(copiedCredential.bearerKey == "shared-secret")
+        #expect(copiedCredential.credentialID.flatMap { credentials.savedBearerKeys[$0] } == "shared-secret")
+        #expect(emptyCredential.credentialID == nil)
+        #expect(emptyCredential.bearerKey.isEmpty)
+        #expect(!rewrittenJSON.contains(#""credentialID":"   ""#))
+        #expect(!rewrittenJSON.contains("shared-secret"))
+        #expect(!rewrittenJSON.contains("bearerKey"))
+    }
+
+    @Test func sub2APIBearerKeysUseIndependentCredentialIDsAndRoundTripThroughCredentialStore() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: "deckConfiguration",
+            credentialStore: credentials
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.sub2API, to: 3)
+        state.setSub2APIBearerKey("shared-value", for: 3)
+        state.assign(.sub2API, to: 4)
+        state.setSub2APIBearerKey("shared-value", for: 4)
+
+        let firstID = try #require(state.sub2APIConfiguration(for: 3).credentialID)
+        let secondID = try #require(state.sub2APIConfiguration(for: 4).credentialID)
+        #expect(firstID != secondID)
+
+        store.saveInteractionState(state, for: .h200Prototype)
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let persistedData = try #require(defaults.data(forKey: "deckConfiguration"))
+        let persistedJSON = try #require(String(data: persistedData, encoding: .utf8))
+
+        #expect(credentials.savedBearerKeys[firstID] == "shared-value")
+        #expect(credentials.savedBearerKeys[secondID] == "shared-value")
+        #expect(restored.sub2APIConfiguration(for: 3).bearerKey == "shared-value")
+        #expect(restored.sub2APIConfiguration(for: 4).bearerKey == "shared-value")
+        #expect(!persistedJSON.contains("shared-value"))
+        #expect(!persistedJSON.contains("bearerKey"))
+    }
+
+    @Test func unrelatedConfigurationSavesDoNotRewriteUnchangedSub2APICredential() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: "deckConfiguration",
+            credentialStore: credentials
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.sub2API, to: 3)
+        state.setSub2APIBearerKey("stable-secret", for: 3)
+        let credentialID = try #require(state.sub2APIConfiguration(for: 3).credentialID)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        let initialSaveCallCount = credentials.saveCallCount
+        let initialLoadCallCount = credentials.loadCallCount
+        #expect(initialSaveCallCount == 1)
+        #expect(initialLoadCallCount == 0)
+        credentials.setLoadError(.keychain(errSecInteractionNotAllowed))
+        credentials.setSaveError(.keychain(errSecInteractionNotAllowed))
+
+        let didIncrementTally = state.triggerShortPress(keyID: 4)
+        #expect(didIncrementTally)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        #expect(credentials.saveCallCount == initialSaveCallCount)
+        #expect(credentials.loadCallCount == initialLoadCallCount)
+
+        let didSetVisualName = state.setButtonVisualName("计数器", for: 4)
+        #expect(didSetVisualName)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        #expect(credentials.saveCallCount == initialSaveCallCount)
+        #expect(credentials.loadCallCount == initialLoadCallCount)
+
+        let didAssignOrdinaryFunction = state.assign(.openFolder, to: 5)
+        #expect(didAssignOrdinaryFunction)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        #expect(credentials.saveCallCount == initialSaveCallCount)
+        #expect(credentials.loadCallCount == initialLoadCallCount)
+
+        credentials.setLoadError(nil)
+        credentials.setSaveError(nil)
+        let didUpdateBearerKey = state.setSub2APIBearerKey("updated-secret", for: 3)
+        #expect(didUpdateBearerKey)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        #expect(credentials.saveCallCount == initialSaveCallCount + 1)
+        #expect(credentials.loadCallCount == initialLoadCallCount)
+        #expect(credentials.savedBearerKeys[credentialID] == "updated-secret")
+    }
+
+    @Test func missingKeychainCredentialClearsPersistedCredentialIDOnLoad() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let credentialID = "missing-credential"
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        defaults.set(
+            Data(#"{"version":2,"layoutIdentifier":"h200Prototype","keys":[],"pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"sub2API","sub2API":{"credentialID":"missing-credential"}}}]}],"rootPageIDs":["root"]}"#.utf8),
+            forKey: storageKey
+        )
+        defaults.set([credentialID], forKey: "\(storageKey).sub2APICredentialIDs")
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+
+        #expect(restored.sub2APIConfiguration(for: 3).bearerKey.isEmpty)
+        #expect(restored.sub2APIConfiguration(for: 3).credentialID == nil)
+        #expect(credentials.loadCallCount == 1)
+        #expect(credentials.deletedCredentialIDs == [credentialID])
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [])
+        #expect(!rewrittenJSON.contains(credentialID))
+    }
+
+    @Test func temporaryKeychainLoadFailurePreservesCredentialIDWithoutOrdinarySaveAccess() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let credentialID = "temporarily-unavailable-credential"
+        let credentials = FakeSub2APICredentialStore()
+        try credentials.saveBearerKey("stored-secret", credentialID: credentialID)
+        let initialSaveCallCount = credentials.saveCallCount
+        credentials.setLoadError(.keychain(errSecInteractionNotAllowed))
+        credentials.setSaveError(.keychain(errSecInteractionNotAllowed))
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        defaults.set(
+            Data(#"{"version":2,"layoutIdentifier":"h200Prototype","keys":[],"pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"sub2API","sub2API":{"credentialID":"temporarily-unavailable-credential"}}}]}],"rootPageIDs":["root"]}"#.utf8),
+            forKey: storageKey
+        )
+        defaults.set([credentialID], forKey: "\(storageKey).sub2APICredentialIDs")
+
+        var restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        #expect(restored.sub2APIConfiguration(for: 3).bearerKey.isEmpty)
+        #expect(restored.sub2APIConfiguration(for: 3).credentialID == credentialID)
+        #expect(credentials.loadCallCount == 1)
+        #expect(credentials.saveCallCount == initialSaveCallCount)
+
+        let didIncrementTally = restored.triggerShortPress(keyID: 4)
+        #expect(didIncrementTally)
+        #expect(store.saveInteractionState(restored, for: .h200Prototype) == .success)
+        #expect(credentials.loadCallCount == 1)
+        #expect(credentials.saveCallCount == initialSaveCallCount)
+        #expect(credentials.savedBearerKeys[credentialID] == "stored-secret")
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [credentialID])
+    }
+
+    @Test func sub2APICredentialSurvivesTemporaryFunctionSwitchInRealStore() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: "deckConfiguration",
+            credentialStore: credentials
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.sub2API, to: 3)
+        state.setSub2APIBearerKey("keep-across-switch", for: 3)
+        let credentialID = try #require(state.sub2APIConfiguration(for: 3).credentialID)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+
+        state.assign(.tally, to: 3)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+
+        #expect(restored.configuration(for: 3)?.function == .tally)
+        #expect(restored.sub2APIConfiguration(for: 3).bearerKey == "keep-across-switch")
+        #expect(restored.sub2APIConfiguration(for: 3).credentialID == credentialID)
+        #expect(credentials.savedBearerKeys[credentialID] == "keep-across-switch")
+        #expect(!credentials.deletedCredentialIDs.contains(credentialID))
+    }
+
+    @Test func failedSub2APICredentialWriteDoesNotDeletePreviousSecretOrForgetIndex() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.sub2API, to: 3)
+        state.setSub2APIBearerKey("old-secret", for: 3)
+        let credentialID = try #require(state.sub2APIConfiguration(for: 3).credentialID)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        let initialSaveCallCount = credentials.saveCallCount
+
+        state.setSub2APIBearerKey("new-secret", for: 3)
+        credentials.setSaveError(.keychain(errSecAuthFailed))
+        let result = store.saveInteractionState(state, for: .h200Prototype)
+
+        guard case .credentialFailure = result else {
+            Issue.record("Keychain 写入失败时应返回 credentialFailure")
+            return
+        }
+        #expect(credentials.savedBearerKeys[credentialID] == "old-secret")
+        #expect(!credentials.deletedCredentialIDs.contains(credentialID))
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [credentialID])
+        #expect(credentials.saveCallCount == initialSaveCallCount + 1)
+
+        credentials.setSaveError(nil)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        #expect(credentials.savedBearerKeys[credentialID] == "new-secret")
+        #expect(credentials.saveCallCount == initialSaveCallCount + 2)
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [credentialID])
+
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        #expect(credentials.saveCallCount == initialSaveCallCount + 2)
+    }
+
+    @Test func failedCredentialIDReplacementPreservesOldCredentialUntilRetrySucceeds() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let newCredentialID = "replacement-credential"
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.sub2API, to: 3)
+        state.setSub2APIBearerKey("old-secret", for: 3)
+        let oldCredentialID = try #require(state.sub2APIConfiguration(for: 3).credentialID)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+
+        let didReplaceCredential = state.restoreSub2APICredential(
+            bearerKey: "new-secret",
+            credentialID: newCredentialID,
+            for: 3
+        )
+        #expect(didReplaceCredential)
+        credentials.setSaveError(.keychain(errSecAuthFailed))
+        let failedResult = store.saveInteractionState(state, for: .h200Prototype)
+
+        guard case .credentialFailure = failedResult else {
+            Issue.record("新凭据写入失败时应返回 credentialFailure")
+            return
+        }
+        #expect(credentials.savedBearerKeys[oldCredentialID] == "old-secret")
+        #expect(credentials.savedBearerKeys[newCredentialID] == nil)
+        #expect(credentials.deletedCredentialIDs.isEmpty)
+        #expect(Set(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") ?? []) == Set([
+            oldCredentialID,
+            newCredentialID,
+        ]))
+
+        credentials.setSaveError(nil)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        #expect(credentials.savedBearerKeys[oldCredentialID] == nil)
+        #expect(credentials.savedBearerKeys[newCredentialID] == "new-secret")
+        #expect(credentials.deletedCredentialIDs == [oldCredentialID])
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [newCredentialID])
+    }
+
+    @Test func failedSub2APICredentialDeletionRemainsIndexedAndRetries() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.sub2API, to: 3)
+        state.setSub2APIBearerKey("delete-me", for: 3)
+        let credentialID = try #require(state.sub2APIConfiguration(for: 3).credentialID)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        let initialSaveCallCount = credentials.saveCallCount
+
+        credentials.setDeleteError(.keychain(errSecInteractionNotAllowed))
+        state.clearFunction(keyID: 3)
+        let failedResult = store.saveInteractionState(state, for: .h200Prototype)
+
+        guard case .credentialFailure = failedResult else {
+            Issue.record("Keychain 删除失败时应返回 credentialFailure")
+            return
+        }
+        #expect(credentials.savedBearerKeys[credentialID] == "delete-me")
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [credentialID])
+        #expect(credentials.saveCallCount == initialSaveCallCount)
+
+        credentials.setDeleteError(nil)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        #expect(credentials.savedBearerKeys[credentialID] == nil)
+        #expect(credentials.deletedCredentialIDs == [credentialID])
+        #expect(credentials.saveCallCount == initialSaveCallCount)
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [])
+    }
+
+    @Test func deletingRootPageCleansUpItsSub2APICredential() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        let didAddRootPage = state.addRootPageAfterCurrent()
+        #expect(didAddRootPage)
+        let didAssignSub2API = state.assign(.sub2API, to: 3)
+        #expect(didAssignSub2API)
+        let didSetBearerKey = state.setSub2APIBearerKey("page-secret", for: 3)
+        #expect(didSetBearerKey)
+        let credentialID = try #require(state.sub2APIConfiguration(for: 3).credentialID)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        let initialSaveCallCount = credentials.saveCallCount
+
+        let didDeleteRootPage = state.deleteCurrentRootPage()
+        #expect(didDeleteRootPage)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+
+        #expect(credentials.savedBearerKeys[credentialID] == nil)
+        #expect(credentials.deletedCredentialIDs == [credentialID])
+        #expect(credentials.saveCallCount == initialSaveCallCount)
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [])
+    }
+
+    @Test func authenticatedHTTPResponseLoaderEnforcesStatusAndSize() async throws {
+        let acceptedURL = try #require(URL(string: "https://api.example.com/accepted"))
+        let rejectedURL = try #require(URL(string: "https://api.example.com/rejected"))
+        let forbiddenURL = try #require(URL(string: "https://api.example.com/forbidden"))
+        let oversizedURL = try #require(URL(string: "https://api.example.com/oversized"))
+        WebPageMetadataURLProtocol.setStubs([
+            acceptedURL: .init(statusCode: 200, mimeType: "application/json", data: Data("ok".utf8)),
+            rejectedURL: .init(statusCode: 401, mimeType: "application/json", data: Data()),
+            forbiddenURL: .init(statusCode: 403, mimeType: "application/json", data: Data()),
+            oversizedURL: .init(statusCode: 200, mimeType: "application/json", data: Data(repeating: 0x61, count: 5)),
+        ])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+
+        let accepted = try await AuthenticatedHTTPResponseLoader.data(
+            for: URLRequest(url: acceptedURL),
+            urlSession: session,
+            maximumBytes: 4
+        )
+        #expect(accepted == Data("ok".utf8))
+
+        await #expect(throws: AuthenticatedHTTPResponseError.unauthorized) {
+            _ = try await AuthenticatedHTTPResponseLoader.data(
+                for: URLRequest(url: rejectedURL),
+                urlSession: session,
+                maximumBytes: 4
+            )
+        }
+        await #expect(throws: AuthenticatedHTTPResponseError.unexpectedStatus(403)) {
+            _ = try await AuthenticatedHTTPResponseLoader.data(
+                for: URLRequest(url: forbiddenURL),
+                urlSession: session,
+                maximumBytes: 4
+            )
+        }
+        await #expect(throws: AuthenticatedHTTPResponseError.responseTooLarge) {
+            _ = try await AuthenticatedHTTPResponseLoader.data(
+                for: URLRequest(url: oversizedURL),
+                urlSession: session,
+                maximumBytes: 4
+            )
+        }
+    }
+
+    @Test func authenticatedHTTPResponseLoaderRejectsUnexpectedOriginAndRedirect() async throws {
+        let requestURL = try #require(URL(string: "https://api.example.com/origin"))
+        let unexpectedURL = try #require(URL(string: "https://attacker.example/origin"))
+        WebPageMetadataURLProtocol.setStubs([
+            requestURL: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                responseURL: unexpectedURL,
+                data: Data("ok".utf8)
+            ),
+        ])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+
+        await #expect(throws: AuthenticatedHTTPResponseError.unexpectedOrigin) {
+            _ = try await AuthenticatedHTTPResponseLoader.data(
+                for: URLRequest(url: requestURL),
+                urlSession: session
+            )
+        }
+
+        let redirectResponse = try #require(HTTPURLResponse(
+            url: requestURL,
+            statusCode: 302,
+            httpVersion: nil,
+            headerFields: ["Location": unexpectedURL.absoluteString]
+        ))
+        var originalRequest = URLRequest(url: requestURL)
+        originalRequest.setValue("Bearer must-not-leak", forHTTPHeaderField: "Authorization")
+        let crossOriginRequest = URLRequest(url: unexpectedURL)
+        let redirectedRequest = await withCheckedContinuation { continuation in
+            SameOriginAuthenticatedRedirectDelegate.shared.urlSession(
+                session,
+                task: session.dataTask(with: originalRequest),
+                willPerformHTTPRedirection: redirectResponse,
+                newRequest: crossOriginRequest
+            ) { acceptedRequest in
+                continuation.resume(returning: acceptedRequest)
+            }
+        }
+        #expect(redirectedRequest == nil)
+    }
+
+    @Test func authenticatedHTTPRedirectDelegateAllowsOnlySameOrigin() async throws {
+        let requestURL = try #require(URL(string: "https://api.example.com/origin"))
+        let sameOriginURL = try #require(URL(string: "https://api.example.com:443/canonical"))
+        let differentSchemeURL = try #require(URL(string: "http://api.example.com/canonical"))
+        let differentPortURL = try #require(URL(string: "https://api.example.com:8443/canonical"))
+        let session = URLSession(configuration: .ephemeral)
+        let redirectResponse = try #require(HTTPURLResponse(
+            url: requestURL,
+            statusCode: 302,
+            httpVersion: nil,
+            headerFields: ["Location": sameOriginURL.absoluteString]
+        ))
+
+        var originalRequest = URLRequest(url: requestURL)
+        originalRequest.setValue("Bearer same-origin", forHTTPHeaderField: "Authorization")
+        let sameOriginRequest = URLRequest(url: sameOriginURL)
+        let acceptedSameOriginRequest = await withCheckedContinuation { continuation in
+            SameOriginAuthenticatedRedirectDelegate.shared.urlSession(
+                session,
+                task: session.dataTask(with: originalRequest),
+                willPerformHTTPRedirection: redirectResponse,
+                newRequest: sameOriginRequest
+            ) { acceptedRequest in
+                continuation.resume(returning: acceptedRequest)
+            }
+        }
+
+        #expect(acceptedSameOriginRequest?.url == sameOriginURL)
+        #expect(acceptedSameOriginRequest?.value(forHTTPHeaderField: "Authorization") == "Bearer same-origin")
+
+        let differentSchemeRequest = URLRequest(url: differentSchemeURL)
+        let acceptedDifferentSchemeRequest = await withCheckedContinuation { continuation in
+            SameOriginAuthenticatedRedirectDelegate.shared.urlSession(
+                session,
+                task: session.dataTask(with: originalRequest),
+                willPerformHTTPRedirection: redirectResponse,
+                newRequest: differentSchemeRequest
+            ) { acceptedRequest in
+                continuation.resume(returning: acceptedRequest)
+            }
+        }
+
+        #expect(acceptedDifferentSchemeRequest == nil)
+
+        let differentPortRequest = URLRequest(url: differentPortURL)
+        let acceptedDifferentPortRequest = await withCheckedContinuation { continuation in
+            SameOriginAuthenticatedRedirectDelegate.shared.urlSession(
+                session,
+                task: session.dataTask(with: originalRequest),
+                willPerformHTTPRedirection: redirectResponse,
+                newRequest: differentPortRequest
+            ) { acceptedRequest in
+                continuation.resume(returning: acceptedRequest)
+            }
+        }
+
+        #expect(acceptedDifferentPortRequest == nil)
+    }
+
+    @Test func productionAuthenticatedClientsUseBoundedResponseLoader() async throws {
+        let sub2APIURL = try #require(URL(string: "https://api.example.com/api/v1/channel-monitors/capacity-summary"))
+        let mihoyoURL = try #require(URL(string: "https://passport-api.mihoyo.com/account/ma-cn-passport/app/createQRLogin"))
+        WebPageMetadataURLProtocol.setStubs([
+            sub2APIURL: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"code":0,"message":"success","data":{"items":[],"total":{"group_id":0,"group_name":"","group_platform":"","concurrency_used":0,"concurrency_max":0,"sessions_used":0,"sessions_max":0,"rpm_used":0,"rpm_max":0}}}"#.utf8)
+            ),
+            mihoyoURL: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"retcode":0,"message":"OK","data":{"ticket":"ticket","url":"https://example.com/qr"}}"#.utf8)
+            ),
+        ])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+
+        let sub2APIResult = await Sub2APIFetcher(urlSession: session).fetchCapacityGroups(
+            baseURL: "api.example.com",
+            bearerKey: "secret-token"
+        )
+        #expect(sub2APIResult == .success(items: []))
+        let qrSession = try await MihoyoGameClient(urlSession: session).createQRCodeLogin()
+        #expect(qrSession.ticket == "ticket")
+        #expect(qrSession.url == "https://example.com/qr")
+
+        let requests = WebPageMetadataURLProtocol.receivedRequests
+        #expect(requests.contains { $0.url == sub2APIURL && $0.httpMethod == "GET" })
+        #expect(requests.contains { $0.url == mihoyoURL && $0.httpMethod == "POST" })
+    }
+
+    @Test func productionAuthenticatedClientsMapHTTP401ToDomainAuthenticationFailures() async throws {
+        let sub2APIURL = try #require(URL(string: "https://api.example.com/api/v1/channel-monitors/capacity-summary"))
+        let oldRolesURL = try Self.mihoyoRolesURL(
+            baseURL: "https://api-takumi.mihoyo.com",
+            path: "/binding/api/getUserGameRolesByCookie"
+        )
+        let passportRolesURL = try Self.mihoyoRolesURL(
+            baseURL: "https://passport-api.mihoyo.com",
+            path: "/binding/api/getUserGameRolesByCookieToken"
+        )
+        WebPageMetadataURLProtocol.setStubs([
+            sub2APIURL: .init(statusCode: 401, mimeType: "application/json", data: Data()),
+            oldRolesURL: .init(statusCode: 401, mimeType: "application/json", data: Data()),
+            passportRolesURL: .init(statusCode: 401, mimeType: "application/json", data: Data()),
+        ])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+
+        let sub2APIResult = await Sub2APIFetcher(urlSession: session).fetchCapacityGroups(
+            baseURL: "api.example.com",
+            bearerKey: "expired-token"
+        )
+        let sub2APISummaryResult = await Sub2APIFetcher(urlSession: session).fetchCapacitySummary(
+            baseURL: "api.example.com",
+            targetGroupID: 1,
+            bearerKey: "expired-token"
+        )
+        let mihoyoResult = await MihoyoGameClient(urlSession: session).fetchDailyStatus(
+            game: .genshin,
+            session: Self.mihoyoSession()
+        )
+
+        #expect(sub2APIResult == .invalidToken)
+        #expect(sub2APISummaryResult == .invalidToken)
+        #expect(mihoyoResult == .loginExpired("登录凭据无效或已过期"))
+    }
+
+    @Test func productionAuthenticatedClientsKeepHTTP403AsGenericNetworkFailure() async throws {
+        let sub2APIURL = try #require(URL(string: "https://api.example.com/api/v1/channel-monitors/capacity-summary"))
+        let oldRolesURL = try Self.mihoyoRolesURL(
+            baseURL: "https://api-takumi.mihoyo.com",
+            path: "/binding/api/getUserGameRolesByCookie"
+        )
+        let passportRolesURL = try Self.mihoyoRolesURL(
+            baseURL: "https://passport-api.mihoyo.com",
+            path: "/binding/api/getUserGameRolesByCookieToken"
+        )
+        WebPageMetadataURLProtocol.setStubs([
+            sub2APIURL: .init(statusCode: 403, mimeType: "application/json", data: Data()),
+            oldRolesURL: .init(statusCode: 403, mimeType: "application/json", data: Data()),
+            passportRolesURL: .init(statusCode: 403, mimeType: "application/json", data: Data()),
+        ])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+
+        let sub2APIResult = await Sub2APIFetcher(urlSession: session).fetchCapacityGroups(
+            baseURL: "api.example.com",
+            bearerKey: "forbidden-token"
+        )
+        let mihoyoResult = await MihoyoGameClient(urlSession: session).fetchDailyStatus(
+            game: .genshin,
+            session: Self.mihoyoSession()
+        )
+
+        #expect(sub2APIResult == .networkError("服务器返回 HTTP 403"))
+        #expect(mihoyoResult == .networkError("服务器返回 HTTP 403"))
     }
 
     @Test func mihoyoGameRefreshIntervalDefaultsClampsAndPersists() throws {
@@ -2092,6 +3337,116 @@ struct UlanziDeckSwiftTests {
 
         #expect(store.savedStates.isEmpty)
         #expect(fetcher.requests.isEmpty)
+        #expect(fetcher.groupListRequests.isEmpty)
+    }
+
+    @MainActor
+    @Test func sub2APIBearerKeySaveFailureClearsInMemorySecretAndShowsErrorState() {
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        let store = FakeDeckConfigurationStore(
+            loadedState: loadedState,
+            saveResult: .credentialFailure("Keychain 不可用")
+        )
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.notConnected]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: store
+        )
+
+        model.selectKey(keyID: 3)
+        model.setSelectedSub2APIBearerKey("must-not-remain-in-memory")
+
+        let configuration = model.interactionState.sub2APIConfiguration(for: 3)
+        #expect(configuration.bearerKey.isEmpty)
+        #expect(configuration.groupListState == .networkError("Keychain 不可用"))
+        #expect(store.savedStates.count == 2)
+        #expect(store.savedStates.last?.sub2APIConfiguration(for: 3).bearerKey.isEmpty == true)
+    }
+
+    @MainActor
+    @Test func sub2APIBearerKeyUpdateFailureRestoresPreviousCredential() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBearerKey("old-secret", for: 3)
+        let previousCredentialID = try #require(loadedState.sub2APIConfiguration(for: 3).credentialID)
+        let store = FakeDeckConfigurationStore(
+            loadedState: loadedState,
+            saveResult: .credentialFailure("Keychain 不可用")
+        )
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.notConnected]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: store
+        )
+
+        model.selectKey(keyID: 3)
+        model.setSelectedSub2APIBearerKey("new-secret")
+
+        let configuration = model.interactionState.sub2APIConfiguration(for: 3)
+        #expect(configuration.bearerKey == "old-secret")
+        #expect(configuration.credentialID == previousCredentialID)
+        #expect(configuration.groupListState == .networkError("Keychain 不可用"))
+        #expect(store.savedStates.count == 2)
+        #expect(store.savedStates.last?.sub2APIConfiguration(for: 3).bearerKey == "old-secret")
+    }
+
+    @MainActor
+    @Test func sub2APIBearerKeyUpdateFailureKeepsInvalidTokenPaused() async throws {
+        let restoredItem = Self.sub2APICapacityItem(
+            groupID: 1215,
+            groupName: "PLU",
+            availableConcurrency: 3050
+        )
+        let fetcher = FakeSub2APIFetcher(
+            results: [.invalidToken, .success(item: restoredItem)],
+            defaultResult: .success(item: restoredItem)
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        loadedState.setSub2APITargetGroupID(1215, for: 3)
+        loadedState.setSub2APIBearerKey("old-token", for: 3)
+        let store = FakeDeckConfigurationStore(
+            loadedState: loadedState,
+            saveResult: .credentialFailure("Keychain 不可用")
+        )
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            sub2APIFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+                && model.interactionState.sub2APIConfiguration(for: 3).lastResult == .invalidToken
+        }
+
+        model.selectKey(keyID: 3)
+        model.setSelectedSub2APIBearerKey("new-token")
+
+        let configuration = model.interactionState.sub2APIConfiguration(for: 3)
+        #expect(configuration.bearerKey == "old-token")
+        #expect(configuration.groupListState == .networkError("Keychain 不可用"))
+
+        syncer.emitInput(H200InputEvent(state: 1, index: 2, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 2, type: .button, action: .release))
+        model.refreshSelectedSub2APIGroupList()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(fetcher.requests == [
+            FakeSub2APIFetcher.Request(
+                baseURL: "api.example.com",
+                targetGroupID: 1215,
+                bearerKey: "old-token"
+            ),
+        ])
         #expect(fetcher.groupListRequests.isEmpty)
     }
 
@@ -2947,6 +4302,50 @@ struct UlanziDeckSwiftTests {
         #expect(fetcher.requests == [
             FakeSub2APIFetcher.Request(baseURL: "api.example.com", targetGroupID: 1215, bearerKey: "token"),
         ])
+    }
+
+    @MainActor
+    @Test func sub2APIAutomaticRefreshDoesNotRewriteUnchangedKeychainCredential() async throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: "deckConfiguration",
+            credentialStore: credentials
+        )
+        let item = Self.sub2APICapacityItem(
+            groupID: 1215,
+            groupName: "PLU",
+            availableConcurrency: 3078
+        )
+        var storedState = DeckGridInteractionState(layout: .h200Prototype)
+        storedState.assign(.sub2API, to: 3)
+        storedState.setSub2APIBaseURL("api.example.com", for: 3)
+        storedState.setSub2APITargetGroupID(1215, for: 3)
+        storedState.setSub2APIBearerKey("token", for: 3)
+        #expect(store.saveInteractionState(storedState, for: .h200Prototype) == .success)
+        let saveCallCountBeforeRefresh = credentials.saveCallCount
+        let fetcher = FakeSub2APIFetcher(results: [.success(item: item)])
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            sub2APIFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+                && model.interactionState.configuration(for: 3)?.sub2API.lastResult == .success(item: item)
+                && Self.hasSyncedDisplayTitle("3078", for: 3, syncer: syncer)
+        }
+
+        #expect(saveCallCountBeforeRefresh == 1)
+        #expect(credentials.saveCallCount == saveCallCountBeforeRefresh)
     }
 
     @MainActor
@@ -4554,6 +5953,49 @@ struct UlanziDeckSwiftTests {
         #expect(opener.openedURLs.isEmpty)
     }
 
+    @MainActor
+    @Test func smbConnectorRejectsUserinfoBeforeMountAndLogFormatterRedactsIt() throws {
+        let mounter = FakeNetFSMounter(status: 0)
+        let opener = FakeSMBURLOpener()
+        let connector = SMBServerConnector(netFSMounter: mounter, urlOpener: opener)
+        let credentialURL = try #require(URL(string: "smb://alice:secret@nas.local/media?token=hidden"))
+
+        let didConnect = connector.connect(to: credentialURL.absoluteString)
+        let logDescription = SMBServerLogFormatter.redactedDescription(for: credentialURL)
+
+        #expect(!didConnect)
+        #expect(mounter.mountedURLs.isEmpty)
+        #expect(opener.openedURLs.isEmpty)
+        #expect(logDescription == "smb://nas.local/media")
+        #expect(!logDescription.contains("alice"))
+        #expect(!logDescription.contains("secret"))
+        #expect(!logDescription.contains("hidden"))
+    }
+
+    @MainActor
+    @Test func smbConnectorRejectsEncodedUserinfoAndLogFormatterDoesNotExposeIt() throws {
+        let mounter = FakeNetFSMounter(status: 0)
+        let opener = FakeSMBURLOpener()
+        let connector = SMBServerConnector(netFSMounter: mounter, urlOpener: opener)
+        let credentialURL = try #require(URL(string: "smb://alice%3Asecret%40nas.local/media"))
+
+        let didConnect = connector.connect(to: credentialURL.absoluteString)
+        let logDescription = SMBServerLogFormatter.redactedDescription(for: credentialURL)
+
+        #expect(!didConnect)
+        #expect(mounter.mountedURLs.isEmpty)
+        #expect(opener.openedURLs.isEmpty)
+        #expect(logDescription == "smb://<invalid>")
+        #expect(!logDescription.localizedCaseInsensitiveContains("alice"))
+        #expect(!logDescription.localizedCaseInsensitiveContains("secret"))
+        #expect(!logDescription.contains("%3A"))
+        #expect(!logDescription.contains("%40"))
+
+        let doubleEncodedURL = try #require(URL(string: "smb://alice%253Asecret%2540nas.local/media"))
+        let doubleEncodedLogDescription = SMBServerLogFormatter.redactedDescription(for: doubleEncodedURL)
+        #expect(doubleEncodedLogDescription == "smb://<invalid>")
+    }
+
     @Test func zzzStatusUsesVitalityAndDoesNotClampOverCapEnergy() {
         let role = Self.mihoyoRole(game: .zenlessZoneZero)
         let status = MihoyoGameStatusMapper.dailyStatus(
@@ -5109,6 +6551,39 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func qrLoginReportsFailureWhenSessionCannotBeSavedSecurely() async throws {
+        let session = Self.mihoyoSession(accountID: "100002")
+        let qrSession = MihoyoQRLoginSession(ticket: "ticket", url: "https://example.com/login", deviceID: "device")
+        let sessionStore = FakeMihoyoSessionStore(saveSucceeds: false)
+        let mihoyoService = FakeMihoyoGameService(
+            createdQRCode: qrSession,
+            qrResults: [.confirmed(session)]
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.starRailStatus, to: 6)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.notConnected]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            mihoyoGameService: mihoyoService,
+            mihoyoSessionStore: sessionStore,
+            mihoyoLoginPollNanoseconds: 1_000_000
+        )
+
+        model.beginMihoyoQRCodeLogin()
+
+        try await Self.waitUntil {
+            if case let .failed(message) = model.mihoyoLoginState {
+                return message.contains("Keychain")
+            }
+            return false
+        }
+        #expect(sessionStore.savedSessions.isEmpty)
+        #expect(model.interactionState.configuration(for: 6)?.mihoyoGame.lastResult == .loginRequired)
+    }
+
+    @MainActor
     @Test func staleGameFetchIsIgnoredAfterKeySwitchesGame() async throws {
         let session = Self.mihoyoSession()
         let genshinStatus = Self.mihoyoStatus(game: .genshin, currentStamina: 160, maxStamina: 200)
@@ -5426,6 +6901,13 @@ struct UlanziDeckSwiftTests {
             dailyDone: dailyCurrent == dailyMax,
             source: .record
         )
+    }
+
+    private static func mihoyoRolesURL(baseURL: String, path: String) throws -> URL {
+        var components = try #require(URLComponents(string: baseURL))
+        components.path = path
+        components.queryItems = [URLQueryItem(name: "game_biz", value: "")]
+        return try #require(components.url)
     }
 
     private static func mihoyoSession(accountID: String = "100001") -> MihoyoLoginSession {
@@ -5770,21 +7252,26 @@ private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
     private let loadedBrightnessPercent: Int?
     private(set) var savedStates: [DeckGridInteractionState] = []
     private(set) var savedBrightnessPercents: [Int] = []
+    private let saveResult: DeckConfigurationSaveResult
 
     init(
         loadedState: DeckGridInteractionState? = nil,
-        loadedBrightnessPercent: Int? = nil
+        loadedBrightnessPercent: Int? = nil,
+        saveResult: DeckConfigurationSaveResult = .success
     ) {
         self.loadedState = loadedState
         self.loadedBrightnessPercent = loadedBrightnessPercent
+        self.saveResult = saveResult
     }
 
     func loadInteractionState(for layout: DeckGridLayout) -> DeckGridInteractionState? {
         loadedState
     }
 
-    func saveInteractionState(_ state: DeckGridInteractionState, for layout: DeckGridLayout) {
+    @discardableResult
+    func saveInteractionState(_ state: DeckGridInteractionState, for layout: DeckGridLayout) -> DeckConfigurationSaveResult {
         savedStates.append(state)
+        return saveResult
     }
 
     func loadBrightnessPercent() -> Int? {
@@ -5883,21 +7370,120 @@ private final class FakeMihoyoSessionStore: MihoyoSessionStoring {
     private let loadedSession: MihoyoLoginSession?
     private(set) var savedSessions: [MihoyoLoginSession] = []
     private(set) var clearCount = 0
+    private let saveSucceeds: Bool
 
-    init(loadedSession: MihoyoLoginSession? = nil) {
+    init(loadedSession: MihoyoLoginSession? = nil, saveSucceeds: Bool = true) {
         self.loadedSession = loadedSession
+        self.saveSucceeds = saveSucceeds
     }
 
     func loadSession() -> MihoyoLoginSession? {
         loadedSession
     }
 
-    func saveSession(_ session: MihoyoLoginSession) {
+    func saveSession(_ session: MihoyoLoginSession) -> Bool {
+        guard saveSucceeds else {
+            return false
+        }
         savedSessions.append(session)
+        return true
     }
 
     func clearSession() {
         clearCount += 1
+    }
+}
+
+private final class FakeSub2APICredentialStore: Sub2APICredentialStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var loadError: Sub2APICredentialStoreError?
+    private var saveError: Sub2APICredentialStoreError?
+    private var deleteError: Sub2APICredentialStoreError?
+    private var bearerKeys: [String: String] = [:]
+    private var deletedIDs: [String] = []
+    private var loadedCredentialCount = 0
+    private var savedCredentialCount = 0
+
+    init(
+        loadError: Sub2APICredentialStoreError? = nil,
+        saveError: Sub2APICredentialStoreError? = nil,
+        deleteError: Sub2APICredentialStoreError? = nil
+    ) {
+        self.loadError = loadError
+        self.saveError = saveError
+        self.deleteError = deleteError
+    }
+
+    var savedBearerKeys: [String: String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return bearerKeys
+    }
+
+    var deletedCredentialIDs: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return deletedIDs
+    }
+
+    var saveCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return savedCredentialCount
+    }
+
+    var loadCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return loadedCredentialCount
+    }
+
+    func setLoadError(_ error: Sub2APICredentialStoreError?) {
+        lock.lock()
+        loadError = error
+        lock.unlock()
+    }
+
+    func setSaveError(_ error: Sub2APICredentialStoreError?) {
+        lock.lock()
+        saveError = error
+        lock.unlock()
+    }
+
+    func setDeleteError(_ error: Sub2APICredentialStoreError?) {
+        lock.lock()
+        deleteError = error
+        lock.unlock()
+    }
+
+    func loadBearerKey(credentialID: String) throws -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        loadedCredentialCount += 1
+        if let loadError {
+            throw loadError
+        }
+        return bearerKeys[credentialID]
+    }
+
+    func saveBearerKey(_ bearerKey: String, credentialID: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        savedCredentialCount += 1
+        if let saveError {
+            throw saveError
+        }
+        bearerKeys[credentialID] = bearerKey
+    }
+
+    func deleteBearerKey(credentialID: String) throws {
+        lock.lock()
+        defer { lock.unlock() }
+        if let deleteError {
+            throw deleteError
+        }
+        bearerKeys[credentialID] = nil
+        deletedIDs.append(credentialID)
     }
 }
 

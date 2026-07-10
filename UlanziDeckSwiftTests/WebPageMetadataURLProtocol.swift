@@ -5,23 +5,39 @@ final class WebPageMetadataURLProtocol: URLProtocol, @unchecked Sendable {
         let statusCode: Int
         let mimeType: String?
         let contentLength: Int64?
+        let responseURL: URL?
         let data: Data
 
-        init(statusCode: Int, mimeType: String?, contentLength: Int64? = nil, data: Data) {
+        init(
+            statusCode: Int,
+            mimeType: String?,
+            contentLength: Int64? = nil,
+            responseURL: URL? = nil,
+            data: Data
+        ) {
             self.statusCode = statusCode
             self.mimeType = mimeType
             self.contentLength = contentLength
+            self.responseURL = responseURL
             self.data = data
         }
     }
 
     private static let lock = NSLock()
     private static var stubs: [URL: Stub] = [:]
+    private static var requests: [URLRequest] = []
 
     static func setStubs(_ newStubs: [URL: Stub]) {
         lock.lock()
         stubs = newStubs
+        requests = []
         lock.unlock()
+    }
+
+    static var receivedRequests: [URLRequest] {
+        lock.lock()
+        defer { lock.unlock() }
+        return requests
     }
 
     private static func stub(for url: URL) -> Stub? {
@@ -42,6 +58,10 @@ final class WebPageMetadataURLProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func startLoading() {
+        Self.lock.lock()
+        Self.requests.append(request)
+        Self.lock.unlock()
+
         guard let url = request.url,
               let stub = Self.stub(for: url)
         else {
@@ -58,7 +78,7 @@ final class WebPageMetadataURLProtocol: URLProtocol, @unchecked Sendable {
         }
 
         guard let response = HTTPURLResponse(
-            url: url,
+            url: stub.responseURL ?? url,
             statusCode: stub.statusCode,
             httpVersion: nil,
             headerFields: headers

@@ -110,7 +110,8 @@ nonisolated enum MihoyoLoginState: Equatable, Sendable {
 
 nonisolated protocol MihoyoSessionStoring {
     func loadSession() -> MihoyoLoginSession?
-    func saveSession(_ session: MihoyoLoginSession)
+    @discardableResult
+    func saveSession(_ session: MihoyoLoginSession) -> Bool
     func clearSession()
 }
 
@@ -142,15 +143,27 @@ nonisolated struct KeychainMihoyoSessionStore: MihoyoSessionStoring {
         return try? decoder.decode(MihoyoLoginSession.self, from: data)
     }
 
-    func saveSession(_ session: MihoyoLoginSession) {
+    func saveSession(_ session: MihoyoLoginSession) -> Bool {
         guard let data = try? encoder.encode(session) else {
-            return
+            return false
         }
 
-        clearSession()
-        var attributes = baseQuery()
+        let query = baseQuery()
+        let updateStatus = SecItemUpdate(
+            query as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
+        if updateStatus == errSecSuccess {
+            return true
+        }
+        guard updateStatus == errSecItemNotFound else {
+            return false
+        }
+
+        var attributes = query
         attributes[kSecValueData as String] = data
-        SecItemAdd(attributes as CFDictionary, nil)
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        return SecItemAdd(attributes as CFDictionary, nil) == errSecSuccess
     }
 
     func clearSession() {
@@ -187,12 +200,13 @@ nonisolated struct UserDefaultsMihoyoSessionStore: MihoyoSessionStoring {
         return try? decoder.decode(MihoyoLoginSession.self, from: data)
     }
 
-    func saveSession(_ session: MihoyoLoginSession) {
+    func saveSession(_ session: MihoyoLoginSession) -> Bool {
         guard let data = try? encoder.encode(session) else {
-            return
+            return false
         }
 
         defaults.set(data, forKey: storageKey)
+        return true
     }
 
     func clearSession() {

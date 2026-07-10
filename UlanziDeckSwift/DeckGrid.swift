@@ -672,6 +672,11 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
         rootPageIDs = normalizedRootPageIDs
         currentPageID = rootPageIDs[0]
+        let reachablePageIDs = Self.reachablePageIDs(
+            in: normalizedPages,
+            from: rootPageIDs
+        )
+        normalizedPages = normalizedPages.filter { reachablePageIDs.contains($0.key) }
         for pageID in Array(normalizedPages.keys) where !rootPageIDs.contains(pageID) {
             let configurations = normalizedPages[pageID]?.configurations ?? [:]
             normalizedPages[pageID]?.configurations = Self.ensureBackKey(
@@ -680,6 +685,37 @@ nonisolated struct DeckGridInteractionState: Equatable {
             )
         }
         pages = normalizedPages
+    }
+
+    private static func reachablePageIDs(
+        in pages: [String: DeckGridPage],
+        from rootPageIDs: [String]
+    ) -> Set<String> {
+        var reachablePageIDs = Set(rootPageIDs)
+        var pendingPageIDs = rootPageIDs
+        var pendingIndex = 0
+
+        while pendingIndex < pendingPageIDs.count {
+            let pageID = pendingPageIDs[pendingIndex]
+            pendingIndex += 1
+            guard let page = pages[pageID] else {
+                continue
+            }
+
+            for configuration in page.configurations.values where configuration.function == .pageFolder {
+                guard let childPageID = configuration.pageFolder.pageID,
+                      let childPage = pages[childPageID],
+                      childPage.parentID == pageID,
+                      reachablePageIDs.insert(childPageID).inserted
+                else {
+                    continue
+                }
+
+                pendingPageIDs.append(childPageID)
+            }
+        }
+
+        return reachablePageIDs
     }
 
     private static func rootConfigurations(for layout: DeckGridLayout) -> [Int: DeckKeyConfiguration] {
@@ -1095,7 +1131,30 @@ nonisolated struct DeckGridInteractionState: Equatable {
             configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
             configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
         }
+        if !bearerKey.isEmpty,
+           configurations[keyID, default: .tallyDefault].sub2API.credentialID == nil {
+            configurations[keyID, default: .tallyDefault].sub2API.credentialID = UUID().uuidString
+        } else if bearerKey.isEmpty {
+            configurations[keyID, default: .tallyDefault].sub2API.credentialID = nil
+        }
         configurations[keyID, default: .tallyDefault].sub2API.bearerKey = bearerKey
+        return true
+    }
+
+    @discardableResult
+    mutating func restoreSub2APICredential(
+        bearerKey: String,
+        credentialID: String?,
+        for keyID: Int
+    ) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2API
+        else {
+            return false
+        }
+
+        configurations[keyID, default: .tallyDefault].sub2API.bearerKey = bearerKey
+        configurations[keyID, default: .tallyDefault].sub2API.credentialID = credentialID
         return true
     }
 
@@ -1412,13 +1471,14 @@ nonisolated struct DeckGridInteractionState: Equatable {
     @discardableResult
     mutating func setSMBServerAddress(_ address: String, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .connectSMBServer
+              configurations[keyID, default: .tallyDefault].function == .connectSMBServer,
+              let validatedAddress = DeckKeySMBServerConfiguration.validatedAddress(address)
         else {
             return false
         }
 
         selectedKeyID = keyID
-        configurations[keyID, default: .tallyDefault].smbServer.address = DeckKeySMBServerConfiguration.normalizedAddress(address)
+        configurations[keyID, default: .tallyDefault].smbServer.address = validatedAddress
         return true
     }
 

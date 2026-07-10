@@ -756,7 +756,15 @@ nonisolated struct MihoyoGameClient: MihoyoGameServicing {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
 
-        let (data, _) = try await urlSession.data(for: request)
+        let data: Data
+        do {
+            data = try await AuthenticatedHTTPResponseLoader.data(
+                for: request,
+                urlSession: urlSession
+            )
+        } catch AuthenticatedHTTPResponseError.unauthorized {
+            throw MihoyoAPIError(retcode: 401, message: "登录凭据无效或已过期")
+        }
         guard let payload = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw MihoyoAPIError(retcode: nil, message: "响应不是 JSON 对象")
         }
@@ -846,7 +854,7 @@ nonisolated private struct MihoyoAPIError: Error, Equatable, LocalizedError {
     }
 
     var isAuthFailure: Bool {
-        if let retcode, [-100, -101, 10001, 10103].contains(retcode) {
+        if let retcode, [-100, -101, 401, 10001, 10103].contains(retcode) {
             return true
         }
 

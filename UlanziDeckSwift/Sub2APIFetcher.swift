@@ -120,6 +120,12 @@ nonisolated enum Sub2APIGroupListResult: Equatable {
 
 private nonisolated struct Sub2APIFetchError: Error {
     let message: String
+    let isUnauthorized: Bool
+
+    init(message: String, isUnauthorized: Bool = false) {
+        self.message = message
+        self.isUnauthorized = isUnauthorized
+    }
 }
 
 nonisolated enum Sub2APIBaseURLError: Error {
@@ -210,6 +216,9 @@ nonisolated struct Sub2APIFetcher: Sub2APIFetching {
         let responseResult = await fetchCapacityResponse(baseURL: baseURL, bearerKey: bearerKey)
         guard case let .success(response) = responseResult else {
             if case let .failure(error) = responseResult {
+                if error.isUnauthorized {
+                    return .invalidToken
+                }
                 return .networkError(error.message)
             }
 
@@ -239,6 +248,9 @@ nonisolated struct Sub2APIFetcher: Sub2APIFetching {
         let responseResult = await fetchCapacityResponse(baseURL: baseURL, bearerKey: bearerKey)
         guard case let .success(response) = responseResult else {
             if case let .failure(error) = responseResult {
+                if error.isUnauthorized {
+                    return .invalidToken
+                }
                 return .networkError(error.message)
             }
 
@@ -275,8 +287,15 @@ nonisolated struct Sub2APIFetcher: Sub2APIFetching {
 
         let data: Data
         do {
-            let (responseData, _) = try await urlSession.data(for: request)
-            data = responseData
+            data = try await AuthenticatedHTTPResponseLoader.data(
+                for: request,
+                urlSession: urlSession
+            )
+        } catch AuthenticatedHTTPResponseError.unauthorized {
+            return .failure(Sub2APIFetchError(
+                message: AuthenticatedHTTPResponseError.unauthorized.localizedDescription,
+                isUnauthorized: true
+            ))
         } catch {
             return .failure(Sub2APIFetchError(message: error.localizedDescription))
         }

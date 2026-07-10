@@ -729,14 +729,25 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        guard interactionState.sub2APIConfiguration(for: selectedKeyID).bearerKey != bearerKey else {
+        let previousCredential = interactionState.sub2APIConfiguration(for: selectedKeyID)
+        guard previousCredential.bearerKey != bearerKey else {
             return
         }
 
         if interactionState.setSub2APIBearerKey(bearerKey, for: selectedKeyID) {
-            resumeSub2APIAfterBearerChange(for: selectedKeyID)
             let instanceID = ensureRuntimeInstance(for: selectedKeyID)
-            persistCurrentConfiguration()
+            let saveResult = persistCurrentConfiguration()
+            if case let .credentialFailure(message) = saveResult {
+                _ = interactionState.restoreSub2APICredential(
+                    bearerKey: previousCredential.bearerKey,
+                    credentialID: previousCredential.credentialID,
+                    for: selectedKeyID
+                )
+                _ = persistCurrentConfiguration()
+                interactionState.setSub2APIGroupListState(.networkError(message), for: selectedKeyID)
+                return
+            }
+            resumeSub2APIAfterBearerChange(for: selectedKeyID)
             if let instanceID {
                 stopSub2APITimer(for: instanceID, preservesNextFire: false)
                 sub2APIFetchTasks[instanceID]?.cancel()
@@ -1403,7 +1414,6 @@ final class H200ConnectionModel: ObservableObject {
 
             self.sub2APIFetchTasks[instanceID] = nil
             self.interactionState.setSub2APILastResult(result, for: latest.slot.keyID)
-            self.persistCurrentConfiguration()
             if result.isTokenUnavailable {
                 self.pauseSub2APIForTokenError(instanceID: instanceID)
             }
@@ -1677,8 +1687,16 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func finishMihoyoLogin(_ session: MihoyoLoginSession) {
+        guard mihoyoSessionStore.saveSession(session) else {
+            mihoyoSession = nil
+            mihoyoLoginState = .failed("无法安全保存登录会话，请检查 Keychain 权限后重试")
+            cancelAllMihoyoGameTimers(preservesNextFire: false)
+            cancelAllMihoyoGameFetchTasks()
+            markAllMihoyoKeys(result: .loginRequired)
+            return
+        }
+
         mihoyoSession = session
-        mihoyoSessionStore.saveSession(session)
         mihoyoLoginState = .loggedIn(accountID: session.accountID)
         guard canRunInternalRefresh else {
             return
@@ -1955,7 +1973,8 @@ final class H200ConnectionModel: ObservableObject {
         brightnessUpdateInProgress = false
     }
 
-    private func persistCurrentConfiguration() {
+    @discardableResult
+    private func persistCurrentConfiguration() -> DeckConfigurationSaveResult {
         configurationStore.saveInteractionState(interactionState, for: layout)
     }
 

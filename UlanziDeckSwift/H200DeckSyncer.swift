@@ -270,7 +270,7 @@ nonisolated final class H200SystemStatsSampler: H200SystemStatsSampling, @unchec
 }
 
 private extension NSLock {
-    func withLock<Value>(_ body: () -> Value) -> Value {
+    nonisolated func withLock<Value>(_ body: () -> Value) -> Value {
         lock()
         defer {
             unlock()

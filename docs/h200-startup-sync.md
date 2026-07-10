@@ -64,6 +64,8 @@
 - `STATS(0)` 小窗 payload 使用 `${mode}|${cpu}|${mem}|${time}|${gpu}|${format}|${suffix}`。CPU 和内存来自 Mach host statistics，GPU 优先读取 `IOAccelerator` 的 `PerformanceStatistics["Device Utilization %"]`，读不到时退回 `Renderer/Tiler Utilization %` 的较大值，仍读不到则发 `0`。
 - app 内修改顶部亮度百分比或 Shortcuts 亮度调节器动作时，只发送 `0x000a` 简单包；payload 是 UTF-8 百分比数字，例如 `"50"`。
 - Sub2API 摘要或组列表请求返回令牌无效/过期后，该页面对应按键会停止自动和手动请求，直到 Bearer Key 再次变化才恢复；普通网络错误不会暂停，会继续按刷新间隔重试。
+- SMB 地址只允许服务器、可选端口和共享路径，不接受 URL 中的用户名、密码、query 或 fragment；认证统一交给 macOS 系统窗口，连接日志也只记录移除凭据和附加参数后的地址。
+- 每个 Sub2API 按键配置拥有独立的凭据 ID；Bearer Key 只保存在 Keychain，UserDefaults 页面配置只保存凭据 ID。临时把按键切换成其他普通功能时会保留该配置的凭据，只有明确清空 Bearer Key、清空按键或删除所属页面时才清理 Keychain；清理失败的凭据 ID 会保留在索引中等待后续重试。旧版配置中的明文 Bearer Key 会在加载时迁移到 Keychain，并立即从 UserDefaults payload 中移除；迁移失败时同样移除明文和凭据 ID，并将该按键视为未填写凭据，安全优先。加载配置时先完成页面和按键结构归一化，再迁移最终保留的凭据；空白或重复凭据 ID 会被清理或拆分为独立 Keychain 项，避免遗留孤儿凭据或多个按钮共享可变凭据。
 - 米游社游戏状态返回需要登录或登录失效后，会清除共享会话、取消所有游戏状态刷新并标记游戏按键需要重新登录；普通网络错误不会清登录，也不会暂停自动刷新。
 - 亮度不再是按键功能，物理按键不会触发亮度调节。
 - 如果发送阶段发现端口被 Ulanzi Studio 或其他软件占用，会显示“按键包尚未发送”的错误提示。
