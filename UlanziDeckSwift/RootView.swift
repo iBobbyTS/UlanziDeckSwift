@@ -78,6 +78,9 @@ struct RootView: View {
             onSub2APIBaseURLChange: { baseURL in
                 connectionModel.setSelectedSub2APIBaseURL(baseURL)
             },
+            onSub2APIDataSourceChange: { sourceInstanceID in
+                connectionModel.setSelectedSub2APIDataSourceInstanceID(sourceInstanceID)
+            },
             onSub2APITargetGroupIDChange: { groupID in
                 connectionModel.setSelectedSub2APITargetGroupID(groupID)
             },
@@ -89,6 +92,9 @@ struct RootView: View {
             },
             onSub2APIBearerKeyChange: { bearerKey in
                 connectionModel.setSelectedSub2APIBearerKey(bearerKey)
+            },
+            onSub2APIBearerKeySourceChange: { sourceInstanceID in
+                connectionModel.setSelectedSub2APIBearerKeySourceInstanceID(sourceInstanceID)
             },
             onSub2APIServiceNameChange: { serviceName in
                 connectionModel.setSelectedSub2APIServiceName(serviceName)

@@ -1028,11 +1028,14 @@ nonisolated struct Sub2APIButtonContent: Equatable {
 }
 
 nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
+    var instanceID: String
     var baseURL: String
+    var dataSourceInstanceID: String?
     var targetGroupID: Int
     var refreshInterval: Int
     var bearerKey: String
     var credentialID: String?
+    var bearerKeySourceInstanceID: String?
     var customServiceName: String
     var customGroupName: String
 
@@ -1043,21 +1046,27 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     var groupListState: DeckKeySub2APIGroupListState = .idle
 
     init(
+        instanceID: String = UUID().uuidString,
         baseURL: String = "",
+        dataSourceInstanceID: String? = nil,
         targetGroupID: Int = 0,
         refreshInterval: Int = 30,
         bearerKey: String = "",
         credentialID: String? = nil,
+        bearerKeySourceInstanceID: String? = nil,
         customServiceName: String = "",
         customGroupName: String = "",
         lastResult: Sub2APICapacityResult? = nil,
         groupListState: DeckKeySub2APIGroupListState = .idle
     ) {
+        self.instanceID = instanceID
         self.baseURL = baseURL
+        self.dataSourceInstanceID = dataSourceInstanceID
         self.targetGroupID = targetGroupID
         self.refreshInterval = refreshInterval
         self.bearerKey = bearerKey
         self.credentialID = credentialID ?? (bearerKey.isEmpty ? nil : UUID().uuidString)
+        self.bearerKeySourceInstanceID = bearerKeySourceInstanceID
         self.customServiceName = customServiceName
         self.customGroupName = customGroupName
         self.lastResult = lastResult
@@ -1116,23 +1125,39 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     }
 
     enum CodingKeys: CodingKey {
+        case instanceID
         case baseURL
+        case dataSourceInstanceID
         case targetGroupID
         case refreshInterval
         case bearerKey
         case credentialID
+        case bearerKeySourceInstanceID
         case customServiceName
         case customGroupName
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedInstanceID = try container.decodeIfPresent(String.self, forKey: .instanceID)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let decodedInstanceID, !decodedInstanceID.isEmpty {
+            instanceID = decodedInstanceID
+        } else {
+            instanceID = UUID().uuidString
+        }
         baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL) ?? ""
+        let decodedDataSourceInstanceID = try container.decodeIfPresent(String.self, forKey: .dataSourceInstanceID)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        dataSourceInstanceID = decodedDataSourceInstanceID?.isEmpty == false ? decodedDataSourceInstanceID : nil
         targetGroupID = try container.decodeIfPresent(Int.self, forKey: .targetGroupID) ?? 0
         refreshInterval = try container.decodeIfPresent(Int.self, forKey: .refreshInterval) ?? 30
         bearerKey = try container.decodeIfPresent(String.self, forKey: .bearerKey) ?? ""
         credentialID = try container.decodeIfPresent(String.self, forKey: .credentialID)
             ?? (bearerKey.isEmpty ? nil : UUID().uuidString)
+        let decodedSourceInstanceID = try container.decodeIfPresent(String.self, forKey: .bearerKeySourceInstanceID)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        bearerKeySourceInstanceID = decodedSourceInstanceID?.isEmpty == false ? decodedSourceInstanceID : nil
         customServiceName = try container.decodeIfPresent(String.self, forKey: .customServiceName) ?? ""
         customGroupName = try container.decodeIfPresent(String.self, forKey: .customGroupName) ?? ""
         lastResult = nil
@@ -1141,10 +1166,13 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(instanceID, forKey: .instanceID)
         try container.encode(baseURL, forKey: .baseURL)
+        try container.encodeIfPresent(dataSourceInstanceID, forKey: .dataSourceInstanceID)
         try container.encode(targetGroupID, forKey: .targetGroupID)
         try container.encode(refreshInterval, forKey: .refreshInterval)
         try container.encodeIfPresent(credentialID, forKey: .credentialID)
+        try container.encodeIfPresent(bearerKeySourceInstanceID, forKey: .bearerKeySourceInstanceID)
         try container.encode(customServiceName, forKey: .customServiceName)
         try container.encode(customGroupName, forKey: .customGroupName)
     }

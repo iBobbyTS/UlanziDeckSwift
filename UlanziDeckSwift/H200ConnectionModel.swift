@@ -71,6 +71,13 @@ final class H200ConnectionModel: ObservableObject {
         let percent: Int
     }
 
+    private struct Sub2APIDataSourceSignature: Equatable {
+        let instanceID: String
+        let baseURL: String
+        let bearerKey: String
+        let refreshInterval: Int
+    }
+
     init(
         discovery: H200Discovering = H200HIDDiscovery(),
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
@@ -666,20 +673,14 @@ final class H200ConnectionModel: ObservableObject {
         guard interactionState.sub2APIConfiguration(for: selectedKeyID).baseURL != normalizedBaseURL else {
             return
         }
+        let previousDataSourceSignatures = currentSub2APIDataSourceSignaturesByKeyID()
 
         if interactionState.setSub2APIBaseURL(baseURL, for: selectedKeyID) {
-            let instanceID = ensureRuntimeInstance(for: selectedKeyID)
             persistCurrentConfiguration()
-            if let instanceID {
-                stopSub2APITimer(for: instanceID, preservesNextFire: false)
-                sub2APIFetchTasks[instanceID]?.cancel()
-                sub2APIFetchTasks[instanceID] = nil
-                sub2APIGroupListTasks[instanceID]?.cancel()
-                sub2APIGroupListTasks[instanceID] = nil
-                stopSub2APIGroupListRefresh(for: instanceID, preservesNextFire: false)
-            }
-            syncKeyDisplay(keyID: selectedKeyID)
-            scheduleSub2APIGroupListRefresh(for: selectedKeyID)
+            restartSub2APIRuntimesAfterDataSourceResolutionChange(
+                previousSignatures: previousDataSourceSignatures,
+                forcedKeyIDs: [selectedKeyID]
+            )
         }
     }
 
@@ -700,7 +701,16 @@ final class H200ConnectionModel: ObservableObject {
                 sub2APIFetchTasks[instanceID]?.cancel()
                 sub2APIFetchTasks[instanceID] = nil
             }
-            if groupID > 0 {
+            if groupID > 0,
+               case let .success(items) = interactionState
+                .sub2APIConfiguration(for: selectedKeyID)
+                .groupListState,
+               sharedSub2APILeaderInstanceID(
+                for: interactionState.resolvedSub2APIDataSourceInstanceID(for: selectedKeyID)
+               ) != nil {
+                applySharedSub2APIResult(.success(items: items), to: selectedKeyID)
+                syncKeyDisplay(keyID: selectedKeyID)
+            } else if groupID > 0 {
                 fetchSub2API(for: selectedKeyID)
             } else {
                 syncKeyDisplay(keyID: selectedKeyID)
@@ -720,7 +730,7 @@ final class H200ConnectionModel: ObservableObject {
 
         if interactionState.setSub2APIRefreshInterval(interval, for: selectedKeyID) {
             persistCurrentConfiguration()
-            restartSub2APITimer(for: selectedKeyID)
+            restartSub2APITimerForDataSource(containing: selectedKeyID)
         }
     }
 
@@ -733,9 +743,9 @@ final class H200ConnectionModel: ObservableObject {
         guard previousCredential.bearerKey != bearerKey else {
             return
         }
+        let previousDataSourceSignatures = currentSub2APIDataSourceSignaturesByKeyID()
 
         if interactionState.setSub2APIBearerKey(bearerKey, for: selectedKeyID) {
-            let instanceID = ensureRuntimeInstance(for: selectedKeyID)
             let saveResult = persistCurrentConfiguration()
             if case let .credentialFailure(message) = saveResult {
                 _ = interactionState.restoreSub2APICredential(
@@ -747,20 +757,54 @@ final class H200ConnectionModel: ObservableObject {
                 interactionState.setSub2APIGroupListState(.networkError(message), for: selectedKeyID)
                 return
             }
-            resumeSub2APIAfterBearerChange(for: selectedKeyID)
-            if let instanceID {
-                stopSub2APITimer(for: instanceID, preservesNextFire: false)
-                sub2APIFetchTasks[instanceID]?.cancel()
-                sub2APIFetchTasks[instanceID] = nil
-                sub2APIGroupListTasks[instanceID]?.cancel()
-                sub2APIGroupListTasks[instanceID] = nil
-                stopSub2APIGroupListRefresh(for: instanceID, preservesNextFire: false)
-            }
-            syncKeyDisplay(keyID: selectedKeyID)
-            scheduleSub2APIGroupListRefresh(for: selectedKeyID)
-            if interactionState.sub2APIConfiguration(for: selectedKeyID).targetGroupID > 0 {
-                fetchSub2API(for: selectedKeyID)
-            }
+            restartSub2APIRuntimesAfterDataSourceResolutionChange(
+                previousSignatures: previousDataSourceSignatures
+            )
+        }
+    }
+
+    func setSelectedSub2APIBearerKeySourceInstanceID(_ sourceInstanceID: String?) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        let previousSourceInstanceID = interactionState
+            .sub2APIConfiguration(for: selectedKeyID)
+            .bearerKeySourceInstanceID
+        guard previousSourceInstanceID != sourceInstanceID else {
+            return
+        }
+        let previousDataSourceSignatures = currentSub2APIDataSourceSignaturesByKeyID()
+
+        if interactionState.setSub2APIBearerKeySourceInstanceID(sourceInstanceID, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            restartSub2APIRuntimesAfterDataSourceResolutionChange(
+                previousSignatures: previousDataSourceSignatures,
+                forcedKeyIDs: [selectedKeyID],
+                resumesTokenPausedKeyIDs: [selectedKeyID]
+            )
+        }
+    }
+
+    func setSelectedSub2APIDataSourceInstanceID(_ sourceInstanceID: String?) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        let previousSourceInstanceID = interactionState
+            .sub2APIConfiguration(for: selectedKeyID)
+            .dataSourceInstanceID
+        guard previousSourceInstanceID != sourceInstanceID else {
+            return
+        }
+        let previousDataSourceSignatures = currentSub2APIDataSourceSignaturesByKeyID()
+
+        if interactionState.setSub2APIDataSourceInstanceID(sourceInstanceID, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            restartSub2APIRuntimesAfterDataSourceResolutionChange(
+                previousSignatures: previousDataSourceSignatures,
+                forcedKeyIDs: [selectedKeyID]
+            )
         }
     }
 
@@ -1356,16 +1400,62 @@ final class H200ConnectionModel: ObservableObject {
 
     private func resolveCurrentSub2APISlot(
         for instanceID: RuntimeInstanceID
-    ) -> (slot: RuntimeSlotID, config: DeckKeySub2APIConfiguration)? {
+    ) -> (
+        slot: RuntimeSlotID,
+        config: DeckKeySub2APIConfiguration,
+        dataSourceInstanceID: String,
+        baseURL: String,
+        bearerKey: String,
+        refreshInterval: Int
+    )? {
         guard let slot = runtimeSlotsByInstance[instanceID],
               slot.pageID == interactionState.currentPageID,
               interactionState.configuration(for: slot.keyID)?.displayMode == .function,
-              interactionState.configuration(for: slot.keyID)?.function == .sub2API
+              interactionState.configuration(for: slot.keyID)?.function == .sub2API,
+              let dataSourceConfiguration = interactionState
+                .resolvedSub2APIDataSourceConfiguration(for: slot.keyID)
         else {
             return nil
         }
 
-        return (slot, interactionState.sub2APIConfiguration(for: slot.keyID))
+        return (
+            slot,
+            interactionState.sub2APIConfiguration(for: slot.keyID),
+            interactionState.resolvedSub2APIDataSourceInstanceID(for: slot.keyID),
+            dataSourceConfiguration.baseURL,
+            interactionState.resolvedSub2APIBearerKey(for: slot.keyID),
+            dataSourceConfiguration.refreshInterval
+        )
+    }
+
+    private func sub2APIConsumerInstanceIDs(for dataSourceInstanceID: String) -> [RuntimeInstanceID] {
+        runtimeInstancesBySlot.compactMap { slot, instanceID in
+            guard slot.pageID == interactionState.currentPageID,
+                  interactionState.configuration(for: slot.keyID)?.displayMode == .function,
+                  interactionState.configuration(for: slot.keyID)?.function == .sub2API,
+                  interactionState.resolvedSub2APIDataSourceInstanceID(for: slot.keyID)
+                    == dataSourceInstanceID
+            else {
+                return nil
+            }
+            return instanceID
+        }
+        .sorted { first, second in
+            let firstKeyID = runtimeSlotsByInstance[first]?.keyID ?? Int.max
+            let secondKeyID = runtimeSlotsByInstance[second]?.keyID ?? Int.max
+            return firstKeyID < secondKeyID
+        }
+    }
+
+    private func sharedSub2APILeaderInstanceID(for dataSourceInstanceID: String) -> RuntimeInstanceID? {
+        let consumerInstanceIDs = sub2APIConsumerInstanceIDs(for: dataSourceInstanceID)
+        guard let firstInstanceID = consumerInstanceIDs.first else {
+            return nil
+        }
+
+        let sourceIsShared = consumerInstanceIDs.count > 1
+            || resolveCurrentSub2APISlot(for: firstInstanceID)?.config.dataSourceInstanceID != nil
+        return sourceIsShared ? firstInstanceID : nil
     }
 
     private func fetchSub2API(for keyID: Int) {
@@ -1380,10 +1470,20 @@ final class H200ConnectionModel: ObservableObject {
         guard canRunInternalRefresh,
               let resolved = resolveCurrentSub2APISlot(for: instanceID),
               !isSub2APITokenPaused(for: instanceID),
-              !resolved.config.baseURL.isEmpty,
-              resolved.config.targetGroupID > 0,
-              !resolved.config.bearerKey.isEmpty
+              !resolved.baseURL.isEmpty,
+              !resolved.bearerKey.isEmpty
         else {
+            return
+        }
+
+        if let leaderInstanceID = sharedSub2APILeaderInstanceID(
+            for: resolved.dataSourceInstanceID
+        ) {
+            fetchSharedSub2API(for: leaderInstanceID)
+            return
+        }
+
+        guard resolved.config.targetGroupID > 0 else {
             return
         }
 
@@ -1391,9 +1491,9 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIFetchTasks[instanceID]?.cancel()
         let pageID = resolved.slot.pageID
         let fetcher = sub2APIFetcher
-        let baseURL = resolved.config.baseURL
+        let baseURL = resolved.baseURL
         let targetGroupID = resolved.config.targetGroupID
-        let bearerKey = resolved.config.bearerKey
+        let bearerKey = resolved.bearerKey
         sub2APIFetchTasks[instanceID] = Task { @MainActor [weak self] in
             let result = await fetcher.fetchCapacitySummary(
                 baseURL: baseURL,
@@ -1405,9 +1505,9 @@ final class H200ConnectionModel: ObservableObject {
             guard let self,
                   let latest = self.resolveCurrentSub2APISlot(for: instanceID),
                   latest.slot.pageID == pageID,
-                  latest.config.baseURL == baseURL,
+                  latest.baseURL == baseURL,
                   latest.config.targetGroupID == targetGroupID,
-                  latest.config.bearerKey == bearerKey
+                  latest.bearerKey == bearerKey
             else {
                 return
             }
@@ -1425,9 +1525,9 @@ final class H200ConnectionModel: ObservableObject {
                 guard let self,
                       self.canRunInternalRefresh,
                       let latest = self.resolveCurrentSub2APISlot(for: instanceID),
-                      latest.config.baseURL == baseURL,
+                      latest.baseURL == baseURL,
                       latest.config.targetGroupID == targetGroupID,
-                      latest.config.bearerKey == bearerKey,
+                      latest.bearerKey == bearerKey,
                       !self.isSub2APITokenPaused(for: instanceID)
                 else {
                     return
@@ -1436,6 +1536,131 @@ final class H200ConnectionModel: ObservableObject {
                 self.scheduleNextSub2APIRefresh(for: instanceID)
             }
         }
+    }
+
+    private func fetchSharedSub2API(for leaderInstanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              sub2APIFetchTasks[leaderInstanceID] == nil,
+              let resolved = resolveCurrentSub2APISlot(for: leaderInstanceID),
+              !isSub2APITokenPaused(for: leaderInstanceID),
+              !resolved.baseURL.isEmpty,
+              !resolved.bearerKey.isEmpty
+        else {
+            return
+        }
+
+        let consumerInstanceIDs = sub2APIConsumerInstanceIDs(
+            for: resolved.dataSourceInstanceID
+        )
+        guard consumerInstanceIDs.contains(where: { instanceID in
+            guard let consumer = resolveCurrentSub2APISlot(for: instanceID) else {
+                return false
+            }
+            return consumer.config.targetGroupID > 0
+        }) else {
+            return
+        }
+
+        for consumerInstanceID in consumerInstanceIDs {
+            stopSub2APITimer(for: consumerInstanceID, preservesNextFire: false)
+            if consumerInstanceID != leaderInstanceID {
+                sub2APIFetchTasks[consumerInstanceID]?.cancel()
+                sub2APIFetchTasks[consumerInstanceID] = nil
+            }
+        }
+        let pageID = resolved.slot.pageID
+        let dataSourceInstanceID = resolved.dataSourceInstanceID
+        let baseURL = resolved.baseURL
+        let bearerKey = resolved.bearerKey
+        let fetcher = sub2APIFetcher
+        sub2APIFetchTasks[leaderInstanceID] = Task { @MainActor [weak self] in
+            let result = await fetcher.fetchCapacityGroups(
+                baseURL: baseURL,
+                bearerKey: bearerKey
+            )
+            guard !Task.isCancelled,
+                  let self,
+                  let latestLeader = self.resolveCurrentSub2APISlot(for: leaderInstanceID),
+                  latestLeader.slot.pageID == pageID,
+                  latestLeader.dataSourceInstanceID == dataSourceInstanceID,
+                  latestLeader.baseURL == baseURL,
+                  latestLeader.bearerKey == bearerKey
+            else {
+                return
+            }
+
+            self.sub2APIFetchTasks[leaderInstanceID] = nil
+            let latestConsumerInstanceIDs = self.sub2APIConsumerInstanceIDs(
+                for: dataSourceInstanceID
+            )
+            guard let currentLeaderInstanceID = self.sharedSub2APILeaderInstanceID(
+                for: dataSourceInstanceID
+            ),
+                  let currentLeader = self.resolveCurrentSub2APISlot(
+                    for: currentLeaderInstanceID
+                  )
+            else {
+                return
+            }
+            var keyIDs: Set<Int> = []
+            for consumerInstanceID in latestConsumerInstanceIDs {
+                guard let consumer = self.resolveCurrentSub2APISlot(for: consumerInstanceID),
+                      consumer.slot.pageID == pageID
+                else {
+                    continue
+                }
+                keyIDs.insert(consumer.slot.keyID)
+                self.applySharedSub2APIResult(result, to: consumer.slot.keyID)
+                if result.isTokenUnavailable {
+                    self.pauseSub2APIForTokenError(instanceID: consumerInstanceID)
+                }
+            }
+
+            let followerKeyIDs = keyIDs.subtracting([currentLeader.slot.keyID])
+            if !followerKeyIDs.isEmpty {
+                self.syncKeyDisplays(keyIDs: followerKeyIDs)
+            }
+            self.syncKeyDisplay(keyID: currentLeader.slot.keyID) { [weak self] syncResult in
+                guard case .success = syncResult,
+                      let self,
+                      self.canRunInternalRefresh,
+                      let latestLeader = self.resolveCurrentSub2APISlot(for: currentLeaderInstanceID),
+                      latestLeader.dataSourceInstanceID == dataSourceInstanceID,
+                      latestLeader.baseURL == baseURL,
+                      latestLeader.bearerKey == bearerKey,
+                      !self.isSub2APITokenPaused(for: currentLeaderInstanceID)
+                else {
+                    return
+                }
+                self.scheduleNextSub2APIRefresh(for: currentLeaderInstanceID)
+            }
+        }
+    }
+
+    private func applySharedSub2APIResult(_ result: Sub2APIGroupListResult, to keyID: Int) {
+        let groupListState: DeckKeySub2APIGroupListState
+        let capacityResult: Sub2APICapacityResult
+        switch result {
+        case let .success(items):
+            groupListState = .success(items: items)
+            let targetGroupID = interactionState.sub2APIConfiguration(for: keyID).targetGroupID
+            if let item = items.first(where: { $0.groupID == targetGroupID }) {
+                capacityResult = .success(item: item)
+            } else {
+                capacityResult = .notFound
+            }
+        case .invalidToken:
+            groupListState = .invalidToken
+            capacityResult = .invalidToken
+        case .tokenExpired:
+            groupListState = .tokenExpired
+            capacityResult = .tokenExpired
+        case let .networkError(message):
+            groupListState = .networkError(message)
+            capacityResult = .networkError(message)
+        }
+        interactionState.setSub2APIGroupListState(groupListState, for: keyID)
+        interactionState.setSub2APILastResult(capacityResult, for: keyID)
     }
 
     private func fetchSub2APIGroupList(for keyID: Int) {
@@ -1454,7 +1679,14 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        guard !resolved.config.baseURL.isEmpty, !resolved.config.bearerKey.isEmpty else {
+        if let leaderInstanceID = sharedSub2APILeaderInstanceID(
+            for: resolved.dataSourceInstanceID
+        ) {
+            fetchSharedSub2API(for: leaderInstanceID)
+            return
+        }
+
+        guard !resolved.baseURL.isEmpty, !resolved.bearerKey.isEmpty else {
             interactionState.setSub2APIGroupListState(
                 .networkError("请先填写 Base URL 和 Bearer Key"),
                 for: resolved.slot.keyID
@@ -1468,8 +1700,8 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIGroupListLastRequestNanoseconds[instanceID] = nowNanoseconds
         let pageID = resolved.slot.pageID
         let fetcher = sub2APIFetcher
-        let baseURL = resolved.config.baseURL
-        let bearerKey = resolved.config.bearerKey
+        let baseURL = resolved.baseURL
+        let bearerKey = resolved.bearerKey
         sub2APIGroupListTasks[instanceID] = Task { @MainActor [weak self] in
             let result = await fetcher.fetchCapacityGroups(baseURL: baseURL, bearerKey: bearerKey)
             guard !Task.isCancelled else { return }
@@ -1477,8 +1709,8 @@ final class H200ConnectionModel: ObservableObject {
             guard let self,
                   let latest = self.resolveCurrentSub2APISlot(for: instanceID),
                   latest.slot.pageID == pageID,
-                  latest.config.baseURL == baseURL,
-                  latest.config.bearerKey == bearerKey
+                  latest.baseURL == baseURL,
+                  latest.bearerKey == bearerKey
             else {
                 return
             }
@@ -1515,8 +1747,8 @@ final class H200ConnectionModel: ObservableObject {
         guard canRunInternalRefresh,
               let resolved = resolveCurrentSub2APISlot(for: instanceID),
               !isSub2APITokenPaused(for: instanceID),
-              !resolved.config.baseURL.isEmpty,
-              !resolved.config.bearerKey.isEmpty
+              !resolved.baseURL.isEmpty,
+              !resolved.bearerKey.isEmpty
         else {
             stopSub2APIGroupListRefresh(for: instanceID, preservesNextFire: false)
             return
@@ -1747,8 +1979,64 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
+        ensureCurrentPageRuntimeInstances()
         for key in layout.keys where interactionState.configuration(for: key.id)?.function == .sub2API {
             fetchSub2API(for: key.id)
+        }
+    }
+
+    private func currentSub2APIDataSourceSignaturesByKeyID() -> [Int: Sub2APIDataSourceSignature] {
+        Dictionary(uniqueKeysWithValues: layout.keys.compactMap { key in
+            guard interactionState.configuration(for: key.id)?.function == .sub2API else {
+                return nil
+            }
+            return (
+                key.id,
+                Sub2APIDataSourceSignature(
+                    instanceID: interactionState.resolvedSub2APIDataSourceInstanceID(for: key.id),
+                    baseURL: interactionState.resolvedSub2APIBaseURL(for: key.id),
+                    bearerKey: interactionState.resolvedSub2APIBearerKey(for: key.id),
+                    refreshInterval: interactionState.resolvedSub2APIRefreshInterval(for: key.id)
+                )
+            )
+        })
+    }
+
+    private func restartSub2APIRuntimesAfterDataSourceResolutionChange(
+        previousSignatures: [Int: Sub2APIDataSourceSignature],
+        forcedKeyIDs: Set<Int> = [],
+        resumesTokenPausedKeyIDs: Set<Int> = []
+    ) {
+        let currentSignatures = currentSub2APIDataSourceSignaturesByKeyID()
+        let changedKeyIDs = Set(currentSignatures.compactMap { keyID, signature in
+            forcedKeyIDs.contains(keyID) || previousSignatures[keyID] != signature
+                ? keyID
+                : nil
+        })
+        for keyID in changedKeyIDs {
+            _ = interactionState.clearSub2APIRuntimeState(for: keyID)
+            let previousSignature = previousSignatures[keyID]
+            let currentSignature = currentSignatures[keyID]
+            if resumesTokenPausedKeyIDs.contains(keyID)
+                || previousSignature?.instanceID != currentSignature?.instanceID
+                || previousSignature?.bearerKey != currentSignature?.bearerKey {
+                resumeSub2APIAfterBearerChange(for: keyID)
+            }
+            if let instanceID = ensureRuntimeInstance(for: keyID) {
+                stopSub2APITimer(for: instanceID, preservesNextFire: false)
+                sub2APIFetchTasks[instanceID]?.cancel()
+                sub2APIFetchTasks[instanceID] = nil
+                sub2APIGroupListTasks[instanceID]?.cancel()
+                sub2APIGroupListTasks[instanceID] = nil
+                stopSub2APIGroupListRefresh(for: instanceID, preservesNextFire: false)
+            }
+            syncKeyDisplay(keyID: keyID)
+        }
+        for keyID in changedKeyIDs.sorted() {
+            scheduleSub2APIGroupListRefresh(for: keyID)
+            if interactionState.sub2APIConfiguration(for: keyID).targetGroupID > 0 {
+                fetchSub2API(for: keyID)
+            }
         }
     }
 
@@ -1767,18 +2055,31 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        let config = resolved.config
+        if let leaderInstanceID = sharedSub2APILeaderInstanceID(
+            for: resolved.dataSourceInstanceID
+        ), leaderInstanceID != instanceID {
+            return
+        }
+        let hasConfiguredConsumer = sub2APIConsumerInstanceIDs(
+            for: resolved.dataSourceInstanceID
+        ).contains { consumerInstanceID in
+            (resolveCurrentSub2APISlot(for: consumerInstanceID)?.config.targetGroupID ?? 0) > 0
+        }
         guard canRunInternalRefresh,
               !isSub2APITokenPaused(for: instanceID),
-              !config.baseURL.isEmpty,
-              config.targetGroupID > 0,
-              !config.bearerKey.isEmpty,
-              config.refreshInterval >= 5
+              !resolved.baseURL.isEmpty,
+              hasConfiguredConsumer,
+              !resolved.bearerKey.isEmpty,
+              resolved.refreshInterval >= 5
         else {
             return
         }
 
-        let intervalNanoseconds = UInt64(TimeInterval(config.refreshInterval) * sub2APIRefreshSecondDuration * 1_000_000_000)
+        let intervalNanoseconds = UInt64(
+            TimeInterval(resolved.refreshInterval)
+                * sub2APIRefreshSecondDuration
+                * 1_000_000_000
+        )
         scheduleSub2APIRefresh(for: instanceID, fireAt: nowNanoseconds + intervalNanoseconds)
     }
 
@@ -1830,6 +2131,29 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         scheduleNextSub2APIRefresh(for: instanceID)
+    }
+
+    private func restartSub2APITimerForDataSource(containing keyID: Int) {
+        guard let selectedInstanceID = ensureRuntimeInstance(for: keyID),
+              let resolved = resolveCurrentSub2APISlot(for: selectedInstanceID)
+        else {
+            return
+        }
+
+        let leaderInstanceID = sharedSub2APILeaderInstanceID(
+            for: resolved.dataSourceInstanceID
+        ) ?? selectedInstanceID
+        for consumerInstanceID in sub2APIConsumerInstanceIDs(
+            for: resolved.dataSourceInstanceID
+        ) {
+            stopSub2APITimer(for: consumerInstanceID, preservesNextFire: false)
+        }
+        guard let leader = resolveCurrentSub2APISlot(for: leaderInstanceID),
+              leader.config.lastResult != nil
+        else {
+            return
+        }
+        scheduleNextSub2APIRefresh(for: leaderInstanceID)
     }
 
     private func startMihoyoGameTimer(for keyID: Int) {

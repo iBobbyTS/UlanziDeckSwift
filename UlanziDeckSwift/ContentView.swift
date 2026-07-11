@@ -45,10 +45,12 @@ struct ContentView: View {
     let onBrightnessPercentPreview: (Int) -> Void
     let onBrightnessPercentCommit: (Int) -> Void
     let onSub2APIBaseURLChange: (String) -> Void
+    let onSub2APIDataSourceChange: (String?) -> Void
     let onSub2APITargetGroupIDChange: (Int) -> Void
     let onSub2APIGroupListRefresh: () -> Void
     let onSub2APIRefreshIntervalChange: (Int) -> Void
     let onSub2APIBearerKeyChange: (String) -> Void
+    let onSub2APIBearerKeySourceChange: (String?) -> Void
     let onSub2APIServiceNameChange: (String) -> Void
     let onSub2APIGroupNameChange: (String) -> Void
     let onMihoyoQRCodeLoginRequest: () -> Void
@@ -830,10 +832,12 @@ struct MihoyoQRCodeView: View {
         onBrightnessPercentPreview: { _ in },
         onBrightnessPercentCommit: { _ in },
         onSub2APIBaseURLChange: { _ in },
+        onSub2APIDataSourceChange: { _ in },
         onSub2APITargetGroupIDChange: { _ in },
         onSub2APIGroupListRefresh: {},
         onSub2APIRefreshIntervalChange: { _ in },
         onSub2APIBearerKeyChange: { _ in },
+        onSub2APIBearerKeySourceChange: { _ in },
         onSub2APIServiceNameChange: { _ in },
         onSub2APIGroupNameChange: { _ in },
         onMihoyoQRCodeLoginRequest: {},

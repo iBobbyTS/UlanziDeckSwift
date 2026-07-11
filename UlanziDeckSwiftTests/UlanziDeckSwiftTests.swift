@@ -2152,6 +2152,127 @@ struct UlanziDeckSwiftTests {
         #expect(!persistedJSON.contains("bearerKey"))
     }
 
+    @Test func sub2APIBearerKeyReferenceOptionsExcludeSelfAndBackReferences() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        for keyID in [3, 4, 5, 6] {
+            let didAssign = state.assign(.sub2API, to: keyID)
+            #expect(didAssign)
+        }
+        let didSetBearerKey = state.setSub2APIBearerKey("source-secret", for: 3)
+        let didSetFirstServiceName = state.setSub2APIServiceName("主服务", for: 3)
+        let didSetFirstGroupName = state.setSub2APIGroupName("主号池", for: 3)
+        let didSetFourthServiceName = state.setSub2APIServiceName("备用服务", for: 6)
+        let didSetFourthGroupName = state.setSub2APIGroupName("备用号池", for: 6)
+        #expect(didSetBearerKey)
+        #expect(didSetFirstServiceName)
+        #expect(didSetFirstGroupName)
+        #expect(didSetFourthServiceName)
+        #expect(didSetFourthGroupName)
+
+        let firstInstanceID = state.sub2APIConfiguration(for: 3).instanceID
+        let secondInstanceID = state.sub2APIConfiguration(for: 4).instanceID
+        let thirdInstanceID = state.sub2APIConfiguration(for: 5).instanceID
+        let fourthInstanceID = state.sub2APIConfiguration(for: 6).instanceID
+        #expect(Set([firstInstanceID, secondInstanceID, thirdInstanceID, fourthInstanceID]).count == 4)
+
+        let didReferenceFirst = state.setSub2APIBearerKeySourceInstanceID(firstInstanceID, for: 4)
+        let didReferenceSecond = state.setSub2APIBearerKeySourceInstanceID(secondInstanceID, for: 5)
+        #expect(didReferenceFirst)
+        #expect(didReferenceSecond)
+        #expect(state.resolvedSub2APIBearerKey(for: 4) == "source-secret")
+        #expect(state.resolvedSub2APIBearerKey(for: 5) == "source-secret")
+
+        let firstOptions = state.sub2APIBearerKeyReferenceOptions(for: 3)
+        #expect(firstOptions.map(\.instanceID) == [fourthInstanceID])
+        #expect(firstOptions.map(\.title) == ["备用服务 (备用号池)"])
+
+        let secondOptionIDs = Set(state.sub2APIBearerKeyReferenceOptions(for: 4).map(\.instanceID))
+        #expect(secondOptionIDs == Set([firstInstanceID, fourthInstanceID]))
+        let didCreateCycle = state.setSub2APIBearerKeySourceInstanceID(thirdInstanceID, for: 3)
+        #expect(!didCreateCycle)
+        #expect(state.sub2APIConfiguration(for: 3).bearerKeySourceInstanceID == nil)
+    }
+
+    @Test func sub2APIDataSourceReferencesResolveConnectionSettingsAndRejectCycles() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        for keyID in [3, 4, 5] {
+            let didAssign = state.assign(.sub2API, to: keyID)
+            #expect(didAssign)
+        }
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIBearerKey("source-secret", for: 3)
+        _ = state.setSub2APIRefreshInterval(45, for: 3)
+        _ = state.setSub2APIServiceName("主服务", for: 3)
+        _ = state.setSub2APIGroupName("主号池", for: 3)
+
+        let firstInstanceID = state.sub2APIConfiguration(for: 3).instanceID
+        let secondInstanceID = state.sub2APIConfiguration(for: 4).instanceID
+        let thirdInstanceID = state.sub2APIConfiguration(for: 5).instanceID
+        let didReferenceFirst = state.setSub2APIDataSourceInstanceID(firstInstanceID, for: 4)
+        let didReferenceSecond = state.setSub2APIDataSourceInstanceID(secondInstanceID, for: 5)
+        #expect(didReferenceFirst)
+        #expect(didReferenceSecond)
+
+        #expect(state.resolvedSub2APIDataSourceInstanceID(for: 4) == firstInstanceID)
+        #expect(state.resolvedSub2APIDataSourceInstanceID(for: 5) == firstInstanceID)
+        #expect(state.resolvedSub2APIBaseURL(for: 5) == "api.example.com")
+        #expect(state.resolvedSub2APIBearerKey(for: 5) == "source-secret")
+        #expect(state.resolvedSub2APIRefreshInterval(for: 5) == 45)
+        let didSetReferencedBaseURL = state.setSub2APIBaseURL("ignored.example.com", for: 5)
+        let didSetReferencedBearerKey = state.setSub2APIBearerKey("ignored-secret", for: 5)
+        #expect(!didSetReferencedBaseURL)
+        #expect(!didSetReferencedBearerKey)
+
+        let firstOptions = state.sub2APIDataSourceReferenceOptions(for: 3)
+        #expect(firstOptions.isEmpty)
+        let secondOptions = state.sub2APIDataSourceReferenceOptions(for: 4)
+        #expect(secondOptions.map(\.instanceID) == [firstInstanceID])
+        #expect(secondOptions.map(\.title) == ["主服务 (主号池)"])
+        let didCreateCycle = state.setSub2APIDataSourceInstanceID(thirdInstanceID, for: 3)
+        #expect(!didCreateCycle)
+    }
+
+    @Test func sub2APIBearerKeyReferenceRoundTripsWithoutDuplicatingSecret() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: "deckConfiguration",
+            credentialStore: credentials
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        let didAssignSource = state.assign(.sub2API, to: 3)
+        let didSetSourceBearerKey = state.setSub2APIBearerKey("source-secret", for: 3)
+        let didAssignReference = state.assign(.sub2API, to: 4)
+        let didSetBackupBearerKey = state.setSub2APIBearerKey("custom-backup", for: 4)
+        #expect(didAssignSource)
+        #expect(didSetSourceBearerKey)
+        #expect(didAssignReference)
+        #expect(didSetBackupBearerKey)
+        let sourceInstanceID = state.sub2APIConfiguration(for: 3).instanceID
+        let referencedCredentialID = try #require(state.sub2APIConfiguration(for: 4).credentialID)
+        let didSetReference = state.setSub2APIBearerKeySourceInstanceID(sourceInstanceID, for: 4)
+        let didSetDataSource = state.setSub2APIDataSourceInstanceID(sourceInstanceID, for: 4)
+        #expect(didSetReference)
+        #expect(didSetDataSource)
+
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let persistedData = try #require(defaults.data(forKey: "deckConfiguration"))
+        let persistedJSON = try #require(String(data: persistedData, encoding: .utf8))
+
+        #expect(restored.sub2APIConfiguration(for: 4).bearerKeySourceInstanceID == sourceInstanceID)
+        #expect(restored.sub2APIConfiguration(for: 4).dataSourceInstanceID == sourceInstanceID)
+        #expect(restored.sub2APIConfiguration(for: 4).bearerKey == "custom-backup")
+        #expect(restored.resolvedSub2APIBearerKey(for: 4) == "source-secret")
+        #expect(credentials.savedBearerKeys[referencedCredentialID] == "custom-backup")
+        #expect(!persistedJSON.contains("source-secret"))
+        #expect(!persistedJSON.contains("custom-backup"))
+        #expect(!persistedJSON.contains("bearerKey\""))
+    }
+
     @Test func unrelatedConfigurationSavesDoNotRewriteUnchangedSub2APICredential() throws {
         let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -2761,6 +2882,100 @@ struct UlanziDeckSwiftTests {
         #expect(expiredTokenResponse.indicatesTokenExpired)
         #expect(!expiredTokenResponse.indicatesInvalidToken)
         #expect(expiredTokenResponse.data == nil)
+    }
+
+    @MainActor
+    @Test func sharedSub2APIDataSourceUsesOneRequestForMultipleTargetGroups() async throws {
+        let firstItem = Self.sub2APICapacityItem(groupID: 101, groupName: "一号池", availableConcurrency: 11)
+        let secondItem = Self.sub2APICapacityItem(groupID: 102, groupName: "二号池", availableConcurrency: 22)
+        let thirdItem = Self.sub2APICapacityItem(groupID: 103, groupName: "三号池", availableConcurrency: 33)
+        let fetcher = FakeSub2APIFetcher(
+            groupListResults: [.success(items: [firstItem, secondItem, thirdItem])]
+        )
+        var loadedState = DeckGridInteractionState(layout: .h200Prototype)
+        for keyID in [3, 4, 5] {
+            _ = loadedState.assign(.sub2API, to: keyID)
+        }
+        _ = loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = loadedState.setSub2APIBearerKey("shared-token", for: 3)
+        _ = loadedState.setSub2APITargetGroupID(101, for: 3)
+        let sourceInstanceID = loadedState.sub2APIConfiguration(for: 3).instanceID
+        _ = loadedState.setSub2APIDataSourceInstanceID(sourceInstanceID, for: 4)
+        _ = loadedState.setSub2APITargetGroupID(102, for: 4)
+        _ = loadedState.setSub2APIDataSourceInstanceID(sourceInstanceID, for: 5)
+        _ = loadedState.setSub2APITargetGroupID(103, for: 5)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            sub2APIFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+
+        try await Self.waitUntil {
+            model.interactionState.sub2APIConfiguration(for: 3).lastResult == .success(item: firstItem)
+                && model.interactionState.sub2APIConfiguration(for: 4).lastResult == .success(item: secondItem)
+                && model.interactionState.sub2APIConfiguration(for: 5).lastResult == .success(item: thirdItem)
+        }
+
+        #expect(fetcher.requests.isEmpty)
+        #expect(fetcher.groupListRequests == [
+            FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "shared-token"),
+        ])
+    }
+
+    @MainActor
+    @Test func sub2APIRequestsResolveReferencedBearerKeyAndFollowSourceUpdates() async throws {
+        let item = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLUS共享号池", availableConcurrency: 3078)
+        let fetcher = FakeSub2APIFetcher(
+            results: [.success(item: item), .success(item: item)],
+            defaultResult: .success(item: item)
+        )
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.notConnected]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(),
+            sub2APIFetcher: fetcher,
+            sub2APIGroupListMinimumIntervalNanoseconds: 1_000_000
+        )
+
+        model.selectKey(keyID: 3)
+        model.assignSelectedFunction(.sub2API)
+        model.setSelectedSub2APIBearerKey("source-token")
+        let sourceInstanceID = model.interactionState.sub2APIConfiguration(for: 3).instanceID
+
+        model.selectKey(keyID: 4)
+        model.assignSelectedFunction(.sub2API)
+        model.setSelectedSub2APIBaseURL("api.example.com")
+        model.setSelectedSub2APIBearerKeySourceInstanceID(sourceInstanceID)
+        model.setSelectedSub2APITargetGroupID(1215)
+
+        try await Self.waitUntil {
+            fetcher.requests.contains(
+                FakeSub2APIFetcher.Request(
+                    baseURL: "api.example.com",
+                    targetGroupID: 1215,
+                    bearerKey: "source-token"
+                )
+            )
+        }
+
+        model.selectKey(keyID: 3)
+        model.setSelectedSub2APIBearerKey("updated-token")
+
+        try await Self.waitUntil {
+            fetcher.requests.contains(
+                FakeSub2APIFetcher.Request(
+                    baseURL: "api.example.com",
+                    targetGroupID: 1215,
+                    bearerKey: "updated-token"
+                )
+            )
+        }
+
+        #expect(model.interactionState.resolvedSub2APIBearerKey(for: 4) == "updated-token")
     }
 
     @MainActor

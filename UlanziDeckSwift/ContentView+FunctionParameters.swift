@@ -233,13 +233,33 @@ extension ContentView {
                 functionParameterColumn(for: configuration)
 
                 VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Base URL")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("数据来源")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
 
-                        TextField("your-api.example.com", text: selectedSub2APIBaseURLBinding)
-                            .textFieldStyle(.roundedBorder)
+                            Picker("数据来源", selection: selectedSub2APIDataSourceBinding) {
+                                Text("自定义").tag(String?.none)
+
+                                ForEach(selectedSub2APIDataSourceReferenceOptions) { option in
+                                    Text(option.title).tag(Optional(option.instanceID))
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(width: 150, alignment: .leading)
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Base URL")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+
+                            TextField("your-api.example.com", text: selectedSub2APIBaseURLBinding)
+                                .textFieldStyle(.roundedBorder)
+                                .disabled(selectedSub2APIDataSourceInstanceID != nil)
+                        }
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -292,6 +312,7 @@ extension ContentView {
                             Stepper("刷新间隔", value: selectedSub2APIRefreshIntervalBinding, in: 5...3600)
                                 .labelsHidden()
                         }
+                        .disabled(selectedSub2APIDataSourceInstanceID != nil)
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -299,8 +320,26 @@ extension ContentView {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
-                        SecureField("Bearer Key", text: selectedSub2APIBearerKeyBinding)
-                            .textFieldStyle(.roundedBorder)
+                        HStack(spacing: 8) {
+                            Picker("Bearer Key 来源", selection: selectedSub2APIBearerKeySourceBinding) {
+                                Text("自定义").tag(String?.none)
+
+                                ForEach(selectedSub2APIBearerKeyReferenceOptions) { option in
+                                    Text(option.title).tag(Optional(option.instanceID))
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(width: 150, alignment: .leading)
+                            .disabled(selectedSub2APIDataSourceInstanceID != nil)
+
+                            SecureField("Bearer Key", text: selectedSub2APIBearerKeyBinding)
+                                .textFieldStyle(.roundedBorder)
+                                .disabled(
+                                    selectedSub2APIDataSourceInstanceID != nil
+                                        || selectedSub2APIBearerKeySourceInstanceID != nil
+                                )
+                        }
                     }
 
                     Divider()
@@ -670,6 +709,28 @@ extension ContentView {
         )
     }
 
+    var selectedSub2APIDataSourceInstanceID: String? {
+        selectedConfiguration?.sub2API.dataSourceInstanceID
+    }
+
+    var selectedSub2APIDataSourceReferenceOptions: [DeckKeySub2APIBearerKeyReferenceOption] {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return []
+        }
+        return interactionState.sub2APIDataSourceReferenceOptions(for: selectedKeyID)
+    }
+
+    var selectedSub2APIDataSourceBinding: Binding<String?> {
+        Binding(
+            get: {
+                selectedSub2APIDataSourceInstanceID
+            },
+            set: { sourceInstanceID in
+                onSub2APIDataSourceChange(sourceInstanceID)
+            }
+        )
+    }
+
     var selectedSub2APITargetGroupIDBinding: Binding<Int> {
         Binding(
             get: {
@@ -702,7 +763,11 @@ extension ContentView {
         }
 
         guard case .loading = sub2API.groupListState else {
-            return !sub2API.baseURL.isEmpty && !sub2API.bearerKey.isEmpty
+            guard let selectedKeyID = interactionState.selectedKeyID else {
+                return false
+            }
+            return !interactionState.resolvedSub2APIBaseURL(for: selectedKeyID).isEmpty
+                && !interactionState.resolvedSub2APIBearerKey(for: selectedKeyID).isEmpty
         }
 
         return false
@@ -805,6 +870,28 @@ extension ContentView {
             },
             set: { bearerKey in
                 onSub2APIBearerKeyChange(bearerKey)
+            }
+        )
+    }
+
+    var selectedSub2APIBearerKeySourceInstanceID: String? {
+        selectedConfiguration?.sub2API.bearerKeySourceInstanceID
+    }
+
+    var selectedSub2APIBearerKeyReferenceOptions: [DeckKeySub2APIBearerKeyReferenceOption] {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return []
+        }
+        return interactionState.sub2APIBearerKeyReferenceOptions(for: selectedKeyID)
+    }
+
+    var selectedSub2APIBearerKeySourceBinding: Binding<String?> {
+        Binding(
+            get: {
+                selectedSub2APIBearerKeySourceInstanceID
+            },
+            set: { sourceInstanceID in
+                onSub2APIBearerKeySourceChange(sourceInstanceID)
             }
         )
     }
