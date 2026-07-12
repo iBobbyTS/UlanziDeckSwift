@@ -32,6 +32,7 @@ final class H200ConnectionModel: ObservableObject {
     private let sub2APIFetcher: Sub2APIFetching
     private let mihoyoGameService: MihoyoGameServicing
     private let mihoyoSessionStore: MihoyoSessionStoring
+    private let pageFolderAutoReturnTimer: PageFolderAutoReturnTimer
     private var hasPersistedBrightnessPercent: Bool
     private var mihoyoSession: MihoyoLoginSession?
     private let longPressDurationNanoseconds: UInt64
@@ -94,7 +95,8 @@ final class H200ConnectionModel: ObservableObject {
         mihoyoLoginPollNanoseconds: UInt64 = 2_000_000_000,
         sub2APIRefreshSecondDuration: TimeInterval = 1,
         sub2APIGroupListMinimumIntervalNanoseconds: UInt64 = 2_000_000_000,
-        mihoyoGameRefreshMinuteDuration: TimeInterval = 60
+        mihoyoGameRefreshMinuteDuration: TimeInterval = 60,
+        pageFolderAutoReturnDurationNanoseconds: UInt64 = 30_000_000_000
     ) {
         self.discovery = discovery
         self.syncer = syncer
@@ -107,6 +109,9 @@ final class H200ConnectionModel: ObservableObject {
         self.sub2APIFetcher = sub2APIFetcher
         self.mihoyoGameService = mihoyoGameService
         self.mihoyoSessionStore = mihoyoSessionStore
+        self.pageFolderAutoReturnTimer = PageFolderAutoReturnTimer(
+            durationNanoseconds: pageFolderAutoReturnDurationNanoseconds
+        )
         self.longPressDurationNanoseconds = longPressDurationNanoseconds
         self.mihoyoLoginPollNanoseconds = mihoyoLoginPollNanoseconds
         self.sub2APIRefreshSecondDuration = sub2APIRefreshSecondDuration
@@ -122,6 +127,9 @@ final class H200ConnectionModel: ObservableObject {
         mihoyoSession = mihoyoSessionStore.loadSession()
         if let mihoyoSession {
             mihoyoLoginState = .loggedIn(accountID: mihoyoSession.accountID)
+        }
+        pageFolderAutoReturnTimer.onTimeout = { [weak self] in
+            self?.goBackPage()
         }
         self.syncer.setInputHandler { [weak self] event in
             Task { @MainActor [weak self] in
@@ -281,6 +289,7 @@ final class H200ConnectionModel: ObservableObject {
 
         syncCurrentDisplays()
         startCurrentPageRuntime()
+        updatePageFolderAutoReturnTimer()
     }
 
     private func goBackPage() {
@@ -298,6 +307,7 @@ final class H200ConnectionModel: ObservableObject {
 
         syncCurrentDisplays()
         startCurrentPageRuntime()
+        updatePageFolderAutoReturnTimer()
     }
 
     func addRootPageAfterCurrent() {
@@ -954,6 +964,7 @@ final class H200ConnectionModel: ObservableObject {
     private func refresh() {
         pauseAllRuntimeInstances()
         _ = interactionState.goToRootPage()
+        pageFolderAutoReturnTimer.cancel()
         reconcileRuntimeInstancesWithInteractionState()
         deviceCommandGeneration += 1
         let generation = deviceCommandGeneration
@@ -1035,9 +1046,20 @@ final class H200ConnectionModel: ObservableObject {
 
         switch event.action {
         case .press:
+            if !interactionState.isOnRootPage {
+                pageFolderAutoReturnTimer.restart()
+            }
             beginKeyPress(keyID: keyID)
         case .release:
             endKeyPress(keyID: keyID)
+        }
+    }
+
+    private func updatePageFolderAutoReturnTimer() {
+        if interactionState.isOnRootPage {
+            pageFolderAutoReturnTimer.cancel()
+        } else {
+            pageFolderAutoReturnTimer.restart()
         }
     }
 

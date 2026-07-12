@@ -4864,6 +4864,67 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func pageFolderAutomaticallyReturnsToParentAfterIdleTimeout() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            pageFolderAutoReturnDurationNanoseconds: 250_000_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 2)
+        model.assignSelectedFunction(.pageFolder)
+        model.navigateKey(keyID: 2)
+
+        try await Self.waitUntil {
+            model.interactionState.currentPageDepth == 1 && syncer.sentDisplays.count == 2
+        }
+        try await Self.waitUntil {
+            model.interactionState.isOnRootPage && syncer.sentDisplays.count == 3
+        }
+
+        #expect(syncer.sentDisplays.last?[1].pageFolderButtonContent?.displayName == "功能夹")
+    }
+
+    @MainActor
+    @Test func physicalButtonPressResetsPageFolderIdleTimeout() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(),
+            pageFolderAutoReturnDurationNanoseconds: 500_000_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+        model.selectKey(keyID: 2)
+        model.assignSelectedFunction(.pageFolder)
+        model.navigateKey(keyID: 2)
+        try await Self.waitUntil {
+            model.interactionState.currentPageDepth == 1 && syncer.sentDisplays.count == 2
+        }
+
+        try await Task.sleep(nanoseconds: 300_000_000)
+        syncer.emitInput(H200InputEvent(state: 1, index: 0, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 0, type: .button, action: .release))
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        #expect(model.interactionState.currentPageDepth == 1)
+        #expect(syncer.sentDisplays.count == 2)
+        try await Self.waitUntil {
+            model.interactionState.isOnRootPage && syncer.sentDisplays.count == 3
+        }
+    }
+
+    @MainActor
     @Test func selectingRootPageByLabelSendsFullPagePackage() async throws {
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
