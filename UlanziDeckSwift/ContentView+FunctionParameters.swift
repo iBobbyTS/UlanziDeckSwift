@@ -320,26 +320,9 @@ extension ContentView {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
-                        HStack(spacing: 8) {
-                            Picker("Bearer Key 来源", selection: selectedSub2APIBearerKeySourceBinding) {
-                                Text("自定义").tag(String?.none)
-
-                                ForEach(selectedSub2APIBearerKeyReferenceOptions) { option in
-                                    Text(option.title).tag(Optional(option.instanceID))
-                                }
-                            }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .frame(width: 150, alignment: .leading)
+                        SecureField("Bearer Key", text: selectedSub2APIBearerKeyBinding)
+                            .textFieldStyle(.roundedBorder)
                             .disabled(selectedSub2APIDataSourceInstanceID != nil)
-
-                            SecureField("Bearer Key", text: selectedSub2APIBearerKeyBinding)
-                                .textFieldStyle(.roundedBorder)
-                                .disabled(
-                                    selectedSub2APIDataSourceInstanceID != nil
-                                        || selectedSub2APIBearerKeySourceInstanceID != nil
-                                )
-                        }
                     }
 
                     Divider()
@@ -713,7 +696,7 @@ extension ContentView {
         selectedConfiguration?.sub2API.dataSourceInstanceID
     }
 
-    var selectedSub2APIDataSourceReferenceOptions: [DeckKeySub2APIBearerKeyReferenceOption] {
+    var selectedSub2APIDataSourceReferenceOptions: [DeckKeySub2APIReferenceOption] {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return []
         }
@@ -870,28 +853,6 @@ extension ContentView {
             },
             set: { bearerKey in
                 onSub2APIBearerKeyChange(bearerKey)
-            }
-        )
-    }
-
-    var selectedSub2APIBearerKeySourceInstanceID: String? {
-        selectedConfiguration?.sub2API.bearerKeySourceInstanceID
-    }
-
-    var selectedSub2APIBearerKeyReferenceOptions: [DeckKeySub2APIBearerKeyReferenceOption] {
-        guard let selectedKeyID = interactionState.selectedKeyID else {
-            return []
-        }
-        return interactionState.sub2APIBearerKeyReferenceOptions(for: selectedKeyID)
-    }
-
-    var selectedSub2APIBearerKeySourceBinding: Binding<String?> {
-        Binding(
-            get: {
-                selectedSub2APIBearerKeySourceInstanceID
-            },
-            set: { sourceInstanceID in
-                onSub2APIBearerKeySourceChange(sourceInstanceID)
             }
         )
     }

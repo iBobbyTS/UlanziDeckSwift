@@ -50,7 +50,6 @@ struct ContentView: View {
     let onSub2APIGroupListRefresh: () -> Void
     let onSub2APIRefreshIntervalChange: (Int) -> Void
     let onSub2APIBearerKeyChange: (String) -> Void
-    let onSub2APIBearerKeySourceChange: (String?) -> Void
     let onSub2APIServiceNameChange: (String) -> Void
     let onSub2APIGroupNameChange: (String) -> Void
     let onMihoyoQRCodeLoginRequest: () -> Void
@@ -837,7 +836,6 @@ struct MihoyoQRCodeView: View {
         onSub2APIGroupListRefresh: {},
         onSub2APIRefreshIntervalChange: { _ in },
         onSub2APIBearerKeyChange: { _ in },
-        onSub2APIBearerKeySourceChange: { _ in },
         onSub2APIServiceNameChange: { _ in },
         onSub2APIGroupNameChange: { _ in },
         onMihoyoQRCodeLoginRequest: {},

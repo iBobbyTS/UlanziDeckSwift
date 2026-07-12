@@ -763,29 +763,6 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
-    func setSelectedSub2APIBearerKeySourceInstanceID(_ sourceInstanceID: String?) {
-        guard let selectedKeyID = interactionState.selectedKeyID else {
-            return
-        }
-
-        let previousSourceInstanceID = interactionState
-            .sub2APIConfiguration(for: selectedKeyID)
-            .bearerKeySourceInstanceID
-        guard previousSourceInstanceID != sourceInstanceID else {
-            return
-        }
-        let previousDataSourceSignatures = currentSub2APIDataSourceSignaturesByKeyID()
-
-        if interactionState.setSub2APIBearerKeySourceInstanceID(sourceInstanceID, for: selectedKeyID) {
-            persistCurrentConfiguration()
-            restartSub2APIRuntimesAfterDataSourceResolutionChange(
-                previousSignatures: previousDataSourceSignatures,
-                forcedKeyIDs: [selectedKeyID],
-                resumesTokenPausedKeyIDs: [selectedKeyID]
-            )
-        }
-    }
-
     func setSelectedSub2APIDataSourceInstanceID(_ sourceInstanceID: String?) {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return

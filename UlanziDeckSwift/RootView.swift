@@ -93,9 +93,6 @@ struct RootView: View {
             onSub2APIBearerKeyChange: { bearerKey in
                 connectionModel.setSelectedSub2APIBearerKey(bearerKey)
             },
-            onSub2APIBearerKeySourceChange: { sourceInstanceID in
-                connectionModel.setSelectedSub2APIBearerKeySourceInstanceID(sourceInstanceID)
-            },
             onSub2APIServiceNameChange: { serviceName in
                 connectionModel.setSelectedSub2APIServiceName(serviceName)
             },

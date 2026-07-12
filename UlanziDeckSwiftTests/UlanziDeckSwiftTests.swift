@@ -2152,48 +2152,7 @@ struct UlanziDeckSwiftTests {
         #expect(!persistedJSON.contains("bearerKey"))
     }
 
-    @Test func sub2APIBearerKeyReferenceOptionsExcludeSelfAndBackReferences() throws {
-        var state = DeckGridInteractionState(layout: .h200Prototype)
-        for keyID in [3, 4, 5, 6] {
-            let didAssign = state.assign(.sub2API, to: keyID)
-            #expect(didAssign)
-        }
-        let didSetBearerKey = state.setSub2APIBearerKey("source-secret", for: 3)
-        let didSetFirstServiceName = state.setSub2APIServiceName("主服务", for: 3)
-        let didSetFirstGroupName = state.setSub2APIGroupName("主号池", for: 3)
-        let didSetFourthServiceName = state.setSub2APIServiceName("备用服务", for: 6)
-        let didSetFourthGroupName = state.setSub2APIGroupName("备用号池", for: 6)
-        #expect(didSetBearerKey)
-        #expect(didSetFirstServiceName)
-        #expect(didSetFirstGroupName)
-        #expect(didSetFourthServiceName)
-        #expect(didSetFourthGroupName)
-
-        let firstInstanceID = state.sub2APIConfiguration(for: 3).instanceID
-        let secondInstanceID = state.sub2APIConfiguration(for: 4).instanceID
-        let thirdInstanceID = state.sub2APIConfiguration(for: 5).instanceID
-        let fourthInstanceID = state.sub2APIConfiguration(for: 6).instanceID
-        #expect(Set([firstInstanceID, secondInstanceID, thirdInstanceID, fourthInstanceID]).count == 4)
-
-        let didReferenceFirst = state.setSub2APIBearerKeySourceInstanceID(firstInstanceID, for: 4)
-        let didReferenceSecond = state.setSub2APIBearerKeySourceInstanceID(secondInstanceID, for: 5)
-        #expect(didReferenceFirst)
-        #expect(didReferenceSecond)
-        #expect(state.resolvedSub2APIBearerKey(for: 4) == "source-secret")
-        #expect(state.resolvedSub2APIBearerKey(for: 5) == "source-secret")
-
-        let firstOptions = state.sub2APIBearerKeyReferenceOptions(for: 3)
-        #expect(firstOptions.map(\.instanceID) == [fourthInstanceID])
-        #expect(firstOptions.map(\.title) == ["备用服务 (备用号池)"])
-
-        let secondOptionIDs = Set(state.sub2APIBearerKeyReferenceOptions(for: 4).map(\.instanceID))
-        #expect(secondOptionIDs == Set([firstInstanceID, fourthInstanceID]))
-        let didCreateCycle = state.setSub2APIBearerKeySourceInstanceID(thirdInstanceID, for: 3)
-        #expect(!didCreateCycle)
-        #expect(state.sub2APIConfiguration(for: 3).bearerKeySourceInstanceID == nil)
-    }
-
-    @Test func sub2APIDataSourceReferencesResolveConnectionSettingsAndRejectCycles() throws {
+    @Test func sub2APIDataSourceReferencesResolveSettingsAndAllowOnlyCustomRoots() throws {
         var state = DeckGridInteractionState(layout: .h200Prototype)
         for keyID in [3, 4, 5] {
             let didAssign = state.assign(.sub2API, to: keyID)
@@ -2211,28 +2170,35 @@ struct UlanziDeckSwiftTests {
         let didReferenceFirst = state.setSub2APIDataSourceInstanceID(firstInstanceID, for: 4)
         let didReferenceSecond = state.setSub2APIDataSourceInstanceID(secondInstanceID, for: 5)
         #expect(didReferenceFirst)
-        #expect(didReferenceSecond)
+        #expect(!didReferenceSecond)
 
         #expect(state.resolvedSub2APIDataSourceInstanceID(for: 4) == firstInstanceID)
-        #expect(state.resolvedSub2APIDataSourceInstanceID(for: 5) == firstInstanceID)
-        #expect(state.resolvedSub2APIBaseURL(for: 5) == "api.example.com")
-        #expect(state.resolvedSub2APIBearerKey(for: 5) == "source-secret")
-        #expect(state.resolvedSub2APIRefreshInterval(for: 5) == 45)
-        let didSetReferencedBaseURL = state.setSub2APIBaseURL("ignored.example.com", for: 5)
-        let didSetReferencedBearerKey = state.setSub2APIBearerKey("ignored-secret", for: 5)
+        #expect(state.resolvedSub2APIDataSourceInstanceID(for: 5) == thirdInstanceID)
+        #expect(state.resolvedSub2APIBaseURL(for: 5).isEmpty)
+        #expect(state.resolvedSub2APIBearerKey(for: 5).isEmpty)
+        #expect(state.resolvedSub2APIRefreshInterval(for: 5) == 30)
+        let didSetReferencedBaseURL = state.setSub2APIBaseURL("ignored.example.com", for: 4)
+        let didSetReferencedBearerKey = state.setSub2APIBearerKey("ignored-secret", for: 4)
         #expect(!didSetReferencedBaseURL)
         #expect(!didSetReferencedBearerKey)
 
         let firstOptions = state.sub2APIDataSourceReferenceOptions(for: 3)
         #expect(firstOptions.isEmpty)
         let secondOptions = state.sub2APIDataSourceReferenceOptions(for: 4)
-        #expect(secondOptions.map(\.instanceID) == [firstInstanceID])
-        #expect(secondOptions.map(\.title) == ["主服务 (主号池)"])
-        let didCreateCycle = state.setSub2APIDataSourceInstanceID(thirdInstanceID, for: 3)
-        #expect(!didCreateCycle)
+        #expect(Set(secondOptions.map(\.instanceID)) == Set([firstInstanceID, thirdInstanceID]))
+        #expect(secondOptions.first(where: { $0.instanceID == firstInstanceID })?.title == "主服务 (主号池)")
+        let thirdOptions = state.sub2APIDataSourceReferenceOptions(for: 5)
+        #expect(thirdOptions.map(\.instanceID) == [firstInstanceID])
+        #expect(thirdOptions.map(\.title) == ["主服务 (主号池)"])
+        let didCreateNestedReference = state.setSub2APIDataSourceInstanceID(thirdInstanceID, for: 3)
+        #expect(!didCreateNestedReference)
+        let didReferenceRoot = state.setSub2APIDataSourceInstanceID(firstInstanceID, for: 5)
+        #expect(didReferenceRoot)
+        #expect(state.resolvedSub2APIDataSourceInstanceID(for: 5) == firstInstanceID)
+        #expect(state.resolvedSub2APIBaseURL(for: 5) == "api.example.com")
     }
 
-    @Test func sub2APIBearerKeyReferenceRoundTripsWithoutDuplicatingSecret() throws {
+    @Test func sub2APIDataSourceReferenceRoundTripsWithoutDuplicatingSecret() throws {
         let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
@@ -2253,9 +2219,7 @@ struct UlanziDeckSwiftTests {
         #expect(didSetBackupBearerKey)
         let sourceInstanceID = state.sub2APIConfiguration(for: 3).instanceID
         let referencedCredentialID = try #require(state.sub2APIConfiguration(for: 4).credentialID)
-        let didSetReference = state.setSub2APIBearerKeySourceInstanceID(sourceInstanceID, for: 4)
         let didSetDataSource = state.setSub2APIDataSourceInstanceID(sourceInstanceID, for: 4)
-        #expect(didSetReference)
         #expect(didSetDataSource)
 
         #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
@@ -2263,7 +2227,6 @@ struct UlanziDeckSwiftTests {
         let persistedData = try #require(defaults.data(forKey: "deckConfiguration"))
         let persistedJSON = try #require(String(data: persistedData, encoding: .utf8))
 
-        #expect(restored.sub2APIConfiguration(for: 4).bearerKeySourceInstanceID == sourceInstanceID)
         #expect(restored.sub2APIConfiguration(for: 4).dataSourceInstanceID == sourceInstanceID)
         #expect(restored.sub2APIConfiguration(for: 4).bearerKey == "custom-backup")
         #expect(restored.resolvedSub2APIBearerKey(for: 4) == "source-secret")
@@ -2927,11 +2890,10 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
-    @Test func sub2APIRequestsResolveReferencedBearerKeyAndFollowSourceUpdates() async throws {
+    @Test func sub2APIRequestsUseReferencedDataSourceAndFollowBearerUpdates() async throws {
         let item = Self.sub2APICapacityItem(groupID: 1215, groupName: "PLUS共享号池", availableConcurrency: 3078)
         let fetcher = FakeSub2APIFetcher(
-            results: [.success(item: item), .success(item: item)],
-            defaultResult: .success(item: item)
+            groupListResults: [.success(items: [item]), .success(items: [item])]
         )
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.notConnected]),
@@ -2943,20 +2905,19 @@ struct UlanziDeckSwiftTests {
 
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
+        model.setSelectedSub2APIBaseURL("api.example.com")
         model.setSelectedSub2APIBearerKey("source-token")
         let sourceInstanceID = model.interactionState.sub2APIConfiguration(for: 3).instanceID
 
         model.selectKey(keyID: 4)
         model.assignSelectedFunction(.sub2API)
-        model.setSelectedSub2APIBaseURL("api.example.com")
-        model.setSelectedSub2APIBearerKeySourceInstanceID(sourceInstanceID)
+        model.setSelectedSub2APIDataSourceInstanceID(sourceInstanceID)
         model.setSelectedSub2APITargetGroupID(1215)
 
         try await Self.waitUntil {
-            fetcher.requests.contains(
-                FakeSub2APIFetcher.Request(
+            fetcher.groupListRequests.contains(
+                FakeSub2APIFetcher.GroupListRequest(
                     baseURL: "api.example.com",
-                    targetGroupID: 1215,
                     bearerKey: "source-token"
                 )
             )
@@ -2966,10 +2927,9 @@ struct UlanziDeckSwiftTests {
         model.setSelectedSub2APIBearerKey("updated-token")
 
         try await Self.waitUntil {
-            fetcher.requests.contains(
-                FakeSub2APIFetcher.Request(
+            fetcher.groupListRequests.contains(
+                FakeSub2APIFetcher.GroupListRequest(
                     baseURL: "api.example.com",
-                    targetGroupID: 1215,
                     bearerKey: "updated-token"
                 )
             )

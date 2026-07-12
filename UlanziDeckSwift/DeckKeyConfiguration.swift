@@ -1035,7 +1035,6 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     var refreshInterval: Int
     var bearerKey: String
     var credentialID: String?
-    var bearerKeySourceInstanceID: String?
     var customServiceName: String
     var customGroupName: String
 
@@ -1053,7 +1052,6 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         refreshInterval: Int = 30,
         bearerKey: String = "",
         credentialID: String? = nil,
-        bearerKeySourceInstanceID: String? = nil,
         customServiceName: String = "",
         customGroupName: String = "",
         lastResult: Sub2APICapacityResult? = nil,
@@ -1066,7 +1064,6 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         self.refreshInterval = refreshInterval
         self.bearerKey = bearerKey
         self.credentialID = credentialID ?? (bearerKey.isEmpty ? nil : UUID().uuidString)
-        self.bearerKeySourceInstanceID = bearerKeySourceInstanceID
         self.customServiceName = customServiceName
         self.customGroupName = customGroupName
         self.lastResult = lastResult
@@ -1132,7 +1129,6 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         case refreshInterval
         case bearerKey
         case credentialID
-        case bearerKeySourceInstanceID
         case customServiceName
         case customGroupName
     }
@@ -1155,9 +1151,6 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         bearerKey = try container.decodeIfPresent(String.self, forKey: .bearerKey) ?? ""
         credentialID = try container.decodeIfPresent(String.self, forKey: .credentialID)
             ?? (bearerKey.isEmpty ? nil : UUID().uuidString)
-        let decodedSourceInstanceID = try container.decodeIfPresent(String.self, forKey: .bearerKeySourceInstanceID)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        bearerKeySourceInstanceID = decodedSourceInstanceID?.isEmpty == false ? decodedSourceInstanceID : nil
         customServiceName = try container.decodeIfPresent(String.self, forKey: .customServiceName) ?? ""
         customGroupName = try container.decodeIfPresent(String.self, forKey: .customGroupName) ?? ""
         lastResult = nil
@@ -1172,7 +1165,6 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         try container.encode(targetGroupID, forKey: .targetGroupID)
         try container.encode(refreshInterval, forKey: .refreshInterval)
         try container.encodeIfPresent(credentialID, forKey: .credentialID)
-        try container.encodeIfPresent(bearerKeySourceInstanceID, forKey: .bearerKeySourceInstanceID)
         try container.encode(customServiceName, forKey: .customServiceName)
         try container.encode(customGroupName, forKey: .customGroupName)
     }

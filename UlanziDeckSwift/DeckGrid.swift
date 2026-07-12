@@ -477,7 +477,7 @@ nonisolated struct RootPageNavigationItem: Identifiable, Equatable {
     let canDelete: Bool
 }
 
-nonisolated struct DeckKeySub2APIBearerKeyReferenceOption: Identifiable, Equatable {
+nonisolated struct DeckKeySub2APIReferenceOption: Identifiable, Equatable {
     let instanceID: String
     let title: String
 
@@ -1012,15 +1012,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
     }
 
     func resolvedSub2APIBearerKey(for keyID: Int) -> String {
-        guard configurations[keyID]?.function == .sub2API else {
-            return ""
-        }
-
-        let dataSourceInstanceID = resolvedSub2APIDataSourceInstanceID(for: keyID)
-        return resolvedSub2APIBearerKey(
-            for: dataSourceInstanceID,
-            visitedInstanceIDs: []
-        )
+        resolvedSub2APIDataSourceConfiguration(for: keyID)?.bearerKey ?? ""
     }
 
     func resolvedSub2APIDataSourceInstanceID(for keyID: Int) -> String {
@@ -1047,26 +1039,13 @@ nonisolated struct DeckGridInteractionState: Equatable {
         resolvedSub2APIDataSourceConfiguration(for: keyID)?.refreshInterval ?? 30
     }
 
-    func sub2APIDataSourceReferenceOptions(for keyID: Int) -> [DeckKeySub2APIBearerKeyReferenceOption] {
+    func sub2APIDataSourceReferenceOptions(for keyID: Int) -> [DeckKeySub2APIReferenceOption] {
         guard configurations[keyID]?.function == .sub2API else {
             return []
         }
 
         let currentInstanceID = configurations[keyID, default: .tallyDefault].sub2API.instanceID
-        return sub2APIReferenceOptions(for: currentInstanceID) { configuration in
-            configuration.dataSourceInstanceID
-        }
-    }
-
-    func sub2APIBearerKeyReferenceOptions(for keyID: Int) -> [DeckKeySub2APIBearerKeyReferenceOption] {
-        guard configurations[keyID]?.function == .sub2API else {
-            return []
-        }
-
-        let currentInstanceID = configurations[keyID, default: .tallyDefault].sub2API.instanceID
-        return sub2APIReferenceOptions(for: currentInstanceID) { configuration in
-            configuration.bearerKeySourceInstanceID
-        }
+        return sub2APIReferenceOptions(for: currentInstanceID)
     }
 
     func mihoyoGame(for keyID: Int) -> MihoyoGame? {
@@ -1190,8 +1169,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
     mutating func setSub2APIBearerKey(_ bearerKey: String, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].function == .sub2API,
-              configurations[keyID, default: .tallyDefault].sub2API.dataSourceInstanceID == nil,
-              configurations[keyID, default: .tallyDefault].sub2API.bearerKeySourceInstanceID == nil
+              configurations[keyID, default: .tallyDefault].sub2API.dataSourceInstanceID == nil
         else {
             return false
         }
@@ -1212,45 +1190,6 @@ nonisolated struct DeckGridInteractionState: Equatable {
     }
 
     @discardableResult
-    mutating func setSub2APIBearerKeySourceInstanceID(_ sourceInstanceID: String?, for keyID: Int) -> Bool {
-        guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .sub2API,
-              configurations[keyID, default: .tallyDefault].sub2API.dataSourceInstanceID == nil
-        else {
-            return false
-        }
-
-        let normalizedSourceInstanceID = sourceInstanceID?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let candidateSourceInstanceID = normalizedSourceInstanceID?.isEmpty == false
-            ? normalizedSourceInstanceID
-            : nil
-        let currentInstanceID = configurations[keyID, default: .tallyDefault].sub2API.instanceID
-        if let candidateSourceInstanceID {
-            guard candidateSourceInstanceID != currentInstanceID,
-                  activeSub2APIConfigurationsByInstanceID()[candidateSourceInstanceID] != nil,
-                  !sub2APIReferenceChain(
-                      startingAt: candidateSourceInstanceID,
-                      contains: currentInstanceID,
-                      sourceInstanceID: { $0.bearerKeySourceInstanceID }
-                  )
-            else {
-                return false
-            }
-        }
-
-        selectedKeyID = keyID
-        guard configurations[keyID, default: .tallyDefault].sub2API.bearerKeySourceInstanceID
-                != candidateSourceInstanceID
-        else {
-            return false
-        }
-        configurations[keyID, default: .tallyDefault].sub2API.bearerKeySourceInstanceID = candidateSourceInstanceID
-        configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
-        configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
-        return true
-    }
-
-    @discardableResult
     mutating func setSub2APIDataSourceInstanceID(_ sourceInstanceID: String?, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].function == .sub2API
@@ -1264,12 +1203,14 @@ nonisolated struct DeckGridInteractionState: Equatable {
             : nil
         let currentInstanceID = configurations[keyID, default: .tallyDefault].sub2API.instanceID
         if let candidateSourceInstanceID {
+            let configurationsByInstanceID = activeSub2APIConfigurationsByInstanceID()
             guard candidateSourceInstanceID != currentInstanceID,
-                  activeSub2APIConfigurationsByInstanceID()[candidateSourceInstanceID] != nil,
+                  let candidateConfiguration = configurationsByInstanceID[candidateSourceInstanceID],
+                  isSub2APICustomReferenceRoot(candidateConfiguration),
+                  !isSub2APIInstanceReferenced(currentInstanceID, in: configurationsByInstanceID),
                   !sub2APIReferenceChain(
                       startingAt: candidateSourceInstanceID,
-                      contains: currentInstanceID,
-                      sourceInstanceID: { $0.dataSourceInstanceID }
+                      contains: currentInstanceID
                   )
             else {
                 return false
@@ -1728,28 +1669,6 @@ nonisolated struct DeckGridInteractionState: Equatable {
         return configurationsByInstanceID
     }
 
-    private func resolvedSub2APIBearerKey(
-        for instanceID: String,
-        visitedInstanceIDs: Set<String>
-    ) -> String {
-        guard !visitedInstanceIDs.contains(instanceID),
-              let configuration = activeSub2APIConfigurationsByInstanceID()[instanceID]
-        else {
-            return ""
-        }
-
-        guard let sourceInstanceID = configuration.bearerKeySourceInstanceID else {
-            return configuration.bearerKey
-        }
-
-        var visitedInstanceIDs = visitedInstanceIDs
-        visitedInstanceIDs.insert(instanceID)
-        return resolvedSub2APIBearerKey(
-            for: sourceInstanceID,
-            visitedInstanceIDs: visitedInstanceIDs
-        )
-    }
-
     private func resolvedSub2APIDataSourceInstanceID(
         for instanceID: String,
         visitedInstanceIDs: Set<String>
@@ -1773,20 +1692,24 @@ nonisolated struct DeckGridInteractionState: Equatable {
     }
 
     private func sub2APIReferenceOptions(
-        for currentInstanceID: String,
-        sourceInstanceID: (DeckKeySub2APIConfiguration) -> String?
-    ) -> [DeckKeySub2APIBearerKeyReferenceOption] {
-        activeSub2APIConfigurationsByInstanceID()
-            .filter { instanceID, _ in
+        for currentInstanceID: String
+    ) -> [DeckKeySub2APIReferenceOption] {
+        let configurationsByInstanceID = activeSub2APIConfigurationsByInstanceID()
+        guard !isSub2APIInstanceReferenced(currentInstanceID, in: configurationsByInstanceID) else {
+            return []
+        }
+
+        return configurationsByInstanceID
+            .filter { instanceID, configuration in
                 instanceID != currentInstanceID
+                    && isSub2APICustomReferenceRoot(configuration)
                     && !sub2APIReferenceChain(
                         startingAt: instanceID,
-                        contains: currentInstanceID,
-                        sourceInstanceID: sourceInstanceID
+                        contains: currentInstanceID
                     )
             }
             .map { instanceID, configuration in
-                DeckKeySub2APIBearerKeyReferenceOption(
+                DeckKeySub2APIReferenceOption(
                     instanceID: instanceID,
                     title: "\(configuration.serviceDisplayName) (\(configuration.displayName))"
                 )
@@ -1799,10 +1722,22 @@ nonisolated struct DeckGridInteractionState: Equatable {
             }
     }
 
+    private func isSub2APICustomReferenceRoot(_ configuration: DeckKeySub2APIConfiguration) -> Bool {
+        configuration.dataSourceInstanceID == nil
+    }
+
+    private func isSub2APIInstanceReferenced(
+        _ instanceID: String,
+        in configurationsByInstanceID: [String: DeckKeySub2APIConfiguration]
+    ) -> Bool {
+        configurationsByInstanceID.values.contains { configuration in
+            configuration.dataSourceInstanceID == instanceID
+        }
+    }
+
     private func sub2APIReferenceChain(
         startingAt instanceID: String,
-        contains targetInstanceID: String,
-        sourceInstanceID: (DeckKeySub2APIConfiguration) -> String?
+        contains targetInstanceID: String
     ) -> Bool {
         var nextInstanceID: String? = instanceID
         var visitedInstanceIDs: Set<String> = []
@@ -1813,7 +1748,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
             if instanceID == targetInstanceID {
                 return true
             }
-            nextInstanceID = configurationsByInstanceID[instanceID].flatMap(sourceInstanceID)
+            nextInstanceID = configurationsByInstanceID[instanceID]?.dataSourceInstanceID
         }
 
         return false
