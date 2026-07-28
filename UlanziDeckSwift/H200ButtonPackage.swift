@@ -8,7 +8,16 @@ nonisolated struct H200ButtonPackage: Equatable {
 }
 
 nonisolated protocol H200ButtonIconRendering {
-    func pngData(for display: DeckKeyDisplay) throws -> Data
+    func pngData(
+        for display: DeckKeyDisplay,
+        colorTemperatureKelvin: Double?
+    ) throws -> Data
+}
+
+extension H200ButtonIconRendering {
+    nonisolated func pngData(for display: DeckKeyDisplay) throws -> Data {
+        try pngData(for: display, colorTemperatureKelvin: nil)
+    }
 }
 
 nonisolated struct H200ButtonPackageBuilder {
@@ -18,7 +27,10 @@ nonisolated struct H200ButtonPackageBuilder {
         self.renderer = renderer
     }
 
-    func buildPackage(displays: [DeckKeyDisplay]) throws -> H200ButtonPackage {
+    func buildPackage(
+        displays: [DeckKeyDisplay],
+        colorTemperatureKelvin: Double? = nil
+    ) throws -> H200ButtonPackage {
         let sortedDisplays = displays.sorted { first, second in
             if first.row == second.row {
                 return first.column < second.column
@@ -30,7 +42,13 @@ nonisolated struct H200ButtonPackageBuilder {
         let manifest = try buildManifest(displays: sortedDisplays)
         let manifestData = try makeJSONData(manifest)
         let imageFiles = try sortedDisplays.map { display in
-            ZIPArchiveFile(path: iconPath(for: display), data: try imageData(for: display))
+            ZIPArchiveFile(
+                path: iconPath(for: display),
+                data: try imageData(
+                    for: display,
+                    colorTemperatureKelvin: colorTemperatureKelvin
+                )
+            )
         }
         let payload = try makeSafePayload(manifestData: manifestData, imageFiles: imageFiles)
 
@@ -64,9 +82,15 @@ nonisolated struct H200ButtonPackageBuilder {
         return try encoder.encode(manifest)
     }
 
-    private func imageData(for display: DeckKeyDisplay) throws -> Data {
+    private func imageData(
+        for display: DeckKeyDisplay,
+        colorTemperatureKelvin: Double?
+    ) throws -> Data {
         guard display.isWide && display.displayMode != .function else {
-            return try renderer.pngData(for: display)
+            return try renderer.pngData(
+                for: display,
+                colorTemperatureKelvin: colorTemperatureKelvin
+            )
         }
 
         return try H200ButtonIconRenderer.transparentPNGData(size: display.devicePixelSize)
@@ -294,7 +318,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         return try pngData(from: rep)
     }
 
-    func pngData(for display: DeckKeyDisplay) throws -> Data {
+    func pngData(
+        for display: DeckKeyDisplay,
+        colorTemperatureKelvin: Double?
+    ) throws -> Data {
         let size = display.devicePixelSize
         let rep = try Self.makeBitmap(size: size)
 
@@ -304,7 +331,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         draw(display: display, in: NSRect(x: 0, y: 0, width: size.width, height: size.height))
         NSGraphicsContext.restoreGraphicsState()
 
-        return try Self.pngData(from: rep)
+        return try H200ButtonColorTemperatureFilter.pngData(
+            from: rep,
+            colorTemperatureKelvin: colorTemperatureKelvin
+        )
     }
 
     private static func makeBitmap(size: H200DeviceTarget.PixelSize) throws -> NSBitmapImageRep {
@@ -804,4 +834,5 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
 nonisolated enum H200ButtonIconRenderError: Error, Equatable {
     case cannotCreateBitmap
     case cannotEncodePNG
+    case cannotApplyColorTemperature
 }

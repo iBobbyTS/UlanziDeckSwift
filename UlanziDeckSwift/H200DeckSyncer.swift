@@ -107,6 +107,7 @@ nonisolated protocol H200DeckSyncing: Sendable {
     func sendStartupPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult
     func sendPartialPackage(displays: [DeckKeyDisplay]) -> H200DeckSyncResult
     func setBrightness(percent: Int) -> H200DeckCommandResult
+    func setColorTemperature(kelvin: Double?)
     func setInternalRefreshPaused(_ paused: Bool)
     func setInputHandler(_ handler: H200InputHandler?)
     func close()
@@ -118,6 +119,7 @@ extension H200DeckSyncing {
     }
 
     nonisolated func setBrightness(percent: Int) -> H200DeckCommandResult { .success(elapsedNanoseconds: 0) }
+    nonisolated func setColorTemperature(kelvin: Double?) {}
     nonisolated func setInternalRefreshPaused(_ paused: Bool) {}
     nonisolated func setInputHandler(_ handler: H200InputHandler?) {}
     nonisolated func close() {}
@@ -288,6 +290,7 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
     private var connection: H200HIDConnection?
     private var inputHandler: H200InputHandler?
     private var currentSmallWindowMode: H200SmallWindowMode = .background
+    private var colorTemperatureKelvin: Double?
     private var isInternalRefreshPaused = false
 
     nonisolated init(
@@ -342,6 +345,12 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
         }
     }
 
+    func setColorTemperature(kelvin: Double?) {
+        operationQueue.sync {
+            colorTemperatureKelvin = kelvin
+        }
+    }
+
     func setInternalRefreshPaused(_ paused: Bool) {
         operationQueue.async { [weak self] in
             self?.setInternalRefreshPausedOnQueue(paused)
@@ -386,7 +395,10 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
     private func sendStartupPackageOnQueue(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
         let package: H200ButtonPackage
         do {
-            package = try packageBuilder.buildPackage(displays: displays)
+            package = try packageBuilder.buildPackage(
+                displays: displays,
+                colorTemperatureKelvin: colorTemperatureKelvin
+            )
         } catch {
             return .failure(.packageBuildFailed(String(describing: error)), elapsedNanoseconds: 0)
         }
@@ -404,7 +416,10 @@ nonisolated final class H200HIDDeckSyncer: H200DeckSyncing, @unchecked Sendable 
     private func sendPartialPackageOnQueue(displays: [DeckKeyDisplay]) -> H200DeckSyncResult {
         let package: H200ButtonPackage
         do {
-            package = try packageBuilder.buildPackage(displays: displays)
+            package = try packageBuilder.buildPackage(
+                displays: displays,
+                colorTemperatureKelvin: colorTemperatureKelvin
+            )
         } catch {
             return .failure(.packageBuildFailed(String(describing: error)), elapsedNanoseconds: 0)
         }

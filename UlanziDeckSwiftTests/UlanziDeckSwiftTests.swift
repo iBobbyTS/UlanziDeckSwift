@@ -15,6 +15,22 @@ struct UlanziDeckSwiftTests {
         #expect(sidebarFunctions.count == Set(sidebarFunctions).count)
     }
 
+    @Test("主页选择器把新增按钮放在所有页码之后")
+    func rootPageSelectorPlacesAdditionAfterEveryPage() {
+        let pages = [
+            RootPageNavigationItem(id: "root", title: "1", isCurrent: true, canDelete: true),
+            RootPageNavigationItem(id: "root-2", title: "2", isCurrent: false, canDelete: false),
+            RootPageNavigationItem(id: "root-3", title: "3", isCurrent: false, canDelete: false),
+        ]
+
+        #expect(ContentView.rootPageSelectorElements(from: pages) == [
+            .page(pages[0]),
+            .page(pages[1]),
+            .page(pages[2]),
+            .addition,
+        ])
+    }
+
     @Test func h200PrototypeLayoutContainsFourteenNumberedKeys() {
         let layout = DeckGridLayout.h200Prototype
 
@@ -1369,7 +1385,8 @@ struct UlanziDeckSwiftTests {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
 
-        #expect(state.assign(.codexUsage, to: 2))
+        let didAssignCodexUsage = state.assign(.codexUsage, to: 2)
+        #expect(didAssignCodexUsage)
         var configuration = try #require(state.configuration(for: 2))
         let directBackground = try #require(configuration.defaultButtonBackgroundPNGData)
         let blurredBackground = try #require(configuration.defaultButtonBlurredBackgroundPNGData)
@@ -4759,6 +4776,38 @@ struct UlanziDeckSwiftTests {
         #expect(BuiltInDisplayBrightnessMapping.deckPercent(for: -0.5) == 0)
     }
 
+    @Test func nightShiftStrengthMapsLinearlyFromSixThousandFiveHundredToTwoThousandFiveHundredKelvin() {
+        #expect(NightShiftColorTemperatureMapping.kelvin(
+            for: NightShiftState(isEnabled: false, strength: 1)
+        ) == nil)
+        #expect(NightShiftColorTemperatureMapping.kelvin(
+            for: NightShiftState(isEnabled: true, strength: 0)
+        ) == 6_500)
+        #expect(NightShiftColorTemperatureMapping.kelvin(
+            for: NightShiftState(isEnabled: true, strength: 0.5)
+        ) == 4_500)
+        #expect(NightShiftColorTemperatureMapping.kelvin(
+            for: NightShiftState(isEnabled: true, strength: 1)
+        ) == 2_500)
+    }
+
+    @Test func buttonColorTemperatureFilterWarmsWhitePixels() throws {
+        let sourceData = Self.solidColorIconPNGData(color: .white)
+        let sourceBitmap = try #require(NSBitmapImageRep(data: sourceData))
+
+        let warmData = try H200ButtonColorTemperatureFilter.pngData(
+            from: sourceBitmap,
+            colorTemperatureKelvin: 2_500
+        )
+        let warmBitmap = try #require(NSBitmapImageRep(data: warmData))
+        let warmColor = try #require(
+            warmBitmap.colorAt(x: 32, y: 32)?.usingColorSpace(.deviceRGB)
+        )
+
+        #expect(warmColor.redComponent >= warmColor.greenComponent)
+        #expect(warmColor.greenComponent > warmColor.blueComponent)
+    }
+
     @MainActor
     @Test func displayServicesReaderReadsBrightnessInsideApplicationTestHost() {
         var displayIDs = [CGDirectDisplayID](repeating: 0, count: 16)
@@ -4806,21 +4855,57 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func nightShiftMonitorOnlyReportsStateChangesWhileEnabled() {
+        let reader = FakeNightShiftStateReader(
+            state: NightShiftState(isEnabled: false, strength: 0.5)
+        )
+        let monitor = NightShiftMonitor(reader: reader, pollInterval: 3_600)
+        var observedStates: [NightShiftState] = []
+        monitor.onStateChange = {
+            observedStates.append($0)
+        }
+
+        monitor.start()
+        monitor.refresh()
+        reader.state = NightShiftState(isEnabled: true, strength: 0.5)
+        monitor.refresh()
+        monitor.stop()
+        reader.state = NightShiftState(isEnabled: true, strength: 1)
+        monitor.refresh()
+
+        #expect(observedStates == [
+            NightShiftState(isEnabled: false, strength: 0.5),
+            NightShiftState(isEnabled: true, strength: 0.5),
+        ])
+        #expect(!monitor.isMonitoring)
+    }
+
+    @MainActor
     @Test func followingBuiltInDisplayBrightnessPersistsAndUpdatesConnectedDeck() async throws {
         let reader = FakeBuiltInDisplayBrightnessReader(brightness: 0.35)
         let monitor = BuiltInDisplayBrightnessMonitor(reader: reader, pollInterval: 3_600)
+        let nightShiftReader = FakeNightShiftStateReader(
+            state: NightShiftState(isEnabled: true, strength: 0.5)
+        )
+        let nightShiftMonitor = NightShiftMonitor(
+            reader: nightShiftReader,
+            pollInterval: 3_600
+        )
         let store = FakeDeckConfigurationStore(loadedFollowsBuiltInDisplayBrightness: true)
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
             syncer: syncer,
             configurationStore: store,
-            builtInDisplayBrightnessMonitor: monitor
+            builtInDisplayBrightnessMonitor: monitor,
+            nightShiftMonitor: nightShiftMonitor
         )
 
         #expect(model.followsBuiltInDisplayBrightness)
         #expect(model.brightnessPercent == 50)
         #expect(monitor.isMonitoring)
+        #expect(nightShiftMonitor.isMonitoring)
+        #expect(syncer.colorTemperatures == [4_500])
         #expect(store.savedBrightnessPercents == [50])
 
         model.checkOnLaunch()
@@ -4835,9 +4920,21 @@ struct UlanziDeckSwiftTests {
         }
         #expect(model.brightnessPercent == 100)
 
+        nightShiftReader.state = NightShiftState(isEnabled: true, strength: 1)
+        nightShiftMonitor.refresh()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 2
+        }
+        #expect(syncer.colorTemperatures == [4_500, 2_500])
+
         model.setFollowsBuiltInDisplayBrightness(false)
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 3
+        }
         #expect(store.savedFollowsBuiltInDisplayBrightness == [false])
         #expect(!monitor.isMonitoring)
+        #expect(!nightShiftMonitor.isMonitoring)
+        #expect(syncer.colorTemperatures == [4_500, 2_500, nil])
     }
 
     @MainActor
@@ -7840,6 +7937,7 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
     private var storedSentDisplays: [[DeckKeyDisplay]] = []
     private var storedPartialDisplays: [[DeckKeyDisplay]] = []
     private var storedBrightnessPercents: [Int] = []
+    private var storedColorTemperatures: [Double?] = []
     private var storedSmallWindowModes: [H200SmallWindowMode] = []
     private var storedInternalRefreshPausedValues: [Bool] = []
     private var inputHandler: H200InputHandler?
@@ -7856,6 +7954,10 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
 
     var brightnessPercents: [Int] {
         locked { storedBrightnessPercents }
+    }
+
+    var colorTemperatures: [Double?] {
+        locked { storedColorTemperatures }
     }
 
     var smallWindowModes: [H200SmallWindowMode] {
@@ -7937,6 +8039,12 @@ private final class FakeH200DeckSyncer: H200DeckSyncing, @unchecked Sendable {
         return .success(elapsedNanoseconds: brightnessDelayNanoseconds)
     }
 
+    func setColorTemperature(kelvin: Double?) {
+        locked {
+            storedColorTemperatures.append(kelvin)
+        }
+    }
+
     func setInternalRefreshPaused(_ paused: Bool) {
         locked {
             storedInternalRefreshPausedValues.append(paused)
@@ -7986,13 +8094,19 @@ private extension H200DeckSyncResult {
 }
 
 private struct FakeH200ButtonIconRenderer: H200ButtonIconRendering {
-    func pngData(for display: DeckKeyDisplay) throws -> Data {
+    func pngData(
+        for display: DeckKeyDisplay,
+        colorTemperatureKelvin: Double?
+    ) throws -> Data {
         Data([0x89, 0x50, 0x4e, 0x47, UInt8(display.id)])
     }
 }
 
 private struct FailingH200ButtonIconRenderer: H200ButtonIconRendering {
-    func pngData(for display: DeckKeyDisplay) throws -> Data {
+    func pngData(
+        for display: DeckKeyDisplay,
+        colorTemperatureKelvin: Double?
+    ) throws -> Data {
         throw H200ButtonIconRenderError.cannotEncodePNG
     }
 }
@@ -8257,6 +8371,19 @@ private final class FakeBuiltInDisplayBrightnessReader: BuiltInDisplayBrightness
 
     func currentBrightness() -> Double? {
         brightness
+    }
+}
+
+@MainActor
+private final class FakeNightShiftStateReader: NightShiftStateReading {
+    var state: NightShiftState?
+
+    init(state: NightShiftState?) {
+        self.state = state
+    }
+
+    func currentState() -> NightShiftState? {
+        state
     }
 }
 

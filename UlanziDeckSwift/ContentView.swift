@@ -20,6 +20,20 @@ struct ContentView: View {
         var text: String
     }
 
+    nonisolated enum RootPageSelectorElement: Equatable, Identifiable {
+        case page(RootPageNavigationItem)
+        case addition
+
+        var id: String {
+            switch self {
+            case let .page(item):
+                "page:\(item.id)"
+            case .addition:
+                "addition"
+            }
+        }
+    }
+
     let connectedDevice: H200DeviceIdentity?
     let brightnessPercent: Int
     let followsBuiltInDisplayBrightness: Bool
@@ -321,24 +335,25 @@ struct ContentView: View {
     private var pageSelector: some View {
         HStack(spacing: 6) {
             if interactionState.isOnRootPage {
-                if let homeItem = interactionState.rootPageNavigationItems.first {
-                    rootPageSelectorItem(homeItem)
-                }
-
-                Button(action: onRootPageAddition) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 11, weight: .bold))
-                        .frame(width: 22, height: 22)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(interactionState.canAddRootPage ? Color.secondary : Color.secondary.opacity(0.38))
-                .disabled(!interactionState.canAddRootPage)
-                .help(interactionState.canAddRootPage ? "新增页面" : "最多允许 10 页")
-                .accessibilityLabel("新增页面")
-
-                ForEach(interactionState.rootPageNavigationItems.dropFirst()) { item in
-                    rootPageSelectorItem(item)
+                ForEach(Self.rootPageSelectorElements(
+                    from: interactionState.rootPageNavigationItems
+                )) { element in
+                    switch element {
+                    case let .page(item):
+                        rootPageSelectorItem(item)
+                    case .addition:
+                        Button(action: onRootPageAddition) {
+                            Image(systemName: "plus")
+                                .font(.system(size: 11, weight: .bold))
+                                .frame(width: 22, height: 22)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(interactionState.canAddRootPage ? Color.secondary : Color.secondary.opacity(0.38))
+                        .disabled(!interactionState.canAddRootPage)
+                        .help(interactionState.canAddRootPage ? "新增页面" : "最多允许 10 页")
+                        .accessibilityLabel("新增页面")
+                    }
                 }
             } else {
                 ForEach(Array(interactionState.navigationPathTitles.enumerated()), id: \.offset) { index, title in
@@ -360,6 +375,12 @@ struct ContentView: View {
         .padding(2)
         .frame(height: pageSelectorHeight)
         .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+    }
+
+    nonisolated static func rootPageSelectorElements(
+        from items: [RootPageNavigationItem]
+    ) -> [RootPageSelectorElement] {
+        items.map(RootPageSelectorElement.page) + [.addition]
     }
 
     private func rootPageSelectorItem(_ item: RootPageNavigationItem) -> some View {

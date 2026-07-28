@@ -36,6 +36,8 @@ final class H200ConnectionModel: ObservableObject {
     private let mihoyoSessionStore: MihoyoSessionStoring
     private let pageFolderAutoReturnTimer: PageFolderAutoReturnTimer
     private let builtInDisplayBrightnessMonitor: BuiltInDisplayBrightnessMonitor
+    private let nightShiftMonitor: NightShiftMonitor
+    private var colorTemperatureKelvin: Double?
     private var hasPersistedBrightnessPercent: Bool
     private var mihoyoSession: MihoyoLoginSession?
     private let longPressDurationNanoseconds: UInt64
@@ -106,7 +108,8 @@ final class H200ConnectionModel: ObservableObject {
         codexUsageRefreshMinuteDuration: TimeInterval = 60,
         mihoyoGameRefreshMinuteDuration: TimeInterval = 60,
         pageFolderAutoReturnDurationNanoseconds: UInt64 = 30_000_000_000,
-        builtInDisplayBrightnessMonitor: BuiltInDisplayBrightnessMonitor? = nil
+        builtInDisplayBrightnessMonitor: BuiltInDisplayBrightnessMonitor? = nil,
+        nightShiftMonitor: NightShiftMonitor? = nil
     ) {
         self.discovery = discovery
         self.syncer = syncer
@@ -125,6 +128,7 @@ final class H200ConnectionModel: ObservableObject {
         )
         self.builtInDisplayBrightnessMonitor = builtInDisplayBrightnessMonitor
             ?? BuiltInDisplayBrightnessMonitor()
+        self.nightShiftMonitor = nightShiftMonitor ?? NightShiftMonitor()
         self.longPressDurationNanoseconds = longPressDurationNanoseconds
         self.mihoyoLoginPollNanoseconds = mihoyoLoginPollNanoseconds
         self.sub2APIRefreshSecondDuration = sub2APIRefreshSecondDuration
@@ -149,8 +153,12 @@ final class H200ConnectionModel: ObservableObject {
         self.builtInDisplayBrightnessMonitor.onBrightnessChange = { [weak self] brightness in
             self?.builtInDisplayBrightnessChanged(to: brightness)
         }
+        self.nightShiftMonitor.onStateChange = { [weak self] state in
+            self?.nightShiftStateChanged(to: state)
+        }
         if followsBuiltInDisplayBrightness {
             self.builtInDisplayBrightnessMonitor.start()
+            self.nightShiftMonitor.start()
         }
         self.syncer.setInputHandler { [weak self] event in
             Task { @MainActor [weak self] in
@@ -1040,8 +1048,11 @@ final class H200ConnectionModel: ObservableObject {
         configurationStore.saveFollowsBuiltInDisplayBrightness(follows)
         if follows {
             builtInDisplayBrightnessMonitor.start()
+            nightShiftMonitor.start()
         } else {
             builtInDisplayBrightnessMonitor.stop()
+            nightShiftMonitor.stop()
+            updateColorTemperature(kelvin: nil)
         }
     }
 
@@ -1082,6 +1093,30 @@ final class H200ConnectionModel: ObservableObject {
             persist: true,
             sendToDevice: canAdjustBrightness
         )
+    }
+
+    private func nightShiftStateChanged(to state: NightShiftState) {
+        guard followsBuiltInDisplayBrightness else {
+            return
+        }
+
+        updateColorTemperature(
+            kelvin: NightShiftColorTemperatureMapping.kelvin(for: state)
+        )
+    }
+
+    private func updateColorTemperature(kelvin: Double?) {
+        guard colorTemperatureKelvin != kelvin else {
+            return
+        }
+
+        colorTemperatureKelvin = kelvin
+        displayRevision += 1
+        if syncSummary == nil {
+            needsFullDisplaySyncAfterStartup = true
+        }
+        syncer.setColorTemperature(kelvin: kelvin)
+        syncCurrentDisplays()
     }
 
     private var isInternalRefreshPaused: Bool {
