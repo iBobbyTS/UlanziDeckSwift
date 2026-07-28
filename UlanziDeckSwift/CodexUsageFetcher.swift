@@ -3,6 +3,14 @@ import Foundation
 nonisolated struct CodexUsageQuota: Equatable, Sendable {
     let remainingPercent: Int
     let resetAfterSeconds: Int
+    let limitWindowSeconds: Int
+    let usedPercent: Double
+
+    var remainingTimeVsUsage: Double {
+        let remainingWindowFraction = Double(resetAfterSeconds) / Double(limitWindowSeconds)
+        let usedFraction = usedPercent * 0.01
+        return remainingWindowFraction / usedFraction
+    }
 
     var resetAfterText: String {
         let clampedSeconds = max(0, resetAfterSeconds)
@@ -23,6 +31,42 @@ nonisolated enum CodexUsageResult: Equatable, Sendable {
     case networkError(String)
 }
 
+nonisolated enum CodexUsageColorMode: String, Codable, Equatable, CaseIterable, Identifiable, Sendable {
+    case highIsRed
+    case lowIsRed
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .highIsRed:
+            return "量多标红"
+        case .lowIsRed:
+            return "量少标红"
+        }
+    }
+
+    func metricColor(for remainingPercent: Int) -> MihoyoGameMetricColor {
+        if remainingPercent > 95 {
+            return self == .highIsRed ? .red : .green
+        }
+        if remainingPercent < 5 {
+            return self == .highIsRed ? .green : .red
+        }
+        return .yellow
+    }
+
+    func resetTimeMetricColor(for remainingTimeVsUsage: Double) -> MihoyoGameMetricColor {
+        if remainingTimeVsUsage < 0.9 {
+            return self == .highIsRed ? .red : .green
+        }
+        if remainingTimeVsUsage > 1.1 {
+            return self == .highIsRed ? .green : .red
+        }
+        return .yellow
+    }
+}
+
 nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     static let defaultRefreshIntervalMinutes = 10
     static let refreshIntervalOptionsMinutes = [1, 5, 10, 30, 60]
@@ -32,6 +76,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     var authFilePath: String?
     var bookmarkData: Data?
     var refreshIntervalMinutes: Int
+    var colorMode: CodexUsageColorMode
 
     /// 最近一次查询的结果。不参与持久化，反序列化时使用空值。
     var lastResult: CodexUsageResult?
@@ -40,17 +85,20 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         authFilePath: String? = nil,
         bookmarkData: Data? = nil,
         refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
+        colorMode: CodexUsageColorMode = .lowIsRed,
         lastResult: CodexUsageResult? = nil
     ) {
         self.authFilePath = authFilePath
         self.bookmarkData = bookmarkData
         self.refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(refreshIntervalMinutes)
+        self.colorMode = colorMode
         self.lastResult = lastResult
     }
 
     init(
         authFileURL: URL,
-        refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes
+        refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
+        colorMode: CodexUsageColorMode = .lowIsRed
     ) throws {
         authFilePath = authFileURL.path
         bookmarkData = try authFileURL.bookmarkData(
@@ -59,6 +107,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
             relativeTo: nil
         )
         self.refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(refreshIntervalMinutes)
+        self.colorMode = colorMode
         lastResult = nil
     }
 
@@ -70,6 +119,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         case authFilePath
         case bookmarkData
         case refreshIntervalMinutes
+        case colorMode
     }
 
     init(from decoder: Decoder) throws {
@@ -80,6 +130,8 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
             try container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes)
                 ?? Self.defaultRefreshIntervalMinutes
         )
+        colorMode = try container.decodeIfPresent(CodexUsageColorMode.self, forKey: .colorMode)
+            ?? .lowIsRed
         lastResult = nil
     }
 
@@ -88,6 +140,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         try container.encodeIfPresent(authFilePath, forKey: .authFilePath)
         try container.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
         try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
+        try container.encode(colorMode, forKey: .colorMode)
     }
 
     static func normalizedRefreshIntervalMinutes(_ minutes: Int) -> Int {
@@ -206,26 +259,23 @@ nonisolated struct CodexUsageFetcher: CodexUsageFetching {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let rateLimit = object["rate_limit"] as? [String: Any],
               let primaryWindow = rateLimit["primary_window"] as? [String: Any],
-              let remainingPercent = Self.remainingPercent(in: primaryWindow),
-              let resetAfterSeconds = Self.nonnegativeInteger(from: primaryWindow["reset_after_seconds"])
+              let usedPercent = Self.finiteNumber(from: primaryWindow["used_percent"]),
+              let resetAfterSeconds = Self.nonnegativeInteger(from: primaryWindow["reset_after_seconds"]),
+              let limitWindowSeconds = Self.positiveInteger(from: primaryWindow["limit_window_seconds"])
         else {
             return .networkError("解析额度响应失败")
         }
 
         return .success(CodexUsageQuota(
-            remainingPercent: remainingPercent,
-            resetAfterSeconds: resetAfterSeconds
+            remainingPercent: Self.remainingPercent(from: usedPercent),
+            resetAfterSeconds: resetAfterSeconds,
+            limitWindowSeconds: limitWindowSeconds,
+            usedPercent: usedPercent
         ))
     }
 
-    private static func remainingPercent(in value: Any?) -> Int? {
-        guard let window = value as? [String: Any],
-              let usedPercent = number(from: window["used_percent"])
-        else {
-            return nil
-        }
-
-        return min(100, max(0, Int(round(100 - usedPercent))))
+    private static func remainingPercent(from usedPercent: Double) -> Int {
+        min(100, max(0, Int(round(100 - usedPercent))))
     }
 
     private static func number(from value: Any?) -> Double? {
@@ -240,9 +290,23 @@ nonisolated struct CodexUsageFetcher: CodexUsageFetching {
     }
 
     private static func nonnegativeInteger(from value: Any?) -> Int? {
-        guard let number = number(from: value), number.isFinite else {
+        guard let number = finiteNumber(from: value) else {
             return nil
         }
         return max(0, Int(number.rounded(.down)))
+    }
+
+    private static func positiveInteger(from value: Any?) -> Int? {
+        guard let number = finiteNumber(from: value), number >= 1 else {
+            return nil
+        }
+        return Int(number.rounded(.down))
+    }
+
+    private static func finiteNumber(from value: Any?) -> Double? {
+        guard let number = number(from: value), number.isFinite else {
+            return nil
+        }
+        return number
     }
 }

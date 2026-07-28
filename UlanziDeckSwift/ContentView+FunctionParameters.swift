@@ -372,6 +372,20 @@ extension ContentView {
                         .labelsHidden()
                         .pickerStyle(.menu)
                         .frame(width: 110, alignment: .leading)
+
+                        Text("额度颜色")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+
+                        Picker("额度颜色", selection: selectedCodexUsageColorModeBinding) {
+                            ForEach(CodexUsageColorMode.allCases) { colorMode in
+                                Text(colorMode.title).tag(colorMode)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 110, alignment: .leading)
                     }
                 }
             ) {
@@ -917,6 +931,17 @@ extension ContentView {
         )
     }
 
+    var selectedCodexUsageColorModeBinding: Binding<CodexUsageColorMode> {
+        Binding(
+            get: {
+                selectedConfiguration?.codexUsage.colorMode ?? .lowIsRed
+            },
+            set: { colorMode in
+                onCodexUsageColorModeChange(colorMode)
+            }
+        )
+    }
+
     var selectedSub2APIBearerKeyBinding: Binding<String> {
         Binding(
             get: {
@@ -1102,7 +1127,8 @@ extension ContentView {
             onCodexAuthFileSelection(try DeckKeyCodexUsageConfiguration(
                 authFileURL: url,
                 refreshIntervalMinutes: selectedConfiguration?.codexUsage.refreshIntervalMinutes
-                    ?? DeckKeyCodexUsageConfiguration.defaultRefreshIntervalMinutes
+                    ?? DeckKeyCodexUsageConfiguration.defaultRefreshIntervalMinutes,
+                colorMode: selectedConfiguration?.codexUsage.colorMode ?? .lowIsRed
             ))
         } catch {
             showWarningAlert(

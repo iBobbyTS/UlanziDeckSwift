@@ -62,6 +62,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let subtitle: String
     let mihoyoGame: MihoyoGame?
     let mihoyoGameButtonContent: MihoyoGameButtonContent?
+    let codexUsageButtonContent: CodexUsageButtonContent?
     let sub2APIButtonContent: Sub2APIButtonContent?
     let folderButtonContent: FolderButtonContent?
     let fileButtonContent: FileButtonContent?
@@ -88,6 +89,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         displayMode = key.columnSpan > 1 ? configuration.displayMode : .function
         let configuredMihoyoGame = configuration.function.game
         var mihoyoGameButtonContent: MihoyoGameButtonContent?
+        var codexUsageButtonContent: CodexUsageButtonContent?
         var sub2APIButtonContent: Sub2APIButtonContent?
         var folderButtonContent: FolderButtonContent?
         var fileButtonContent: FileButtonContent?
@@ -228,6 +230,16 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             case .codexUsage:
                 switch configuration.codexUsage.lastResult {
                 case let .success(quota):
+                    codexUsageButtonContent = CodexUsageButtonContent(
+                        percentageText: "\(quota.remainingPercent)%",
+                        resetAfterText: quota.resetAfterText,
+                        percentageColor: configuration.codexUsage.colorMode.metricColor(
+                            for: quota.remainingPercent
+                        ),
+                        resetAfterColor: configuration.codexUsage.colorMode.resetTimeMetricColor(
+                            for: quota.remainingTimeVsUsage
+                        )
+                    )
                     title = configuration.visual.displayName(
                         fallback: "\(quota.remainingPercent)%"
                     )
@@ -285,6 +297,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             hasCustomBackground: configuration.visual.hasCustomBackground
         )
         self.mihoyoGameButtonContent = mihoyoGameButtonContent
+        self.codexUsageButtonContent = codexUsageButtonContent
         self.sub2APIButtonContent = sub2APIButtonContent
         self.folderButtonContent = folderButtonContent
         self.fileButtonContent = fileButtonContent
@@ -318,6 +331,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             subtitle: subtitle,
             mihoyoGame: mihoyoGame,
             mihoyoGameButtonContent: mihoyoGameButtonContent,
+            codexUsageButtonContent: codexUsageButtonContent,
             sub2APIButtonContent: sub2APIButtonContent,
             folderButtonContent: folderButtonContent,
             fileButtonContent: fileButtonContent,
@@ -341,6 +355,7 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let subtitle: String
     let mihoyoGame: MihoyoGame?
     let mihoyoGameButtonContent: MihoyoGameButtonContent?
+    let codexUsageButtonContent: CodexUsageButtonContent?
     let sub2APIButtonContent: Sub2APIButtonContent?
     let folderButtonContent: FolderButtonContent?
     let fileButtonContent: FileButtonContent?
@@ -350,6 +365,13 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let pageBackButtonContent: PageBackButtonContent?
     let buttonVisualContent: ButtonVisualContent
     let devicePixelSize: H200DeviceTarget.PixelSize
+}
+
+nonisolated struct CodexUsageButtonContent: Equatable, Sendable {
+    let percentageText: String
+    let resetAfterText: String
+    let percentageColor: MihoyoGameMetricColor
+    let resetAfterColor: MihoyoGameMetricColor
 }
 
 nonisolated struct ButtonVisualContent: Equatable {
@@ -1359,6 +1381,19 @@ nonisolated struct DeckGridInteractionState: Equatable {
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].codexUsage.refreshIntervalMinutes =
             DeckKeyCodexUsageConfiguration.normalizedRefreshIntervalMinutes(minutes)
+        return true
+    }
+
+    @discardableResult
+    mutating func setCodexUsageColorMode(_ colorMode: CodexUsageColorMode, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .codexUsage
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].codexUsage.colorMode = colorMode
         return true
     }
 

@@ -343,6 +343,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             drawShortcutContent(display.title, in: cardRect, buttonRect: rect)
             return
         }
+        if let content = display.codexUsageButtonContent {
+            drawCodexUsageContent(content, in: cardRect, buttonRect: rect)
+            return
+        }
         if let content = display.mihoyoGameButtonContent {
             drawMihoyoGameContent(content, in: cardRect, buttonRect: rect)
             return
@@ -595,6 +599,48 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             maximumFont: valueSuffixFont,
             color: mihoyoGameMetricColor(for: content.dailyColor),
             rect: NSRect(x: rect.minX, y: top - totalHeight, width: rect.width, height: valueHeight),
+            shadow: shadow
+        )
+    }
+
+    private func drawCodexUsageContent(
+        _ content: CodexUsageButtonContent,
+        in rect: NSRect,
+        buttonRect: NSRect
+    ) {
+        let percentageHeight = buttonRect.height * 0.42
+        let resetHeight = buttonRect.height * 0.19
+        let gap = buttonRect.height * 0.035
+        let totalHeight = percentageHeight + gap + resetHeight
+        let top = rect.midY + totalHeight / 2
+        let shadow = textShadow()
+
+        drawCenteredAutoSizedSingleLineText(
+            content.percentageText,
+            weight: .heavy,
+            maxFontSize: buttonRect.height * 0.39,
+            minFontSize: buttonRect.height * 0.20,
+            color: mihoyoGameMetricColor(for: content.percentageColor),
+            rect: NSRect(
+                x: rect.minX,
+                y: top - percentageHeight,
+                width: rect.width,
+                height: percentageHeight
+            ),
+            shadow: shadow
+        )
+        drawCenteredAutoSizedSingleLineText(
+            content.resetAfterText,
+            weight: .semibold,
+            maxFontSize: buttonRect.height * 0.16,
+            minFontSize: buttonRect.height * 0.09,
+            color: mihoyoGameMetricColor(for: content.resetAfterColor),
+            rect: NSRect(
+                x: rect.minX,
+                y: top - totalHeight,
+                width: rect.width,
+                height: resetHeight
+            ),
             shadow: shadow
         )
     }

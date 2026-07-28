@@ -6977,6 +6977,7 @@ struct UlanziDeckSwiftTests {
                 "primary_window": [
                     "used_percent": 21.6,
                     "reset_after_seconds": 183_845,
+                    "limit_window_seconds": 604_800,
                 ],
                 "secondary_window": NSNull(),
             ],
@@ -7013,7 +7014,9 @@ struct UlanziDeckSwiftTests {
 
         #expect(result == .success(CodexUsageQuota(
             remainingPercent: 78,
-            resetAfterSeconds: 183_845
+            resetAfterSeconds: 183_845,
+            limitWindowSeconds: 604_800,
+            usedPercent: 21.6
         )))
         let request = try #require(WebPageMetadataURLProtocol.receivedRequests.last)
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer access-token")
@@ -7026,9 +7029,12 @@ struct UlanziDeckSwiftTests {
             authFilePath: "/Users/test/.codex/auth.json",
             bookmarkData: Data("bookmark".utf8),
             refreshIntervalMinutes: 30,
+            colorMode: .highIsRed,
             lastResult: .success(CodexUsageQuota(
                 remainingPercent: 80,
-                resetAfterSeconds: 90_000
+                resetAfterSeconds: 90_000,
+                limitWindowSeconds: 604_800,
+                usedPercent: 20
             ))
         )
 
@@ -7038,6 +7044,7 @@ struct UlanziDeckSwiftTests {
         #expect(decoded.authFilePath == configuration.authFilePath)
         #expect(decoded.bookmarkData == configuration.bookmarkData)
         #expect(decoded.refreshIntervalMinutes == 30)
+        #expect(decoded.colorMode == .highIsRed)
         #expect(decoded.lastResult == nil)
         #expect(DeckKeyCodexUsageConfiguration.defaultRefreshIntervalMinutes == 10)
         #expect(DeckKeyCodexUsageConfiguration.refreshIntervalOptionsMinutes == [1, 5, 10, 30, 60])
@@ -7048,7 +7055,9 @@ struct UlanziDeckSwiftTests {
         var configuration = DeckKeyConfiguration(function: .codexUsage)
         configuration.codexUsage.lastResult = .success(CodexUsageQuota(
             remainingPercent: 74,
-            resetAfterSeconds: 593_588
+            resetAfterSeconds: 593_588,
+            limitWindowSeconds: 604_800,
+            usedPercent: 26
         ))
         let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
 
@@ -7061,15 +7070,104 @@ struct UlanziDeckSwiftTests {
 
         #expect(display.title == "74%")
         #expect(display.subtitle == "6天 20:53")
+        #expect(display.codexUsageButtonContent == CodexUsageButtonContent(
+            percentageText: "74%",
+            resetAfterText: "6天 20:53",
+            percentageColor: .yellow,
+            resetAfterColor: .red
+        ))
+    }
+
+    @Test func codexUsageColorModesUseStrictFiveAndNinetyFivePercentThresholds() {
+        #expect(CodexUsageColorMode.highIsRed.metricColor(for: 96) == .red)
+        #expect(CodexUsageColorMode.highIsRed.metricColor(for: 95) == .yellow)
+        #expect(CodexUsageColorMode.highIsRed.metricColor(for: 5) == .yellow)
+        #expect(CodexUsageColorMode.highIsRed.metricColor(for: 4) == .green)
+
+        #expect(CodexUsageColorMode.lowIsRed.metricColor(for: 96) == .green)
+        #expect(CodexUsageColorMode.lowIsRed.metricColor(for: 95) == .yellow)
+        #expect(CodexUsageColorMode.lowIsRed.metricColor(for: 5) == .yellow)
+        #expect(CodexUsageColorMode.lowIsRed.metricColor(for: 4) == .red)
+    }
+
+    @Test func codexUsageTimeColorsUseRemainingTimeVersusUsageRatio() {
+        #expect(CodexUsageColorMode.highIsRed.resetTimeMetricColor(for: 0.89) == .red)
+        #expect(CodexUsageColorMode.highIsRed.resetTimeMetricColor(for: 0.9) == .yellow)
+        #expect(CodexUsageColorMode.highIsRed.resetTimeMetricColor(for: 1.1) == .yellow)
+        #expect(CodexUsageColorMode.highIsRed.resetTimeMetricColor(for: 1.11) == .green)
+
+        #expect(CodexUsageColorMode.lowIsRed.resetTimeMetricColor(for: 0.89) == .green)
+        #expect(CodexUsageColorMode.lowIsRed.resetTimeMetricColor(for: 0.9) == .yellow)
+        #expect(CodexUsageColorMode.lowIsRed.resetTimeMetricColor(for: 1.1) == .yellow)
+        #expect(CodexUsageColorMode.lowIsRed.resetTimeMetricColor(for: 1.11) == .red)
+
+        let quota = CodexUsageQuota(
+            remainingPercent: 75,
+            resetAfterSeconds: 151_200,
+            limitWindowSeconds: 604_800,
+            usedPercent: 25
+        )
+        #expect(quota.remainingTimeVsUsage == 1)
+    }
+
+    @Test func codexUsageRendererUsesMihoyoMetricColorPreset() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var configuration = DeckKeyConfiguration(function: .codexUsage)
+        configuration.codexUsage.colorMode = .highIsRed
+        configuration.codexUsage.lastResult = .success(CodexUsageQuota(
+            remainingPercent: 4,
+            resetAfterSeconds: 3_600,
+            limitWindowSeconds: 604_800,
+            usedPercent: 96
+        ))
+        let display = DeckKeyDisplay(
+            key: layout.keys[0],
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+
+        #expect(Self.bitmapContainsPixel(
+            in: image,
+            xRange: 0..<image.pixelsWide,
+            yRange: 0..<image.pixelsHigh
+        ) { color in
+            color.redComponent > 0.75
+                && color.greenComponent < 0.35
+                && color.blueComponent < 0.35
+        })
+        #expect(Self.bitmapContainsPixel(
+            in: image,
+            xRange: 0..<image.pixelsWide,
+            yRange: 0..<image.pixelsHigh
+        ) { color in
+            color.redComponent < 0.35
+                && color.greenComponent > 0.65
+                && color.blueComponent < 0.45
+        })
     }
 
     @Test func codexUsageResetTimeKeepsHoursBelowOneHourAndClampsNegativeValues() {
         let multipleDays = CodexUsageQuota(
             remainingPercent: 100,
-            resetAfterSeconds: 2 * 86_400 + 3 * 3_600 + 4 * 60
+            resetAfterSeconds: 2 * 86_400 + 3 * 3_600 + 4 * 60,
+            limitWindowSeconds: 604_800,
+            usedPercent: 0
         )
-        let belowOneHour = CodexUsageQuota(remainingPercent: 100, resetAfterSeconds: 3_599)
-        let negative = CodexUsageQuota(remainingPercent: 100, resetAfterSeconds: -1)
+        let belowOneHour = CodexUsageQuota(
+            remainingPercent: 100,
+            resetAfterSeconds: 3_599,
+            limitWindowSeconds: 604_800,
+            usedPercent: 0
+        )
+        let negative = CodexUsageQuota(
+            remainingPercent: 100,
+            resetAfterSeconds: -1,
+            limitWindowSeconds: 604_800,
+            usedPercent: 0
+        )
 
         #expect(multipleDays.resetAfterText == "2天 3:04")
         #expect(belowOneHour.resetAfterText == "0:59")
@@ -7080,15 +7178,21 @@ struct UlanziDeckSwiftTests {
     @Test func codexUsageRefreshesOnPressAndUsesSelectedAutomaticInterval() async throws {
         let first = CodexUsageResult.success(CodexUsageQuota(
             remainingPercent: 90,
-            resetAfterSeconds: 600
+            resetAfterSeconds: 600,
+            limitWindowSeconds: 18_000,
+            usedPercent: 10
         ))
         let second = CodexUsageResult.success(CodexUsageQuota(
             remainingPercent: 89,
-            resetAfterSeconds: 540
+            resetAfterSeconds: 540,
+            limitWindowSeconds: 18_000,
+            usedPercent: 11
         ))
         let third = CodexUsageResult.success(CodexUsageQuota(
             remainingPercent: 88,
-            resetAfterSeconds: 480
+            resetAfterSeconds: 480,
+            limitWindowSeconds: 18_000,
+            usedPercent: 12
         ))
         let fetcher = FakeCodexUsageFetcher(
             results: [first, second, third],
@@ -7131,6 +7235,10 @@ struct UlanziDeckSwiftTests {
         model.setSelectedCodexUsageRefreshIntervalMinutes(1)
         #expect(model.interactionState.codexUsageConfiguration(for: 3).refreshIntervalMinutes == 1)
         #expect(configurationStore.savedStates.last?.codexUsageConfiguration(for: 3).refreshIntervalMinutes == 1)
+
+        model.setSelectedCodexUsageColorMode(.highIsRed)
+        #expect(model.interactionState.codexUsageConfiguration(for: 3).colorMode == .highIsRed)
+        #expect(configurationStore.savedStates.last?.codexUsageConfiguration(for: 3).colorMode == .highIsRed)
 
         try await Self.waitUntil {
             fetcher.requestCount >= 3

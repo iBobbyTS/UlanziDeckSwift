@@ -38,6 +38,7 @@ struct ContentView: View {
     let onFilePathSelection: (DeckKeyOpenFileConfiguration) -> Void
     let onCodexAuthFileSelection: (DeckKeyCodexUsageConfiguration) -> Void
     let onCodexUsageRefreshIntervalChange: (Int) -> Void
+    let onCodexUsageColorModeChange: (CodexUsageColorMode) -> Void
     let onWebPageURLChange: (String) -> Void
     let onWebPageURLSubmit: () -> Void
     let onButtonVisualNamePreview: (Int, String) -> Void
@@ -826,6 +827,7 @@ struct MihoyoQRCodeView: View {
         onFilePathSelection: { _ in },
         onCodexAuthFileSelection: { _ in },
         onCodexUsageRefreshIntervalChange: { _ in },
+        onCodexUsageColorModeChange: { _ in },
         onWebPageURLChange: { _ in },
         onWebPageURLSubmit: {},
         onButtonVisualNamePreview: { _, _ in },

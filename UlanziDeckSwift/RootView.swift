@@ -57,6 +57,9 @@ struct RootView: View {
             onCodexUsageRefreshIntervalChange: { minutes in
                 connectionModel.setSelectedCodexUsageRefreshIntervalMinutes(minutes)
             },
+            onCodexUsageColorModeChange: { colorMode in
+                connectionModel.setSelectedCodexUsageColorMode(colorMode)
+            },
             onWebPageURLChange: { urlString in
                 connectionModel.setSelectedWebPageURLString(urlString)
             },

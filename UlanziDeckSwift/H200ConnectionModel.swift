@@ -650,6 +650,18 @@ final class H200ConnectionModel: ObservableObject {
         scheduleNextCodexUsageRefresh(for: instanceID)
     }
 
+    func setSelectedCodexUsageColorMode(_ colorMode: CodexUsageColorMode) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.codexUsageConfiguration(for: selectedKeyID).colorMode != colorMode,
+              interactionState.setCodexUsageColorMode(colorMode, for: selectedKeyID)
+        else {
+            return
+        }
+
+        persistCurrentConfiguration()
+        syncKeyDisplay(keyID: selectedKeyID)
+    }
+
     func setSelectedFileName(_ name: String) {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return
