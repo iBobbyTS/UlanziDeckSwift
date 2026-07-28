@@ -611,9 +611,31 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         let percentageHeight = buttonRect.height * 0.42
         let resetHeight = buttonRect.height * 0.19
         let gap = buttonRect.height * 0.035
-        let totalHeight = percentageHeight + gap + resetHeight
+        let nicknameHeight = buttonRect.height * 0.13
+        let nicknameGap = buttonRect.height * 0.02
+        let nicknameExtraHeight = content.accountNickname == nil ? 0 : nicknameHeight + nicknameGap
+        let metricsHeight = percentageHeight + gap + resetHeight
+        let totalHeight = nicknameExtraHeight + metricsHeight
         let top = rect.midY + totalHeight / 2
+        let metricsTop = top - nicknameExtraHeight
         let shadow = textShadow()
+
+        if let accountNickname = content.accountNickname {
+            drawCenteredAutoSizedSingleLineText(
+                accountNickname,
+                weight: .semibold,
+                maxFontSize: buttonRect.height * 0.12,
+                minFontSize: buttonRect.height * 0.08,
+                color: NSColor(calibratedWhite: 0.88, alpha: 1),
+                rect: NSRect(
+                    x: rect.minX,
+                    y: top - nicknameHeight,
+                    width: rect.width,
+                    height: nicknameHeight
+                ),
+                shadow: shadow
+            )
+        }
 
         drawCenteredAutoSizedSingleLineText(
             content.percentageText,
@@ -623,7 +645,7 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             color: mihoyoGameMetricColor(for: content.percentageColor),
             rect: NSRect(
                 x: rect.minX,
-                y: top - percentageHeight,
+                y: metricsTop - percentageHeight,
                 width: rect.width,
                 height: percentageHeight
             ),
@@ -637,7 +659,7 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             color: mihoyoGameMetricColor(for: content.resetAfterColor),
             rect: NSRect(
                 x: rect.minX,
-                y: top - totalHeight,
+                y: metricsTop - metricsHeight,
                 width: rect.width,
                 height: resetHeight
             ),

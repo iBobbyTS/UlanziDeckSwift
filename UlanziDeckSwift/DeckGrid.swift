@@ -231,6 +231,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 switch configuration.codexUsage.lastResult {
                 case let .success(quota):
                     codexUsageButtonContent = CodexUsageButtonContent(
+                        accountNickname: configuration.codexUsage.displayAccountNickname,
                         percentageText: "\(quota.remainingPercent)%",
                         resetAfterText: quota.resetAfterText,
                         percentageColor: configuration.codexUsage.colorMode.metricColor(
@@ -368,6 +369,7 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
 }
 
 nonisolated struct CodexUsageButtonContent: Equatable, Sendable {
+    let accountNickname: String?
     let percentageText: String
     let resetAfterText: String
     let percentageColor: MihoyoGameMetricColor
@@ -1394,6 +1396,19 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].codexUsage.colorMode = colorMode
+        return true
+    }
+
+    @discardableResult
+    mutating func setCodexUsageAccountNickname(_ accountNickname: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .codexUsage
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].codexUsage.accountNickname = accountNickname
         return true
     }
 

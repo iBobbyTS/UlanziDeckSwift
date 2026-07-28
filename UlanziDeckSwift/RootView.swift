@@ -55,6 +55,9 @@ struct RootView: View {
             onCodexAuthFileSelection: { configuration in
                 connectionModel.setSelectedCodexUsageConfiguration(configuration)
             },
+            onCodexUsageAccountNicknameChange: { accountNickname in
+                connectionModel.setSelectedCodexUsageAccountNickname(accountNickname)
+            },
             onCodexUsageRefreshIntervalChange: { minutes in
                 connectionModel.setSelectedCodexUsageRefreshIntervalMinutes(minutes)
             },

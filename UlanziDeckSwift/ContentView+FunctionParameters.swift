@@ -493,6 +493,15 @@ extension ContentView {
                 }
                 .buttonStyle(.bordered)
 
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("账号昵称")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    TextField("选填", text: selectedCodexUsageAccountNicknameBinding)
+                        .textFieldStyle(.roundedBorder)
+                }
+
                 HStack(spacing: 12) {
                     Text("刷新间隔")
                         .font(.caption.weight(.semibold))
@@ -973,10 +982,21 @@ extension ContentView {
         )
     }
 
+    var selectedCodexUsageAccountNicknameBinding: Binding<String> {
+        Binding(
+            get: {
+                selectedConfiguration?.codexUsage.accountNickname ?? ""
+            },
+            set: { accountNickname in
+                onCodexUsageAccountNicknameChange(accountNickname)
+            }
+        )
+    }
+
     var selectedCodexUsageColorModeBinding: Binding<CodexUsageColorMode> {
         Binding(
             get: {
-                selectedConfiguration?.codexUsage.colorMode ?? .lowIsRed
+                selectedConfiguration?.codexUsage.colorMode ?? .highIsRed
             },
             set: { colorMode in
                 onCodexUsageColorModeChange(colorMode)

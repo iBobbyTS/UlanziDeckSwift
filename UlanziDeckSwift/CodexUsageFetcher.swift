@@ -89,6 +89,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
 
     var authFilePath: String?
     var bookmarkData: Data?
+    var accountNickname: String
     var refreshIntervalMinutes: Int
     var colorMode: CodexUsageColorMode
 
@@ -98,12 +99,14 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     init(
         authFilePath: String? = nil,
         bookmarkData: Data? = nil,
+        accountNickname: String = "",
         refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
         colorMode: CodexUsageColorMode = .highIsRed,
         lastResult: CodexUsageResult? = nil
     ) {
         self.authFilePath = authFilePath
         self.bookmarkData = bookmarkData
+        self.accountNickname = accountNickname
         self.refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(refreshIntervalMinutes)
         self.colorMode = colorMode
         self.lastResult = lastResult
@@ -111,10 +114,12 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
 
     init(
         authFileURL: URL,
+        accountNickname: String = "",
         refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
         colorMode: CodexUsageColorMode = .highIsRed
     ) throws {
         authFilePath = authFileURL.path
+        self.accountNickname = accountNickname
         bookmarkData = try authFileURL.bookmarkData(
             options: Self.securityScopedBookmarkCreationOptions,
             includingResourceValuesForKeys: nil,
@@ -129,9 +134,15 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         authFilePath != nil && bookmarkData == nil
     }
 
+    var displayAccountNickname: String? {
+        let normalized = accountNickname.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty ? nil : normalized
+    }
+
     enum CodingKeys: CodingKey {
         case authFilePath
         case bookmarkData
+        case accountNickname
         case refreshIntervalMinutes
         case colorMode
     }
@@ -140,6 +151,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         authFilePath = try container.decodeIfPresent(String.self, forKey: .authFilePath)
         bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        accountNickname = try container.decodeIfPresent(String.self, forKey: .accountNickname) ?? ""
         refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(
             try container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes)
                 ?? Self.defaultRefreshIntervalMinutes
@@ -153,6 +165,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encodeIfPresent(authFilePath, forKey: .authFilePath)
         try container.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
+        try container.encode(accountNickname, forKey: .accountNickname)
         try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
         try container.encode(colorMode, forKey: .colorMode)
     }

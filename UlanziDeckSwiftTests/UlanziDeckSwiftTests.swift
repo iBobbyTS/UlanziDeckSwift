@@ -7309,6 +7309,7 @@ struct UlanziDeckSwiftTests {
         let configuration = DeckKeyCodexUsageConfiguration(
             authFilePath: "/Users/test/.codex/auth.json",
             bookmarkData: Data("bookmark".utf8),
+            accountNickname: "工作账号",
             refreshIntervalMinutes: 30,
             colorMode: .highIsRed,
             lastResult: .success(CodexUsageQuota(
@@ -7324,6 +7325,7 @@ struct UlanziDeckSwiftTests {
 
         #expect(decoded.authFilePath == configuration.authFilePath)
         #expect(decoded.bookmarkData == configuration.bookmarkData)
+        #expect(decoded.accountNickname == "工作账号")
         #expect(decoded.refreshIntervalMinutes == 30)
         #expect(decoded.colorMode == .highIsRed)
         #expect(decoded.lastResult == nil)
@@ -7339,6 +7341,7 @@ struct UlanziDeckSwiftTests {
             from: legacyData
         )
         #expect(legacyConfiguration.colorMode == .highIsRed)
+        #expect(legacyConfiguration.accountNickname.isEmpty)
     }
 
     @Test func codexUsageDisplayShowsRemainingPercentAndFormattedResetTime() throws {
@@ -7361,11 +7364,30 @@ struct UlanziDeckSwiftTests {
         #expect(display.title == "74%")
         #expect(display.subtitle == "6天 20:53")
         #expect(display.codexUsageButtonContent == CodexUsageButtonContent(
+            accountNickname: nil,
             percentageText: "74%",
             resetAfterText: "6天 20:53",
             percentageColor: .yellow,
             resetAfterColor: .red
         ))
+
+        configuration.codexUsage.accountNickname = "  主账号  "
+        let namedDisplay = DeckKeyDisplay(
+            key: key,
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+        #expect(namedDisplay.codexUsageButtonContent?.accountNickname == "主账号")
+
+        configuration.codexUsage.accountNickname = " \n "
+        let blankNamedDisplay = DeckKeyDisplay(
+            key: key,
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+        #expect(blankNamedDisplay.codexUsageButtonContent?.accountNickname == nil)
     }
 
     @Test func codexUsageColorModesUseStrictFiveAndNinetyFivePercentThresholds() {
@@ -7529,6 +7551,10 @@ struct UlanziDeckSwiftTests {
         model.setSelectedCodexUsageColorMode(.highIsRed)
         #expect(model.interactionState.codexUsageConfiguration(for: 3).colorMode == .highIsRed)
         #expect(configurationStore.savedStates.last?.codexUsageConfiguration(for: 3).colorMode == .highIsRed)
+
+        model.setSelectedCodexUsageAccountNickname("主账号")
+        #expect(model.interactionState.codexUsageConfiguration(for: 3).accountNickname == "主账号")
+        #expect(configurationStore.savedStates.last?.codexUsageConfiguration(for: 3).accountNickname == "主账号")
 
         try await Self.waitUntil {
             fetcher.requestCount >= 3

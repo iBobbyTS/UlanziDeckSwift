@@ -674,6 +674,19 @@ final class H200ConnectionModel: ObservableObject {
         syncKeyDisplay(keyID: selectedKeyID)
     }
 
+    func setSelectedCodexUsageAccountNickname(_ accountNickname: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.codexUsageConfiguration(for: selectedKeyID).accountNickname
+                != accountNickname,
+              interactionState.setCodexUsageAccountNickname(accountNickname, for: selectedKeyID)
+        else {
+            return
+        }
+
+        persistCurrentConfiguration()
+        syncKeyDisplay(keyID: selectedKeyID)
+    }
+
     func setSelectedFileName(_ name: String) {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return
