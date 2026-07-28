@@ -261,24 +261,12 @@ action:
 封包:  单包发送，无需分块
 ```
 
-**参考代码:**
+**参考实现定位:**
 
-```typescript
-// companion-surface-d200/src/protocol.ts
-export function encodeBrightness(percent: number): Buffer {
-  const clamped = Math.max(0, Math.min(100, Math.round(percent)))
-  return Buffer.from(String(clamped), 'utf8')
-}
-```
+- [`companion-surface-d200` 的亮度载荷编码](https://github.com/jcalado/companion-surface-d200/blob/11b0cf0b9bb9f8a408549d449af93fc7ec47b466/src/protocol.ts#L179-L182)：`src/protocol.ts` 第 179–182 行。
+- [`companion-surface-d200` 的亮度命令发送](https://github.com/jcalado/companion-surface-d200/blob/11b0cf0b9bb9f8a408549d449af93fc7ec47b466/src/device.ts#L99-L101)：`src/device.ts` 第 99–101 行。
 
-**调用示例:**
-
-```typescript
-// companion-surface-d200/src/device.ts
-async setBrightness(percent: number): Promise<void> {
-  await this.#writePacket(buildSimplePacket(Command.OUT_SET_BRIGHTNESS, encodeBrightness(percent)))
-}
-```
+以上链接固定到提交 `11b0cf0b9bb9f8a408549d449af93fc7ec47b466`；该项目采用 MIT License。本文档仅记录协议参考位置，实际实现由本项目独立完成。
 
 **注意:** companion-surface-d200 在 config 面板中**没有**暴露亮度调节给用户（缺少对应的 UI 配置项），但 device 层的 `setBrightness()` 方法已经完整实现，可直接调用。
 
