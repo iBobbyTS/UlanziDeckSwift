@@ -3,8 +3,23 @@ import Foundation
 nonisolated struct CodexUsageQuota: Equatable, Sendable {
     let remainingPercent: Int
     let resetAfterSeconds: Int
+    let resetAt: Int?
     let limitWindowSeconds: Int
     let usedPercent: Double
+
+    init(
+        remainingPercent: Int,
+        resetAfterSeconds: Int,
+        resetAt: Int? = nil,
+        limitWindowSeconds: Int,
+        usedPercent: Double
+    ) {
+        self.remainingPercent = remainingPercent
+        self.resetAfterSeconds = resetAfterSeconds
+        self.resetAt = resetAt
+        self.limitWindowSeconds = limitWindowSeconds
+        self.usedPercent = usedPercent
+    }
 
     var remainingTimeVsUsage: Double {
         let remainingWindowFraction = Double(resetAfterSeconds) / Double(limitWindowSeconds)
@@ -19,6 +34,24 @@ nonisolated struct CodexUsageQuota: Equatable, Sendable {
         let minutes = clampedSeconds % 3_600 / 60
         let clockText = "\(hours):\(String(format: "%02d", minutes))"
         return days > 0 ? "\(days)天 \(clockText)" : clockText
+    }
+
+    func resetAtText(timeZone: TimeZone = .current) -> String? {
+        guard let resetAt else {
+            return nil
+        }
+
+        let date = Date(timeIntervalSince1970: TimeInterval(resetAt))
+        let components = Calendar(identifier: .gregorian).dateComponents(in: timeZone, from: date)
+        guard let month = components.month,
+              let day = components.day,
+              let hour = components.hour,
+              let minute = components.minute
+        else {
+            return nil
+        }
+
+        return String(format: "%d/%d %d:%02d", month, day, hour, minute)
     }
 }
 
@@ -67,6 +100,31 @@ nonisolated enum CodexUsageColorMode: String, Codable, Equatable, CaseIterable, 
     }
 }
 
+nonisolated enum CodexUsageResetDisplayMode: String, Codable, Equatable, CaseIterable, Identifiable, Sendable {
+    case remainingTime
+    case resetTime
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .remainingTime:
+            return "剩余时间"
+        case .resetTime:
+            return "重置时间"
+        }
+    }
+
+    func text(for quota: CodexUsageQuota) -> String {
+        switch self {
+        case .remainingTime:
+            return quota.resetAfterText
+        case .resetTime:
+            return quota.resetAtText() ?? quota.resetAfterText
+        }
+    }
+}
+
 nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     static let defaultRefreshIntervalMinutes = 10
     static let refreshIntervalOptionsMinutes = [1, 5, 10, 30, 60]
@@ -92,6 +150,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     var accountNickname: String
     var refreshIntervalMinutes: Int
     var colorMode: CodexUsageColorMode
+    var resetDisplayMode: CodexUsageResetDisplayMode
 
     /// 最近一次查询的结果。不参与持久化，反序列化时使用空值。
     var lastResult: CodexUsageResult?
@@ -102,6 +161,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         accountNickname: String = "",
         refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
         colorMode: CodexUsageColorMode = .highIsRed,
+        resetDisplayMode: CodexUsageResetDisplayMode = .remainingTime,
         lastResult: CodexUsageResult? = nil
     ) {
         self.authFilePath = authFilePath
@@ -109,6 +169,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         self.accountNickname = accountNickname
         self.refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(refreshIntervalMinutes)
         self.colorMode = colorMode
+        self.resetDisplayMode = resetDisplayMode
         self.lastResult = lastResult
     }
 
@@ -116,7 +177,8 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         authFileURL: URL,
         accountNickname: String = "",
         refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
-        colorMode: CodexUsageColorMode = .highIsRed
+        colorMode: CodexUsageColorMode = .highIsRed,
+        resetDisplayMode: CodexUsageResetDisplayMode = .remainingTime
     ) throws {
         authFilePath = authFileURL.path
         self.accountNickname = accountNickname
@@ -127,6 +189,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         )
         self.refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(refreshIntervalMinutes)
         self.colorMode = colorMode
+        self.resetDisplayMode = resetDisplayMode
         lastResult = nil
     }
 
@@ -145,6 +208,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         case accountNickname
         case refreshIntervalMinutes
         case colorMode
+        case resetDisplayMode
     }
 
     init(from decoder: Decoder) throws {
@@ -158,6 +222,10 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         )
         colorMode = try container.decodeIfPresent(CodexUsageColorMode.self, forKey: .colorMode)
             ?? .highIsRed
+        resetDisplayMode = try container.decodeIfPresent(
+            CodexUsageResetDisplayMode.self,
+            forKey: .resetDisplayMode
+        ) ?? .remainingTime
         lastResult = nil
     }
 
@@ -168,6 +236,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         try container.encode(accountNickname, forKey: .accountNickname)
         try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
         try container.encode(colorMode, forKey: .colorMode)
+        try container.encode(resetDisplayMode, forKey: .resetDisplayMode)
     }
 
     static func normalizedRefreshIntervalMinutes(_ minutes: Int) -> Int {
@@ -296,6 +365,7 @@ nonisolated struct CodexUsageFetcher: CodexUsageFetching {
         return .success(CodexUsageQuota(
             remainingPercent: Self.remainingPercent(from: usedPercent),
             resetAfterSeconds: resetAfterSeconds,
+            resetAt: Self.nonnegativeInteger(from: primaryWindow["reset_at"]),
             limitWindowSeconds: limitWindowSeconds,
             usedPercent: usedPercent
         ))

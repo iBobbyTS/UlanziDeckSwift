@@ -521,6 +521,24 @@ extension ContentView {
                 }
 
                 HStack(spacing: 12) {
+                    Text("下次重置显示模式")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Picker(
+                        "下次重置显示模式",
+                        selection: selectedCodexUsageResetDisplayModeBinding
+                    ) {
+                        ForEach(CodexUsageResetDisplayMode.allCases) { displayMode in
+                            Text(displayMode.title).tag(displayMode)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 110, alignment: .leading)
+                }
+
+                HStack(spacing: 12) {
                     Text("额度颜色")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
@@ -1004,6 +1022,17 @@ extension ContentView {
         )
     }
 
+    var selectedCodexUsageResetDisplayModeBinding: Binding<CodexUsageResetDisplayMode> {
+        Binding(
+            get: {
+                selectedConfiguration?.codexUsage.resetDisplayMode ?? .remainingTime
+            },
+            set: { resetDisplayMode in
+                onCodexUsageResetDisplayModeChange(resetDisplayMode)
+            }
+        )
+    }
+
     var selectedSub2APIBearerKeyBinding: Binding<String> {
         Binding(
             get: {
@@ -1188,9 +1217,12 @@ extension ContentView {
         do {
             onCodexAuthFileSelection(try DeckKeyCodexUsageConfiguration(
                 authFileURL: url,
+                accountNickname: selectedConfiguration?.codexUsage.accountNickname ?? "",
                 refreshIntervalMinutes: selectedConfiguration?.codexUsage.refreshIntervalMinutes
                     ?? DeckKeyCodexUsageConfiguration.defaultRefreshIntervalMinutes,
-                colorMode: selectedConfiguration?.codexUsage.colorMode ?? .lowIsRed
+                colorMode: selectedConfiguration?.codexUsage.colorMode ?? .highIsRed,
+                resetDisplayMode: selectedConfiguration?.codexUsage.resetDisplayMode
+                    ?? .remainingTime
             ))
         } catch {
             showWarningAlert(

@@ -234,7 +234,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                         accountNickname: configuration.codexUsage.displayAccountNickname,
                         percentageText: "\(quota.remainingPercent)%",
                         resetLabelText: "下次重设",
-                        resetAfterText: quota.resetAfterText,
+                        resetAfterText: configuration.codexUsage.resetDisplayMode.text(for: quota),
                         percentageColor: configuration.codexUsage.colorMode.metricColor(
                             for: quota.remainingPercent
                         ),
@@ -1398,6 +1398,22 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].codexUsage.colorMode = colorMode
+        return true
+    }
+
+    @discardableResult
+    mutating func setCodexUsageResetDisplayMode(
+        _ resetDisplayMode: CodexUsageResetDisplayMode,
+        for keyID: Int
+    ) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .codexUsage
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].codexUsage.resetDisplayMode = resetDisplayMode
         return true
     }
 

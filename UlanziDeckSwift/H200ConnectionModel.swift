@@ -687,6 +687,24 @@ final class H200ConnectionModel: ObservableObject {
         syncKeyDisplay(keyID: selectedKeyID)
     }
 
+    func setSelectedCodexUsageResetDisplayMode(
+        _ resetDisplayMode: CodexUsageResetDisplayMode
+    ) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.codexUsageConfiguration(for: selectedKeyID).resetDisplayMode
+                != resetDisplayMode,
+              interactionState.setCodexUsageResetDisplayMode(
+                resetDisplayMode,
+                for: selectedKeyID
+              )
+        else {
+            return
+        }
+
+        persistCurrentConfiguration()
+        syncKeyDisplay(keyID: selectedKeyID)
+    }
+
     func setSelectedFileName(_ name: String) {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return

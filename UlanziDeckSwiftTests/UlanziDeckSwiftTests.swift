@@ -7219,6 +7219,7 @@ struct UlanziDeckSwiftTests {
                 "primary_window": [
                     "used_percent": 21.6,
                     "reset_after_seconds": 183_845,
+                    "reset_at": 1_800_000_000,
                     "limit_window_seconds": 604_800,
                 ],
                 "secondary_window": NSNull(),
@@ -7257,6 +7258,7 @@ struct UlanziDeckSwiftTests {
         #expect(result == .success(CodexUsageQuota(
             remainingPercent: 78,
             resetAfterSeconds: 183_845,
+            resetAt: 1_800_000_000,
             limitWindowSeconds: 604_800,
             usedPercent: 21.6
         )))
@@ -7312,6 +7314,7 @@ struct UlanziDeckSwiftTests {
             accountNickname: "工作账号",
             refreshIntervalMinutes: 30,
             colorMode: .highIsRed,
+            resetDisplayMode: .resetTime,
             lastResult: .success(CodexUsageQuota(
                 remainingPercent: 80,
                 resetAfterSeconds: 90_000,
@@ -7328,6 +7331,7 @@ struct UlanziDeckSwiftTests {
         #expect(decoded.accountNickname == "工作账号")
         #expect(decoded.refreshIntervalMinutes == 30)
         #expect(decoded.colorMode == .highIsRed)
+        #expect(decoded.resetDisplayMode == .resetTime)
         #expect(decoded.lastResult == nil)
         #expect(DeckKeyCodexUsageConfiguration.defaultRefreshIntervalMinutes == 10)
         #expect(DeckKeyCodexUsageConfiguration.refreshIntervalOptionsMinutes == [1, 5, 10, 30, 60])
@@ -7342,6 +7346,7 @@ struct UlanziDeckSwiftTests {
         )
         #expect(legacyConfiguration.colorMode == .highIsRed)
         #expect(legacyConfiguration.accountNickname.isEmpty)
+        #expect(legacyConfiguration.resetDisplayMode == .remainingTime)
     }
 
     @Test func codexUsageDisplayShowsRemainingPercentAndFormattedResetTime() throws {
@@ -7389,6 +7394,26 @@ struct UlanziDeckSwiftTests {
             isPressed: false
         )
         #expect(blankNamedDisplay.codexUsageButtonContent?.accountNickname == nil)
+
+        configuration.codexUsage.resetDisplayMode = .resetTime
+        let resetTimeQuota = CodexUsageQuota(
+            remainingPercent: 74,
+            resetAfterSeconds: 593_588,
+            resetAt: 1_800_000_000,
+            limitWindowSeconds: 604_800,
+            usedPercent: 26
+        )
+        configuration.codexUsage.lastResult = .success(resetTimeQuota)
+        let resetTimeDisplay = DeckKeyDisplay(
+            key: key,
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+        #expect(
+            resetTimeDisplay.codexUsageButtonContent?.resetAfterText
+                == resetTimeQuota.resetAtText()
+        )
     }
 
     @Test func codexUsageColorModesUseStrictFiveAndNinetyFivePercentThresholds() {
@@ -7487,6 +7512,21 @@ struct UlanziDeckSwiftTests {
         #expect(negative.resetAfterText == "0:00")
     }
 
+    @Test func codexUsageAbsoluteResetTimeUsesMonthDayHourMinuteFormat() throws {
+        let quota = CodexUsageQuota(
+            remainingPercent: 50,
+            resetAfterSeconds: 3_600,
+            resetAt: 0,
+            limitWindowSeconds: 18_000,
+            usedPercent: 50
+        )
+        let utc = try #require(TimeZone(secondsFromGMT: 0))
+
+        #expect(quota.resetAtText(timeZone: utc) == "1/1 0:00")
+        #expect(CodexUsageResetDisplayMode.remainingTime.text(for: quota) == "1:00")
+        #expect(CodexUsageResetDisplayMode.resetTime.title == "重置时间")
+    }
+
     @MainActor
     @Test func codexUsageRefreshesOnPressAndUsesSelectedAutomaticInterval() async throws {
         let first = CodexUsageResult.success(CodexUsageQuota(
@@ -7556,6 +7596,15 @@ struct UlanziDeckSwiftTests {
         model.setSelectedCodexUsageAccountNickname("主账号")
         #expect(model.interactionState.codexUsageConfiguration(for: 3).accountNickname == "主账号")
         #expect(configurationStore.savedStates.last?.codexUsageConfiguration(for: 3).accountNickname == "主账号")
+
+        model.setSelectedCodexUsageResetDisplayMode(.resetTime)
+        #expect(
+            model.interactionState.codexUsageConfiguration(for: 3).resetDisplayMode == .resetTime
+        )
+        #expect(
+            configurationStore.savedStates.last?.codexUsageConfiguration(for: 3).resetDisplayMode
+                == .resetTime
+        )
 
         try await Self.waitUntil {
             fetcher.requestCount >= 3

@@ -41,6 +41,7 @@ struct ContentView: View {
     let onCodexUsageAccountNicknameChange: (String) -> Void
     let onCodexUsageRefreshIntervalChange: (Int) -> Void
     let onCodexUsageColorModeChange: (CodexUsageColorMode) -> Void
+    let onCodexUsageResetDisplayModeChange: (CodexUsageResetDisplayMode) -> Void
     let onWebPageURLChange: (String) -> Void
     let onWebPageURLSubmit: () -> Void
     let onButtonVisualNamePreview: (Int, String) -> Void
@@ -868,6 +869,7 @@ struct MihoyoQRCodeView: View {
         onCodexUsageAccountNicknameChange: { _ in },
         onCodexUsageRefreshIntervalChange: { _ in },
         onCodexUsageColorModeChange: { _ in },
+        onCodexUsageResetDisplayModeChange: { _ in },
         onWebPageURLChange: { _ in },
         onWebPageURLSubmit: {},
         onButtonVisualNamePreview: { _, _ in },

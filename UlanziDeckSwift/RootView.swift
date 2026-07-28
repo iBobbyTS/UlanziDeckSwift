@@ -64,6 +64,9 @@ struct RootView: View {
             onCodexUsageColorModeChange: { colorMode in
                 connectionModel.setSelectedCodexUsageColorMode(colorMode)
             },
+            onCodexUsageResetDisplayModeChange: { resetDisplayMode in
+                connectionModel.setSelectedCodexUsageResetDisplayMode(resetDisplayMode)
+            },
             onWebPageURLChange: { urlString in
                 connectionModel.setSelectedWebPageURLString(urlString)
             },
