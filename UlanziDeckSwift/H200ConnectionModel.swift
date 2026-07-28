@@ -30,6 +30,7 @@ final class H200ConnectionModel: ObservableObject {
     private let webPageMetadataFetcher: WebPageMetadataFetching
     private let smbServerConnector: SMBServerConnecting
     private let sub2APIFetcher: Sub2APIFetching
+    private let codexUsageFetcher: CodexUsageFetching
     private let mihoyoGameService: MihoyoGameServicing
     private let mihoyoSessionStore: MihoyoSessionStoring
     private let pageFolderAutoReturnTimer: PageFolderAutoReturnTimer
@@ -58,6 +59,9 @@ final class H200ConnectionModel: ObservableObject {
     private var sub2APIGroupListRefreshFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var sub2APIGroupListLastRequestNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var sub2APITokenPausedInstances: Set<RuntimeInstanceID> = []
+    private var codexUsageTimers: [RuntimeInstanceID: Timer] = [:]
+    private var codexUsageNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
+    private var codexUsageFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
     private var webPageMetadataTasks: [Int: Task<Void, Never>] = [:]
     private var webPageMetadataFetchedURLStrings: [Int: String] = [:]
     private var mihoyoLoginTask: Task<Void, Never>?
@@ -66,6 +70,7 @@ final class H200ConnectionModel: ObservableObject {
     private var mihoyoGameFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
     private let sub2APIRefreshSecondDuration: TimeInterval
     private let sub2APIGroupListMinimumIntervalNanoseconds: UInt64
+    private let codexUsageRefreshMinuteDuration: TimeInterval
     private let mihoyoGameRefreshMinuteDuration: TimeInterval
 
     private struct BrightnessUpdateRequest {
@@ -89,12 +94,14 @@ final class H200ConnectionModel: ObservableObject {
         webPageMetadataFetcher: WebPageMetadataFetching = WebPageMetadataFetcher(),
         smbServerConnector: SMBServerConnecting? = nil,
         sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher(),
+        codexUsageFetcher: CodexUsageFetching = CodexUsageFetcher(),
         mihoyoGameService: MihoyoGameServicing = MihoyoGameClient(),
         mihoyoSessionStore: MihoyoSessionStoring = KeychainMihoyoSessionStore(),
         longPressDurationNanoseconds: UInt64 = 1_000_000_000,
         mihoyoLoginPollNanoseconds: UInt64 = 2_000_000_000,
         sub2APIRefreshSecondDuration: TimeInterval = 1,
         sub2APIGroupListMinimumIntervalNanoseconds: UInt64 = 2_000_000_000,
+        codexUsageRefreshMinuteDuration: TimeInterval = 60,
         mihoyoGameRefreshMinuteDuration: TimeInterval = 60,
         pageFolderAutoReturnDurationNanoseconds: UInt64 = 30_000_000_000
     ) {
@@ -107,6 +114,7 @@ final class H200ConnectionModel: ObservableObject {
         self.webPageMetadataFetcher = webPageMetadataFetcher
         self.smbServerConnector = smbServerConnector ?? SMBServerConnector()
         self.sub2APIFetcher = sub2APIFetcher
+        self.codexUsageFetcher = codexUsageFetcher
         self.mihoyoGameService = mihoyoGameService
         self.mihoyoSessionStore = mihoyoSessionStore
         self.pageFolderAutoReturnTimer = PageFolderAutoReturnTimer(
@@ -116,6 +124,7 @@ final class H200ConnectionModel: ObservableObject {
         self.mihoyoLoginPollNanoseconds = mihoyoLoginPollNanoseconds
         self.sub2APIRefreshSecondDuration = sub2APIRefreshSecondDuration
         self.sub2APIGroupListMinimumIntervalNanoseconds = sub2APIGroupListMinimumIntervalNanoseconds
+        self.codexUsageRefreshMinuteDuration = codexUsageRefreshMinuteDuration
         self.mihoyoGameRefreshMinuteDuration = mihoyoGameRefreshMinuteDuration
         interactionState = configurationStore.loadInteractionState(for: layout) ?? DeckGridInteractionState(layout: layout)
         let loadedBrightnessPercent = configurationStore.loadBrightnessPercent()
@@ -151,6 +160,12 @@ final class H200ConnectionModel: ObservableObject {
             task.cancel()
         }
         for task in sub2APIGroupListRefreshTasks.values {
+            task.cancel()
+        }
+        for timer in codexUsageTimers.values {
+            timer.invalidate()
+        }
+        for task in codexUsageFetchTasks.values {
             task.cancel()
         }
         for task in webPageMetadataTasks.values {
@@ -444,6 +459,8 @@ final class H200ConnectionModel: ObservableObject {
             connectSMBServer(for: keyID)
         case .refreshSub2API:
             fetchSub2API(for: keyID)
+        case .refreshCodexUsage:
+            fetchCodexUsage(for: keyID)
         case .refreshMihoyoGame:
             fetchMihoyoGameStatus(for: keyID)
         case .enterPage:
@@ -487,6 +504,10 @@ final class H200ConnectionModel: ObservableObject {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
                 fetchSub2API(for: selectedKeyID)
                 scheduleSub2APIGroupListRefresh(for: selectedKeyID)
+            }
+            if function == .codexUsage {
+                _ = ensureRuntimeInstance(for: selectedKeyID)
+                fetchCodexUsage(for: selectedKeyID)
             }
             if function.game != nil {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
@@ -590,6 +611,43 @@ final class H200ConnectionModel: ObservableObject {
             persistCurrentConfiguration()
             syncKeyDisplay(keyID: selectedKeyID)
         }
+    }
+
+    func setSelectedCodexUsageConfiguration(_ configuration: DeckKeyCodexUsageConfiguration) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.setCodexUsageConfiguration(configuration, for: selectedKeyID)
+        else {
+            return
+        }
+
+        persistCurrentConfiguration()
+        syncKeyDisplay(keyID: selectedKeyID)
+        if let instanceID = ensureRuntimeInstance(for: selectedKeyID) {
+            stopCodexUsageTimer(for: instanceID, preservesNextFire: false)
+            codexUsageFetchTasks[instanceID]?.cancel()
+            codexUsageFetchTasks[instanceID] = nil
+        }
+        fetchCodexUsage(for: selectedKeyID)
+    }
+
+    func setSelectedCodexUsageRefreshIntervalMinutes(_ minutes: Int) {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        let normalizedMinutes = DeckKeyCodexUsageConfiguration.normalizedRefreshIntervalMinutes(minutes)
+        guard interactionState.codexUsageConfiguration(for: selectedKeyID).refreshIntervalMinutes != normalizedMinutes,
+              interactionState.setCodexUsageRefreshIntervalMinutes(normalizedMinutes, for: selectedKeyID)
+        else {
+            return
+        }
+
+        persistCurrentConfiguration()
+        guard let instanceID = ensureRuntimeInstance(for: selectedKeyID) else {
+            return
+        }
+        stopCodexUsageTimer(for: instanceID, preservesNextFire: false)
+        scheduleNextCodexUsageRefresh(for: instanceID)
     }
 
     func setSelectedFileName(_ name: String) {
@@ -1033,6 +1091,7 @@ final class H200ConnectionModel: ObservableObject {
             }
             if canRunInternalRefresh {
                 refreshAssignedSub2APIStatuses()
+                refreshAssignedCodexUsageStatuses()
             }
         case let .failure(error, _):
             alert = H200ConnectionAlert(syncFailure: error)
@@ -1248,6 +1307,8 @@ final class H200ConnectionModel: ObservableObject {
         switch kind {
         case .sub2API:
             _ = interactionState.clearSub2APIRuntimeState(for: slot.keyID)
+        case .codexUsage:
+            _ = interactionState.clearCodexUsageRuntimeState(for: slot.keyID)
         case .mihoyoGame:
             _ = interactionState.clearMihoyoGameRuntimeState(for: slot.keyID)
         case nil:
@@ -1274,6 +1335,12 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIGroupListRefreshFireNanoseconds[instanceID] = nil
         sub2APIGroupListLastRequestNanoseconds[instanceID] = nil
         sub2APITokenPausedInstances.remove(instanceID)
+
+        codexUsageTimers[instanceID]?.invalidate()
+        codexUsageTimers[instanceID] = nil
+        codexUsageNextFireNanoseconds[instanceID] = nil
+        codexUsageFetchTasks[instanceID]?.cancel()
+        codexUsageFetchTasks[instanceID] = nil
 
         mihoyoGameTimers[instanceID]?.invalidate()
         mihoyoGameTimers[instanceID] = nil
@@ -1334,6 +1401,11 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIGroupListRefreshTasks[instanceID]?.cancel()
         sub2APIGroupListRefreshTasks[instanceID] = nil
 
+        codexUsageTimers[instanceID]?.invalidate()
+        codexUsageTimers[instanceID] = nil
+        codexUsageFetchTasks[instanceID]?.cancel()
+        codexUsageFetchTasks[instanceID] = nil
+
         mihoyoGameTimers[instanceID]?.invalidate()
         mihoyoGameTimers[instanceID] = nil
         mihoyoGameFetchTasks[instanceID]?.cancel()
@@ -1370,6 +1442,8 @@ final class H200ConnectionModel: ObservableObject {
         switch runtimeKindsByInstance[instanceID] {
         case .sub2API:
             resumeSub2APIRuntime(instanceID)
+        case .codexUsage:
+            resumeCodexUsageRuntime(instanceID)
         case .mihoyoGame:
             resumeMihoyoGameRuntime(instanceID)
         case nil:
@@ -1830,6 +1904,138 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    private func resolveCurrentCodexUsageSlot(
+        for instanceID: RuntimeInstanceID
+    ) -> (slot: RuntimeSlotID, config: DeckKeyCodexUsageConfiguration)? {
+        guard let slot = runtimeSlotsByInstance[instanceID],
+              slot.pageID == interactionState.currentPageID,
+              interactionState.configuration(for: slot.keyID)?.displayMode == .function,
+              interactionState.configuration(for: slot.keyID)?.function == .codexUsage
+        else {
+            return nil
+        }
+
+        return (slot, interactionState.codexUsageConfiguration(for: slot.keyID))
+    }
+
+    private func fetchCodexUsage(for keyID: Int) {
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else {
+            return
+        }
+
+        fetchCodexUsage(for: instanceID)
+    }
+
+    private func fetchCodexUsage(for instanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              let resolved = resolveCurrentCodexUsageSlot(for: instanceID)
+        else {
+            return
+        }
+
+        stopCodexUsageTimer(for: instanceID, preservesNextFire: false)
+        codexUsageFetchTasks[instanceID]?.cancel()
+        let pageID = resolved.slot.pageID
+        let authFilePath = resolved.config.authFilePath
+        let bookmarkData = resolved.config.bookmarkData
+        let fetcher = codexUsageFetcher
+        codexUsageFetchTasks[instanceID] = Task { @MainActor [weak self] in
+            let result = await fetcher.fetchUsage(configuration: resolved.config)
+            guard !Task.isCancelled,
+                  let self,
+                  let latest = self.resolveCurrentCodexUsageSlot(for: instanceID),
+                  latest.slot.pageID == pageID,
+                  latest.config.authFilePath == authFilePath,
+                  latest.config.bookmarkData == bookmarkData
+            else {
+                return
+            }
+
+            self.codexUsageFetchTasks[instanceID] = nil
+            self.interactionState.setCodexUsageLastResult(result, for: latest.slot.keyID)
+            self.syncKeyDisplay(keyID: latest.slot.keyID)
+            self.scheduleNextCodexUsageRefresh(for: instanceID)
+        }
+    }
+
+    private func scheduleNextCodexUsageRefresh(for instanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              let resolved = resolveCurrentCodexUsageSlot(for: instanceID),
+              resolved.config.bookmarkData != nil
+        else {
+            return
+        }
+
+        let intervalNanoseconds = UInt64(
+            TimeInterval(resolved.config.refreshIntervalMinutes)
+                * codexUsageRefreshMinuteDuration
+                * 1_000_000_000
+        )
+        scheduleCodexUsageRefresh(
+            for: instanceID,
+            fireAt: nowNanoseconds + intervalNanoseconds
+        )
+    }
+
+    private func scheduleCodexUsageRefresh(
+        for instanceID: RuntimeInstanceID,
+        fireAt fireNanoseconds: UInt64
+    ) {
+        stopCodexUsageTimer(for: instanceID, preservesNextFire: true)
+        guard canRunInternalRefresh,
+              resolveCurrentCodexUsageSlot(for: instanceID) != nil
+        else {
+            return
+        }
+
+        codexUsageNextFireNanoseconds[instanceID] = fireNanoseconds
+        let now = nowNanoseconds
+        guard fireNanoseconds > now else {
+            codexUsageNextFireNanoseconds[instanceID] = nil
+            fetchCodexUsage(for: instanceID)
+            return
+        }
+
+        let interval = TimeInterval(fireNanoseconds - now) / 1_000_000_000
+        codexUsageTimers[instanceID] = Timer.scheduledTimer(
+            withTimeInterval: interval,
+            repeats: false
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.codexUsageTimers[instanceID] = nil
+                self?.codexUsageNextFireNanoseconds[instanceID] = nil
+                self?.fetchCodexUsage(for: instanceID)
+            }
+        }
+    }
+
+    private func stopCodexUsageTimer(
+        for instanceID: RuntimeInstanceID,
+        preservesNextFire: Bool
+    ) {
+        codexUsageTimers[instanceID]?.invalidate()
+        codexUsageTimers[instanceID] = nil
+        if !preservesNextFire {
+            codexUsageNextFireNanoseconds[instanceID] = nil
+        }
+    }
+
+    private func resumeCodexUsageRuntime(_ instanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              let resolved = resolveCurrentCodexUsageSlot(for: instanceID)
+        else {
+            return
+        }
+
+        if let nextFireNanoseconds = codexUsageNextFireNanoseconds[instanceID] {
+            scheduleCodexUsageRefresh(for: instanceID, fireAt: nextFireNanoseconds)
+        } else if resolved.config.lastResult != nil {
+            scheduleNextCodexUsageRefresh(for: instanceID)
+        } else {
+            fetchCodexUsage(for: instanceID)
+        }
+    }
+
     private func fetchMihoyoGameStatus(for keyID: Int) {
         guard let instanceID = ensureRuntimeInstance(for: keyID) else {
             return
@@ -1981,6 +2187,18 @@ final class H200ConnectionModel: ObservableObject {
         ensureCurrentPageRuntimeInstances()
         for key in layout.keys where interactionState.configuration(for: key.id)?.function == .sub2API {
             fetchSub2API(for: key.id)
+        }
+    }
+
+    private func refreshAssignedCodexUsageStatuses() {
+        guard canRunInternalRefresh else {
+            return
+        }
+
+        ensureCurrentPageRuntimeInstances()
+        for key in layout.keys
+        where interactionState.configuration(for: key.id)?.function == .codexUsage {
+            fetchCodexUsage(for: key.id)
         }
     }
 

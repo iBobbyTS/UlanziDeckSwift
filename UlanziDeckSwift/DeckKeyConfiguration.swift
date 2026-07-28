@@ -9,6 +9,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case connectSMBServer
     case brightness
     case sub2API
+    case codexUsage
     case genshinStatus
     case starRailStatus
     case zenlessZoneStatus
@@ -24,6 +25,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
         .openWebPage,
         .connectSMBServer,
         .sub2API,
+        .codexUsage,
         .genshinStatus,
         .starRailStatus,
         .zenlessZoneStatus,
@@ -50,6 +52,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "亮度调节"
         case .sub2API:
             return "Sub2API 号池查询"
+        case .codexUsage:
+            return "Codex 剩余额度"
         case .genshinStatus:
             return "原神状态"
         case .starRailStatus:
@@ -85,6 +89,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "sun.max"
         case .sub2API:
             return "globe"
+        case .codexUsage:
+            return "gauge.with.dots.needle.67percent"
         case .genshinStatus:
             return "sparkles"
         case .starRailStatus:
@@ -110,7 +116,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return .starRail
         case .zenlessZoneStatus:
             return .zenlessZoneZero
-        case .none, .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .pageFolder, .pageBack, .previousPage, .nextPage:
+        case .none, .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .codexUsage, .pageFolder, .pageBack, .previousPage, .nextPage:
             return nil
         }
     }
@@ -124,6 +130,7 @@ nonisolated enum DeckKeyPressRuntimeAction: Equatable {
     case openWebPage
     case connectSMBServer
     case refreshSub2API
+    case refreshCodexUsage
     case refreshMihoyoGame
     case enterPage
     case goBackPage
@@ -133,6 +140,7 @@ nonisolated enum DeckKeyPressRuntimeAction: Equatable {
 
 nonisolated enum DeckKeyScheduledRuntime: Equatable {
     case sub2API
+    case codexUsage
     case mihoyoGame
 }
 
@@ -151,6 +159,8 @@ extension DeckKeyFunction {
             return .connectSMBServer
         case .sub2API:
             return .refreshSub2API
+        case .codexUsage:
+            return .refreshCodexUsage
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .refreshMihoyoGame
         case .pageFolder:
@@ -170,6 +180,8 @@ extension DeckKeyFunction {
         switch self {
         case .sub2API:
             return .sub2API
+        case .codexUsage:
+            return .codexUsage
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .mihoyoGame
         case .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .none, .pageFolder, .pageBack, .previousPage, .nextPage:
@@ -1281,6 +1293,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var openWebPage: DeckKeyOpenWebPageConfiguration
     var smbServer: DeckKeySMBServerConfiguration
     var sub2API: DeckKeySub2APIConfiguration
+    var codexUsage: DeckKeyCodexUsageConfiguration
     var mihoyoGame: DeckKeyMihoyoGameConfiguration
     var pageFolder: DeckKeyPageFolderConfiguration
     var visual: DeckKeyVisualConfiguration
@@ -1294,6 +1307,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openWebPage: DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
+        codexUsage: DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration()
     )
@@ -1307,6 +1321,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openWebPage: DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
+        codexUsage: DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration()
     )
@@ -1320,6 +1335,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openWebPage: DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
+        codexUsage: DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration(),
         visual: DeckKeyVisualConfiguration(dimsBackground: false)
@@ -1334,6 +1350,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openWebPage: DeckKeyOpenWebPageConfiguration = DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration = DeckKeySub2APIConfiguration(),
+        codexUsage: DeckKeyCodexUsageConfiguration = DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration = DeckKeyPageFolderConfiguration(),
         visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration()
@@ -1346,6 +1363,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         self.openWebPage = openWebPage
         self.smbServer = smbServer
         self.sub2API = sub2API
+        self.codexUsage = codexUsage
         self.mihoyoGame = mihoyoGame
         self.pageFolder = pageFolder
         self.visual = visual
@@ -1360,6 +1378,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openWebPage: DeckKeyOpenWebPageConfiguration = DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration = DeckKeySub2APIConfiguration(),
+        codexUsage: DeckKeyCodexUsageConfiguration = DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration = DeckKeyPageFolderConfiguration()
     ) {
@@ -1372,6 +1391,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             openWebPage: openWebPage,
             smbServer: smbServer,
             sub2API: sub2API,
+            codexUsage: codexUsage,
             mihoyoGame: mihoyoGame,
             pageFolder: pageFolder,
             visual: DeckKeyVisualConfiguration()
@@ -1387,6 +1407,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case openWebPage
         case smbServer
         case sub2API
+        case codexUsage
         case mihoyoGame
         case pageFolder
         case visual
@@ -1402,6 +1423,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openWebPage = try container.decodeIfPresent(DeckKeyOpenWebPageConfiguration.self, forKey: .openWebPage) ?? DeckKeyOpenWebPageConfiguration()
         smbServer = try container.decodeIfPresent(DeckKeySMBServerConfiguration.self, forKey: .smbServer) ?? DeckKeySMBServerConfiguration()
         sub2API = try container.decodeIfPresent(DeckKeySub2APIConfiguration.self, forKey: .sub2API) ?? DeckKeySub2APIConfiguration()
+        codexUsage = try container.decodeIfPresent(DeckKeyCodexUsageConfiguration.self, forKey: .codexUsage) ?? DeckKeyCodexUsageConfiguration()
         mihoyoGame = try container.decodeIfPresent(DeckKeyMihoyoGameConfiguration.self, forKey: .mihoyoGame) ?? DeckKeyMihoyoGameConfiguration()
         pageFolder = try container.decodeIfPresent(DeckKeyPageFolderConfiguration.self, forKey: .pageFolder) ?? DeckKeyPageFolderConfiguration()
         visual = try container.decodeIfPresent(DeckKeyVisualConfiguration.self, forKey: .visual)
@@ -1425,6 +1447,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         try container.encode(openWebPage, forKey: .openWebPage)
         try container.encode(smbServer, forKey: .smbServer)
         try container.encode(sub2API, forKey: .sub2API)
+        try container.encode(codexUsage, forKey: .codexUsage)
         try container.encode(mihoyoGame, forKey: .mihoyoGame)
         try container.encode(pageFolder, forKey: .pageFolder)
         try container.encode(visual, forKey: .visual)
@@ -1475,7 +1498,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return pageFolder.visual.backgroundPNGData
         case .pageBack:
             return visual.backgroundPNGData
-        case .none, .tally, .brightness, .sub2API:
+        case .none, .tally, .brightness, .sub2API, .codexUsage:
             return nil
         case .previousPage, .nextPage:
             return visual.backgroundPNGData
@@ -1498,7 +1521,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return pageFolder.visual.blurredBackgroundPNGData
         case .pageBack:
             return visual.blurredBackgroundPNGData
-        case .none, .tally, .brightness, .sub2API:
+        case .none, .tally, .brightness, .sub2API, .codexUsage:
             return nil
         case .previousPage, .nextPage:
             return visual.blurredBackgroundPNGData
@@ -1523,6 +1546,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return ""
         case .sub2API:
             return sub2API.displayName
+        case .codexUsage:
+            return "Codex 额度"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return function.game?.shortDisplayName ?? "游戏"
         case .pageFolder:
@@ -1562,7 +1587,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return DeckKeyPageFolderConfiguration.migratingLegacyDefaultName(in: pageFolder.visual)
         case .pageBack:
             return DeckKeyVisualConfiguration(dimsBackground: false)
-        case .none, .tally, .brightness, .sub2API, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage:
+        case .none, .tally, .brightness, .sub2API, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage:
             return DeckKeyVisualConfiguration()
         }
     }

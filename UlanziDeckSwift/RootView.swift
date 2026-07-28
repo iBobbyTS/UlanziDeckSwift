@@ -51,6 +51,12 @@ struct RootView: View {
             onFilePathSelection: { configuration in
                 connectionModel.setSelectedFileConfiguration(configuration)
             },
+            onCodexAuthFileSelection: { configuration in
+                connectionModel.setSelectedCodexUsageConfiguration(configuration)
+            },
+            onCodexUsageRefreshIntervalChange: { minutes in
+                connectionModel.setSelectedCodexUsageRefreshIntervalMinutes(minutes)
+            },
             onWebPageURLChange: { urlString in
                 connectionModel.setSelectedWebPageURLString(urlString)
             },

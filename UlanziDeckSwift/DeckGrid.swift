@@ -225,6 +225,32 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                     title = configuration.visual.displayName(fallback: "号池")
                     subtitle = "未配置"
                 }
+            case .codexUsage:
+                switch configuration.codexUsage.lastResult {
+                case let .success(quota):
+                    title = configuration.visual.displayName(
+                        fallback: "\(quota.remainingPercent)%"
+                    )
+                    subtitle = quota.resetAfterText
+                case .authFileNotSelected:
+                    title = configuration.visual.displayName(fallback: "Codex 额度")
+                    subtitle = "未选择 auth.json"
+                case .authFileNeedsReselection:
+                    title = configuration.visual.displayName(fallback: "Codex 额度")
+                    subtitle = "需重选文件"
+                case .invalidAuthFile:
+                    title = configuration.visual.displayName(fallback: "auth.json")
+                    subtitle = "格式无效"
+                case .unauthorized:
+                    title = configuration.visual.displayName(fallback: "Codex 额度")
+                    subtitle = "登录已失效"
+                case .networkError:
+                    title = configuration.visual.displayName(fallback: "Codex 额度")
+                    subtitle = "刷新失败"
+                case nil:
+                    title = configuration.visual.displayName(fallback: "Codex 额度")
+                    subtitle = configuration.codexUsage.authFilePath == nil ? "未配置" : "未刷新"
+                }
             case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
                 buttonBackgroundUsesFittedImage = false
                 if case let .success(status) = configuration.mihoyoGame.lastResult {
@@ -1011,6 +1037,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations[keyID, default: .tallyDefault].sub2API
     }
 
+    func codexUsageConfiguration(for keyID: Int) -> DeckKeyCodexUsageConfiguration {
+        configurations[keyID, default: .tallyDefault].codexUsage
+    }
+
     func resolvedSub2APIBearerKey(for keyID: Int) -> String {
         resolvedSub2APIDataSourceConfiguration(for: keyID)?.bearerKey ?? ""
     }
@@ -1299,6 +1329,60 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
         configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
         configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
+        return true
+    }
+
+    @discardableResult
+    mutating func setCodexUsageConfiguration(
+        _ configuration: DeckKeyCodexUsageConfiguration,
+        for keyID: Int
+    ) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .codexUsage
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].codexUsage = configuration
+        return true
+    }
+
+    @discardableResult
+    mutating func setCodexUsageRefreshIntervalMinutes(_ minutes: Int, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .codexUsage
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].codexUsage.refreshIntervalMinutes =
+            DeckKeyCodexUsageConfiguration.normalizedRefreshIntervalMinutes(minutes)
+        return true
+    }
+
+    @discardableResult
+    mutating func setCodexUsageLastResult(_ result: CodexUsageResult, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .codexUsage
+        else {
+            return false
+        }
+
+        configurations[keyID, default: .tallyDefault].codexUsage.lastResult = result
+        return true
+    }
+
+    @discardableResult
+    mutating func clearCodexUsageRuntimeState(for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].codexUsage.lastResult != nil
+        else {
+            return false
+        }
+
+        configurations[keyID, default: .tallyDefault].codexUsage.lastResult = nil
         return true
     }
 

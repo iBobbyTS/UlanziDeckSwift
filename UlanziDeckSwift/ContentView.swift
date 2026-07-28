@@ -36,6 +36,8 @@ struct ContentView: View {
     let onTallyDefaultValueChange: (Int) -> Void
     let onFolderPathSelection: (DeckKeyOpenFolderConfiguration) -> Void
     let onFilePathSelection: (DeckKeyOpenFileConfiguration) -> Void
+    let onCodexAuthFileSelection: (DeckKeyCodexUsageConfiguration) -> Void
+    let onCodexUsageRefreshIntervalChange: (Int) -> Void
     let onWebPageURLChange: (String) -> Void
     let onWebPageURLSubmit: () -> Void
     let onButtonVisualNamePreview: (Int, String) -> Void
@@ -388,7 +390,7 @@ struct ContentView: View {
     private var functionSidebar: some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 12) {
-                ForEach(functionSections) { section in
+                ForEach(Self.functionSections) { section in
                     FunctionSectionCard(
                         section: section,
                         selectedFunction: selectedConfiguration?.function,
@@ -822,6 +824,8 @@ struct MihoyoQRCodeView: View {
         onTallyDefaultValueChange: { _ in },
         onFolderPathSelection: { _ in },
         onFilePathSelection: { _ in },
+        onCodexAuthFileSelection: { _ in },
+        onCodexUsageRefreshIntervalChange: { _ in },
         onWebPageURLChange: { _ in },
         onWebPageURLSubmit: {},
         onButtonVisualNamePreview: { _, _ in },

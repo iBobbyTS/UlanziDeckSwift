@@ -345,6 +345,39 @@ extension ContentView {
                 Spacer()
             }
 
+        case .codexUsage:
+            localResourceParameterContent(
+                configuration: configuration,
+                resourceTitle: "Codex auth.json",
+                path: configuration.codexUsage.authFilePath,
+                emptyPathText: "未选择 auth.json",
+                needsReselection: configuration.codexUsage.needsReselection,
+                chooseButtonTitle: "选择 auth.json",
+                rechooseButtonTitle: "重新选择 auth.json",
+                chooseButtonSystemImage: "key.horizontal",
+                additionalContent: {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("刷新间隔")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        Picker("刷新间隔", selection: selectedCodexUsageRefreshIntervalMinutesBinding) {
+                            ForEach(
+                                DeckKeyCodexUsageConfiguration.refreshIntervalOptionsMinutes,
+                                id: \.self
+                            ) { minutes in
+                                Text("\(minutes) 分钟").tag(minutes)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 110, alignment: .leading)
+                    }
+                }
+            ) {
+                chooseCodexAuthFile()
+            }
+
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             mihoyoGameParameterContent(for: configuration)
         }
@@ -375,6 +408,32 @@ extension ContentView {
         chooseButtonTitle: String,
         rechooseButtonTitle: String,
         chooseButtonSystemImage: String,
+        chooseAction: @escaping () -> Void
+    ) -> some View {
+        localResourceParameterContent(
+            configuration: configuration,
+            resourceTitle: resourceTitle,
+            path: path,
+            emptyPathText: emptyPathText,
+            needsReselection: needsReselection,
+            chooseButtonTitle: chooseButtonTitle,
+            rechooseButtonTitle: rechooseButtonTitle,
+            chooseButtonSystemImage: chooseButtonSystemImage,
+            additionalContent: { EmptyView() },
+            chooseAction: chooseAction
+        )
+    }
+
+    private func localResourceParameterContent<AdditionalContent: View>(
+        configuration: DeckKeyConfiguration,
+        resourceTitle: String,
+        path: String?,
+        emptyPathText: String,
+        needsReselection: Bool,
+        chooseButtonTitle: String,
+        rechooseButtonTitle: String,
+        chooseButtonSystemImage: String,
+        @ViewBuilder additionalContent: () -> AdditionalContent,
         chooseAction: @escaping () -> Void
     ) -> some View {
         HStack(alignment: .top, spacing: 28) {
@@ -410,6 +469,8 @@ extension ContentView {
                 )
             }
             .buttonStyle(.bordered)
+
+            additionalContent()
 
             Spacer()
         }
@@ -500,8 +561,7 @@ extension ContentView {
 }
 
 extension ContentView {
-    var functionSections: [FunctionSection] {
-        [
+    static let functionSections: [FunctionSection] = [
             FunctionSection(
                 title: "数字",
                 systemImageName: "number.square",
@@ -520,7 +580,7 @@ extension ContentView {
             FunctionSection(
                 title: "网站",
                 systemImageName: "globe",
-                functions: [.openWebPage, .sub2API]
+                functions: [.openWebPage, .sub2API, .codexUsage]
             ),
             FunctionSection(
                 title: "游戏",
@@ -528,7 +588,6 @@ extension ContentView {
                 functions: [.genshinStatus, .starRailStatus, .zenlessZoneStatus]
             ),
         ]
-    }
 
     var selectedConfiguration: DeckKeyConfiguration? {
         guard let selectedKeyID = interactionState.selectedKeyID else {
@@ -846,6 +905,18 @@ extension ContentView {
         )
     }
 
+    var selectedCodexUsageRefreshIntervalMinutesBinding: Binding<Int> {
+        Binding(
+            get: {
+                selectedConfiguration?.codexUsage.refreshIntervalMinutes
+                    ?? DeckKeyCodexUsageConfiguration.defaultRefreshIntervalMinutes
+            },
+            set: { minutes in
+                onCodexUsageRefreshIntervalChange(minutes)
+            }
+        )
+    }
+
     var selectedSub2APIBearerKeyBinding: Binding<String> {
         Binding(
             get: {
@@ -1008,6 +1079,36 @@ extension ContentView {
             alert.informativeText = error.localizedDescription
             alert.alertStyle = .warning
             alert.runModal()
+        }
+    }
+
+    func chooseCodexAuthFile() {
+        let panel = NSOpenPanel()
+        panel.title = "选择 Codex auth.json"
+        panel.prompt = "选择"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.allowedContentTypes = [.json]
+
+        guard panel.runModal() == .OK,
+              let url = panel.url
+        else {
+            return
+        }
+
+        do {
+            onCodexAuthFileSelection(try DeckKeyCodexUsageConfiguration(
+                authFileURL: url,
+                refreshIntervalMinutes: selectedConfiguration?.codexUsage.refreshIntervalMinutes
+                    ?? DeckKeyCodexUsageConfiguration.defaultRefreshIntervalMinutes
+            ))
+        } catch {
+            showWarningAlert(
+                title: "无法保存 auth.json 权限",
+                message: error.localizedDescription
+            )
         }
     }
 

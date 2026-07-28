@@ -7,6 +7,14 @@ import Testing
 
 @Suite(.serialized)
 struct UlanziDeckSwiftTests {
+    @Test("右侧功能选择列覆盖所有可分配功能")
+    func functionSidebarCoversEveryAssignableFunction() {
+        let sidebarFunctions = ContentView.functionSections.flatMap(\.functions)
+
+        #expect(Set(sidebarFunctions) == Set(DeckKeyFunction.assignableCases))
+        #expect(sidebarFunctions.count == Set(sidebarFunctions).count)
+    }
+
     @Test func h200PrototypeLayoutContainsFourteenNumberedKeys() {
         let layout = DeckGridLayout.h200Prototype
 
@@ -6962,6 +6970,174 @@ struct UlanziDeckSwiftTests {
         )
     }
 
+    @Test func codexUsageFetcherUsesAuthTokensAndParsesPrimaryWindow() async throws {
+        let usageURL = try #require(URL(string: "https://chatgpt.com/backend-api/wham/usage"))
+        let responseData = try JSONSerialization.data(withJSONObject: [
+            "rate_limit": [
+                "primary_window": [
+                    "used_percent": 21.6,
+                    "reset_after_seconds": 183_845,
+                ],
+                "secondary_window": NSNull(),
+            ],
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            usageURL: WebPageMetadataURLProtocol.Stub(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: responseData
+            ),
+        ])
+        defer {
+            WebPageMetadataURLProtocol.setStubs([:])
+        }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let authData = try JSONSerialization.data(withJSONObject: [
+            "auth_mode": "chatgpt",
+            "tokens": [
+                "access_token": "access-token",
+                "account_id": "account-id",
+            ],
+        ])
+        let fetcher = CodexUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            authFileLoader: FakeCodexAuthFileLoader(result: .success(authData))
+        )
+
+        let result = await fetcher.fetchUsage(configuration: DeckKeyCodexUsageConfiguration(
+            authFilePath: "/tmp/auth.json",
+            bookmarkData: Data("bookmark".utf8)
+        ))
+
+        #expect(result == .success(CodexUsageQuota(
+            remainingPercent: 78,
+            resetAfterSeconds: 183_845
+        )))
+        let request = try #require(WebPageMetadataURLProtocol.receivedRequests.last)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer access-token")
+        #expect(request.value(forHTTPHeaderField: "ChatGPT-Account-Id") == "account-id")
+        #expect(request.value(forHTTPHeaderField: "User-Agent") == "codex-cli")
+    }
+
+    @Test func codexUsageConfigurationPersistsFileAccessButNotRuntimeResult() throws {
+        let configuration = DeckKeyCodexUsageConfiguration(
+            authFilePath: "/Users/test/.codex/auth.json",
+            bookmarkData: Data("bookmark".utf8),
+            refreshIntervalMinutes: 30,
+            lastResult: .success(CodexUsageQuota(
+                remainingPercent: 80,
+                resetAfterSeconds: 90_000
+            ))
+        )
+
+        let data = try JSONEncoder().encode(configuration)
+        let decoded = try JSONDecoder().decode(DeckKeyCodexUsageConfiguration.self, from: data)
+
+        #expect(decoded.authFilePath == configuration.authFilePath)
+        #expect(decoded.bookmarkData == configuration.bookmarkData)
+        #expect(decoded.refreshIntervalMinutes == 30)
+        #expect(decoded.lastResult == nil)
+        #expect(DeckKeyCodexUsageConfiguration.defaultRefreshIntervalMinutes == 10)
+        #expect(DeckKeyCodexUsageConfiguration.refreshIntervalOptionsMinutes == [1, 5, 10, 30, 60])
+        #expect(DeckKeyCodexUsageConfiguration(refreshIntervalMinutes: 7).refreshIntervalMinutes == 10)
+    }
+
+    @Test func codexUsageDisplayShowsRemainingPercentAndFormattedResetTime() throws {
+        var configuration = DeckKeyConfiguration(function: .codexUsage)
+        configuration.codexUsage.lastResult = .success(CodexUsageQuota(
+            remainingPercent: 74,
+            resetAfterSeconds: 593_588
+        ))
+        let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
+
+        let display = DeckKeyDisplay(
+            key: key,
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+
+        #expect(display.title == "74%")
+        #expect(display.subtitle == "6天 20:53")
+    }
+
+    @Test func codexUsageResetTimeKeepsHoursBelowOneHourAndClampsNegativeValues() {
+        let multipleDays = CodexUsageQuota(
+            remainingPercent: 100,
+            resetAfterSeconds: 2 * 86_400 + 3 * 3_600 + 4 * 60
+        )
+        let belowOneHour = CodexUsageQuota(remainingPercent: 100, resetAfterSeconds: 3_599)
+        let negative = CodexUsageQuota(remainingPercent: 100, resetAfterSeconds: -1)
+
+        #expect(multipleDays.resetAfterText == "2天 3:04")
+        #expect(belowOneHour.resetAfterText == "0:59")
+        #expect(negative.resetAfterText == "0:00")
+    }
+
+    @MainActor
+    @Test func codexUsageRefreshesOnPressAndUsesSelectedAutomaticInterval() async throws {
+        let first = CodexUsageResult.success(CodexUsageQuota(
+            remainingPercent: 90,
+            resetAfterSeconds: 600
+        ))
+        let second = CodexUsageResult.success(CodexUsageQuota(
+            remainingPercent: 89,
+            resetAfterSeconds: 540
+        ))
+        let third = CodexUsageResult.success(CodexUsageQuota(
+            remainingPercent: 88,
+            resetAfterSeconds: 480
+        ))
+        let fetcher = FakeCodexUsageFetcher(
+            results: [first, second, third],
+            defaultResult: third
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.codexUsage, to: 3)
+        loadedState.setCodexUsageConfiguration(
+            DeckKeyCodexUsageConfiguration(
+                authFilePath: "/Users/test/.codex/auth.json",
+                bookmarkData: Data("bookmark".utf8),
+                refreshIntervalMinutes: 60
+            ),
+            for: 3
+        )
+        let syncer = FakeH200DeckSyncer()
+        let configurationStore = FakeDeckConfigurationStore(loadedState: loadedState)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: configurationStore,
+            codexUsageFetcher: fetcher,
+            codexUsageRefreshMinuteDuration: 0.02
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.requestCount == 1
+                && model.interactionState.codexUsageConfiguration(for: 3).lastResult == first
+        }
+
+        syncer.emitInput(H200InputEvent(state: 1, index: 2, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 2, type: .button, action: .release))
+        try await Self.waitUntil {
+            fetcher.requestCount == 2
+                && model.interactionState.codexUsageConfiguration(for: 3).lastResult == second
+        }
+
+        model.setSelectedCodexUsageRefreshIntervalMinutes(1)
+        #expect(model.interactionState.codexUsageConfiguration(for: 3).refreshIntervalMinutes == 1)
+        #expect(configurationStore.savedStates.last?.codexUsageConfiguration(for: 3).refreshIntervalMinutes == 1)
+
+        try await Self.waitUntil {
+            fetcher.requestCount >= 3
+                && model.interactionState.codexUsageConfiguration(for: 3).lastResult == third
+        }
+    }
+
     private static func inputReport(state: UInt8, index: UInt8, type: UInt8, action: UInt8) -> Data {
         var report = Data()
         report.append(0x7c)
@@ -7337,6 +7513,48 @@ private final class FakeH200Discovery: H200Discovering, @unchecked Sendable {
                 return .notConnected
             }
 
+            return results.removeFirst()
+        }
+    }
+
+    private func locked<Value>(_ body: () -> Value) -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
+private struct FakeCodexAuthFileLoader: CodexAuthFileLoading {
+    let result: CodexAuthFileLoadResult
+
+    func loadAuthData(
+        configuration: DeckKeyCodexUsageConfiguration
+    ) -> CodexAuthFileLoadResult {
+        result
+    }
+}
+
+private final class FakeCodexUsageFetcher: CodexUsageFetching, @unchecked Sendable {
+    private let lock = NSLock()
+    private var results: [CodexUsageResult]
+    private let defaultResult: CodexUsageResult
+    private var storedRequestCount = 0
+
+    var requestCount: Int {
+        locked { storedRequestCount }
+    }
+
+    init(results: [CodexUsageResult], defaultResult: CodexUsageResult) {
+        self.results = results
+        self.defaultResult = defaultResult
+    }
+
+    func fetchUsage(configuration: DeckKeyCodexUsageConfiguration) async -> CodexUsageResult {
+        locked {
+            storedRequestCount += 1
+            guard !results.isEmpty else {
+                return defaultResult
+            }
             return results.removeFirst()
         }
     }
