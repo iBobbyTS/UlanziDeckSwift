@@ -7329,7 +7329,16 @@ struct UlanziDeckSwiftTests {
         #expect(decoded.lastResult == nil)
         #expect(DeckKeyCodexUsageConfiguration.defaultRefreshIntervalMinutes == 10)
         #expect(DeckKeyCodexUsageConfiguration.refreshIntervalOptionsMinutes == [1, 5, 10, 30, 60])
-        #expect(DeckKeyCodexUsageConfiguration(refreshIntervalMinutes: 7).refreshIntervalMinutes == 10)
+        let defaultConfiguration = DeckKeyCodexUsageConfiguration(refreshIntervalMinutes: 7)
+        #expect(defaultConfiguration.refreshIntervalMinutes == 10)
+        #expect(defaultConfiguration.colorMode == .highIsRed)
+
+        let legacyData = Data(#"{"refreshIntervalMinutes":10}"#.utf8)
+        let legacyConfiguration = try JSONDecoder().decode(
+            DeckKeyCodexUsageConfiguration.self,
+            from: legacyData
+        )
+        #expect(legacyConfiguration.colorMode == .highIsRed)
     }
 
     @Test func codexUsageDisplayShowsRemainingPercentAndFormattedResetTime() throws {

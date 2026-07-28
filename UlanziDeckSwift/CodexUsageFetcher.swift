@@ -99,7 +99,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         authFilePath: String? = nil,
         bookmarkData: Data? = nil,
         refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
-        colorMode: CodexUsageColorMode = .lowIsRed,
+        colorMode: CodexUsageColorMode = .highIsRed,
         lastResult: CodexUsageResult? = nil
     ) {
         self.authFilePath = authFilePath
@@ -112,7 +112,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     init(
         authFileURL: URL,
         refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
-        colorMode: CodexUsageColorMode = .lowIsRed
+        colorMode: CodexUsageColorMode = .highIsRed
     ) throws {
         authFilePath = authFileURL.path
         bookmarkData = try authFileURL.bookmarkData(
@@ -145,7 +145,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
                 ?? Self.defaultRefreshIntervalMinutes
         )
         colorMode = try container.decodeIfPresent(CodexUsageColorMode.self, forKey: .colorMode)
-            ?? .lowIsRed
+            ?? .highIsRed
         lastResult = nil
     }
 
