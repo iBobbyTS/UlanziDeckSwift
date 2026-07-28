@@ -16,8 +16,8 @@
 
 ## 文件与鉴权
 
-- 文件必须由用户通过应用内文件选择器选择。
-- 从空按键新增“Codex 剩余额度”功能时，应用会自动打开文件选择器并预选 `~/.codex/auth.json`；修改已有功能时仍使用原来的手动选择流程。
+- 从空按键新增“Codex 剩余额度”功能时，应用会直接选择 `~/.codex/auth.json`，不打开文件选择器。
+- 修改已有“Codex 剩余额度”功能的文件时，仍使用原来的手动选择流程。
 - 应用只持久化文件路径和只读 security-scoped bookmark，不复制或持久化 access token。
 - 查询时从 `tokens.access_token` 读取 Bearer token；如果存在 `tokens.account_id`，同时发送 `ChatGPT-Account-Id`。
 - 请求使用 `GET https://chatgpt.com/backend-api/wham/usage`，并发送 `User-Agent: codex-cli`。

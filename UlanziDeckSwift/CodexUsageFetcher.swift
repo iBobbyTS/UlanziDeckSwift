@@ -81,6 +81,12 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
             .appendingPathComponent("auth.json", isDirectory: false)
     }
 
+    static func defaultAuthFileConfiguration(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) throws -> Self {
+        try Self(authFileURL: defaultAuthFileURL(homeDirectory: homeDirectory))
+    }
+
     var authFilePath: String?
     var bookmarkData: Data?
     var refreshIntervalMinutes: Int

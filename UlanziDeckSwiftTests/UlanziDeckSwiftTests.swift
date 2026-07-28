@@ -7266,22 +7266,40 @@ struct UlanziDeckSwiftTests {
         #expect(request.value(forHTTPHeaderField: "User-Agent") == "codex-cli")
     }
 
-    @Test func newCodexUsageComponentPreselectsDefaultAuthFileOnlyFromEmptyKey() {
-        let homeDirectory = URL(fileURLWithPath: "/Users/test", isDirectory: true)
+    @Test func newCodexUsageComponentDirectlySelectsDefaultAuthFileOnlyFromEmptyKey() throws {
+        let homeDirectory = FileManager.default.temporaryDirectory
+            .appending(path: "UlanziDeckSwiftCodexHome-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let codexDirectory = homeDirectory.appending(path: ".codex", directoryHint: .isDirectory)
+        let authFileURL = codexDirectory.appending(path: "auth.json")
+        try FileManager.default.createDirectory(
+            at: codexDirectory,
+            withIntermediateDirectories: true
+        )
+        try Data("{}".utf8).write(to: authFileURL)
+        defer {
+            try? FileManager.default.removeItem(at: homeDirectory)
+        }
 
         #expect(
             DeckKeyCodexUsageConfiguration.defaultAuthFileURL(homeDirectory: homeDirectory).path
-                == "/Users/test/.codex/auth.json"
+                == authFileURL.path
         )
-        #expect(ContentView.shouldAutomaticallyChooseCodexAuthFile(
+        let configuration = try DeckKeyCodexUsageConfiguration.defaultAuthFileConfiguration(
+            homeDirectory: homeDirectory
+        )
+        #expect(configuration.authFilePath == authFileURL.path)
+        #expect(configuration.bookmarkData != nil)
+        #expect(!configuration.needsReselection)
+
+        #expect(ContentView.shouldAutomaticallySelectDefaultCodexAuthFile(
             currentFunction: DeckKeyFunction.none,
             selectedFunction: .codexUsage
         ))
-        #expect(!ContentView.shouldAutomaticallyChooseCodexAuthFile(
+        #expect(!ContentView.shouldAutomaticallySelectDefaultCodexAuthFile(
             currentFunction: .tally,
             selectedFunction: .codexUsage
         ))
-        #expect(!ContentView.shouldAutomaticallyChooseCodexAuthFile(
+        #expect(!ContentView.shouldAutomaticallySelectDefaultCodexAuthFile(
             currentFunction: DeckKeyFunction.none,
             selectedFunction: .openFile
         ))

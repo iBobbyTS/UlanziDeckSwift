@@ -428,13 +428,20 @@ struct ContentView: View {
         let currentFunction = selectedConfiguration?.function
         onFunctionSelection(function)
 
-        if Self.shouldAutomaticallyChooseCodexAuthFile(
+        if Self.shouldAutomaticallySelectDefaultCodexAuthFile(
             currentFunction: currentFunction,
             selectedFunction: function
         ) {
-            chooseCodexAuthFile(
-                preselecting: DeckKeyCodexUsageConfiguration.defaultAuthFileURL()
-            )
+            do {
+                onCodexAuthFileSelection(
+                    try DeckKeyCodexUsageConfiguration.defaultAuthFileConfiguration()
+                )
+            } catch {
+                showWarningAlert(
+                    title: "无法使用默认 auth.json",
+                    message: error.localizedDescription
+                )
+            }
         }
     }
 

@@ -53,7 +53,7 @@ private final class ButtonBackgroundSelectionAccessory: NSObject {
 }
 
 extension ContentView {
-    nonisolated static func shouldAutomaticallyChooseCodexAuthFile(
+    nonisolated static func shouldAutomaticallySelectDefaultCodexAuthFile(
         currentFunction: DeckKeyFunction?,
         selectedFunction: DeckKeyFunction
     ) -> Bool {
@@ -1151,7 +1151,7 @@ extension ContentView {
         }
     }
 
-    func chooseCodexAuthFile(preselecting preselectedURL: URL? = nil) {
+    func chooseCodexAuthFile() {
         let panel = NSOpenPanel()
         panel.title = "选择 Codex auth.json"
         panel.prompt = "选择"
@@ -1161,11 +1161,6 @@ extension ContentView {
         panel.canCreateDirectories = false
         panel.showsHiddenFiles = true
         panel.allowedContentTypes = [.json]
-        if let preselectedURL {
-            panel.directoryURL = preselectedURL.deletingLastPathComponent()
-            panel.nameFieldStringValue = preselectedURL.lastPathComponent
-        }
-
         guard panel.runModal() == .OK,
               let url = panel.url
         else {
@@ -1187,7 +1182,7 @@ extension ContentView {
         }
     }
 
-    private func showWarningAlert(title: String, message: String) {
+    func showWarningAlert(title: String, message: String) {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
