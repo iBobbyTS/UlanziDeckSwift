@@ -396,7 +396,7 @@ struct ContentView: View {
                         section: section,
                         selectedFunction: selectedConfiguration?.function,
                         isFunctionDisabled: isFunctionDisabled,
-                        onFunctionSelection: onFunctionSelection
+                        onFunctionSelection: selectSidebarFunction
                     )
                 }
             }
@@ -406,6 +406,20 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func selectSidebarFunction(_ function: DeckKeyFunction) {
+        let currentFunction = selectedConfiguration?.function
+        onFunctionSelection(function)
+
+        if Self.shouldAutomaticallyChooseCodexAuthFile(
+            currentFunction: currentFunction,
+            selectedFunction: function
+        ) {
+            chooseCodexAuthFile(
+                preselecting: DeckKeyCodexUsageConfiguration.defaultAuthFileURL()
+            )
+        }
     }
 
     private func isFunctionDisabled(_ function: DeckKeyFunction) -> Bool {

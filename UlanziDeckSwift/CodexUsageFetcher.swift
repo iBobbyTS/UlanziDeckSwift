@@ -73,6 +73,14 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     static let securityScopedBookmarkCreationOptions = DeckKeySecurityScopedBookmarkOptions.readOnlyCreation
     static let securityScopedBookmarkResolutionOptions = DeckKeySecurityScopedBookmarkOptions.resolution
 
+    static func defaultAuthFileURL(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory
+            .appendingPathComponent(".codex", isDirectory: true)
+            .appendingPathComponent("auth.json", isDirectory: false)
+    }
+
     var authFilePath: String?
     var bookmarkData: Data?
     var refreshIntervalMinutes: Int

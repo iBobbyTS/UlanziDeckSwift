@@ -53,6 +53,13 @@ private final class ButtonBackgroundSelectionAccessory: NSObject {
 }
 
 extension ContentView {
+    nonisolated static func shouldAutomaticallyChooseCodexAuthFile(
+        currentFunction: DeckKeyFunction?,
+        selectedFunction: DeckKeyFunction
+    ) -> Bool {
+        currentFunction == .none && selectedFunction == .codexUsage
+    }
+
     @ViewBuilder
     func parameterContent(for configuration: DeckKeyConfiguration) -> some View {
         switch configuration.function {
@@ -346,51 +353,7 @@ extension ContentView {
             }
 
         case .codexUsage:
-            localResourceParameterContent(
-                configuration: configuration,
-                resourceTitle: "Codex auth.json",
-                path: configuration.codexUsage.authFilePath,
-                emptyPathText: "未选择 auth.json",
-                needsReselection: configuration.codexUsage.needsReselection,
-                chooseButtonTitle: "选择 auth.json",
-                rechooseButtonTitle: "重新选择 auth.json",
-                chooseButtonSystemImage: "key.horizontal",
-                additionalContent: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("刷新间隔")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        Picker("刷新间隔", selection: selectedCodexUsageRefreshIntervalMinutesBinding) {
-                            ForEach(
-                                DeckKeyCodexUsageConfiguration.refreshIntervalOptionsMinutes,
-                                id: \.self
-                            ) { minutes in
-                                Text("\(minutes) 分钟").tag(minutes)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .frame(width: 110, alignment: .leading)
-
-                        Text("额度颜色")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-
-                        Picker("额度颜色", selection: selectedCodexUsageColorModeBinding) {
-                            ForEach(CodexUsageColorMode.allCases) { colorMode in
-                                Text(colorMode.title).tag(colorMode)
-                            }
-                        }
-                        .labelsHidden()
-                        .pickerStyle(.menu)
-                        .frame(width: 110, alignment: .leading)
-                    }
-                }
-            ) {
-                chooseCodexAuthFile()
-            }
+            codexUsageParameterContent(for: configuration)
 
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             mihoyoGameParameterContent(for: configuration)
@@ -485,6 +448,87 @@ extension ContentView {
             .buttonStyle(.bordered)
 
             additionalContent()
+
+            Spacer()
+        }
+    }
+
+    private func codexUsageParameterContent(for configuration: DeckKeyConfiguration) -> some View {
+        HStack(alignment: .top, spacing: 28) {
+            functionParameterColumn(for: configuration)
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .bottom, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Codex auth.json")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        Text(configuration.codexUsage.authFilePath ?? "未选择 auth.json")
+                            .font(.callout)
+                            .foregroundStyle(
+                                configuration.codexUsage.authFilePath == nil
+                                    ? Color.secondary
+                                    : Color.primary
+                            )
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+
+                        if configuration.codexUsage.needsReselection {
+                            Text("需要重新选择")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Button {
+                        chooseCodexAuthFile()
+                    } label: {
+                        Label(
+                            configuration.codexUsage.needsReselection
+                                ? "重新选择 auth.json"
+                                : "选择 auth.json",
+                            systemImage: "key.horizontal"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                HStack(spacing: 12) {
+                    Text("刷新间隔")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Picker("刷新间隔", selection: selectedCodexUsageRefreshIntervalMinutesBinding) {
+                        ForEach(
+                            DeckKeyCodexUsageConfiguration.refreshIntervalOptionsMinutes,
+                            id: \.self
+                        ) { minutes in
+                            Text("\(minutes) 分钟").tag(minutes)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 110, alignment: .leading)
+                }
+
+                HStack(spacing: 12) {
+                    Text("额度颜色")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    Picker("额度颜色", selection: selectedCodexUsageColorModeBinding) {
+                        ForEach(CodexUsageColorMode.allCases) { colorMode in
+                            Text(colorMode.title).tag(colorMode)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 110, alignment: .leading)
+                }
+            }
+            .frame(maxWidth: 520, alignment: .leading)
 
             Spacer()
         }
@@ -1107,7 +1151,7 @@ extension ContentView {
         }
     }
 
-    func chooseCodexAuthFile() {
+    func chooseCodexAuthFile(preselecting preselectedURL: URL? = nil) {
         let panel = NSOpenPanel()
         panel.title = "选择 Codex auth.json"
         panel.prompt = "选择"
@@ -1115,7 +1159,12 @@ extension ContentView {
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = false
+        panel.showsHiddenFiles = true
         panel.allowedContentTypes = [.json]
+        if let preselectedURL {
+            panel.directoryURL = preselectedURL.deletingLastPathComponent()
+            panel.nameFieldStringValue = preselectedURL.lastPathComponent
+        }
 
         guard panel.runModal() == .OK,
               let url = panel.url

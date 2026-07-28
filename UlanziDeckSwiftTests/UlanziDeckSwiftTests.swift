@@ -7024,6 +7024,27 @@ struct UlanziDeckSwiftTests {
         #expect(request.value(forHTTPHeaderField: "User-Agent") == "codex-cli")
     }
 
+    @Test func newCodexUsageComponentPreselectsDefaultAuthFileOnlyFromEmptyKey() {
+        let homeDirectory = URL(fileURLWithPath: "/Users/test", isDirectory: true)
+
+        #expect(
+            DeckKeyCodexUsageConfiguration.defaultAuthFileURL(homeDirectory: homeDirectory).path
+                == "/Users/test/.codex/auth.json"
+        )
+        #expect(ContentView.shouldAutomaticallyChooseCodexAuthFile(
+            currentFunction: DeckKeyFunction.none,
+            selectedFunction: .codexUsage
+        ))
+        #expect(!ContentView.shouldAutomaticallyChooseCodexAuthFile(
+            currentFunction: .tally,
+            selectedFunction: .codexUsage
+        ))
+        #expect(!ContentView.shouldAutomaticallyChooseCodexAuthFile(
+            currentFunction: DeckKeyFunction.none,
+            selectedFunction: .openFile
+        ))
+    }
+
     @Test func codexUsageConfigurationPersistsFileAccessButNotRuntimeResult() throws {
         let configuration = DeckKeyCodexUsageConfiguration(
             authFilePath: "/Users/test/.codex/auth.json",
