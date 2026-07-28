@@ -577,6 +577,25 @@ nonisolated private struct StoredDeckConfiguration: Codable, Equatable {
 nonisolated private struct StoredDeckKeyConfiguration: Codable, Equatable {
     let id: Int
     let configuration: DeckKeyConfiguration
+
+    enum CodingKeys: CodingKey {
+        case id
+        case configuration
+    }
+
+    init(id: Int, configuration: DeckKeyConfiguration) {
+        self.id = id
+        self.configuration = configuration
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        configuration = (try? container.decode(
+            DeckKeyConfiguration.self,
+            forKey: .configuration
+        )) ?? .empty
+    }
 }
 
 nonisolated private struct StoredDeckPage: Codable, Equatable {

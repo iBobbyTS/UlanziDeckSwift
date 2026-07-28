@@ -1494,6 +1494,37 @@ struct UlanziDeckSwiftTests {
         #expect(restored.folderPath(for: 4) == "/Users/ibobby/Documents/Nested")
     }
 
+    @Test func userDefaultsStoreClearsOnlyKeyContainingUnknownConfigurationValue() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let storageKey = "deckConfiguration"
+        let credentialID = "unknown-key-owned-credential"
+        let credentials = FakeSub2APICredentialStore()
+        try credentials.saveBearerKey("must-be-deleted", credentialID: credentialID)
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        let payload = Data(#"{"version":2,"layoutIdentifier":"h200Prototype","pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"futureFunction","sub2API":{"credentialID":"unknown-key-owned-credential"}}},{"id":4,"configuration":{"function":"openWebPage","openWebPage":{"urlString":"https://example.com"}}}]}],"rootPageIDs":["root"]}"#.utf8)
+        defaults.set(payload, forKey: storageKey)
+        defaults.set([credentialID], forKey: "\(storageKey).sub2APICredentialIDs")
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+
+        #expect(restored.configuration(for: 3)?.function == DeckKeyFunction.none)
+        #expect(restored.configuration(for: 4)?.function == .openWebPage)
+        #expect(restored.configuration(for: 5)?.function == .tally)
+        let sanitizedData = try #require(defaults.data(forKey: storageKey))
+        #expect(!String(decoding: sanitizedData, as: UTF8.self).contains("futureFunction"))
+        #expect(credentials.savedBearerKeys[credentialID] == nil)
+        #expect(credentials.deletedCredentialIDs == [credentialID])
+    }
+
     @Test func userDefaultsStoreDeletesMalformedConfigurationThatMayContainPlaintextCredential() throws {
         let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

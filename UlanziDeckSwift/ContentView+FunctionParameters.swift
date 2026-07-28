@@ -57,7 +57,7 @@ extension ContentView {
         currentFunction: DeckKeyFunction?,
         selectedFunction: DeckKeyFunction
     ) -> Bool {
-        currentFunction == .none && selectedFunction == .codexUsage
+        currentFunction == DeckKeyFunction.none && selectedFunction == .codexUsage
     }
 
     @ViewBuilder
