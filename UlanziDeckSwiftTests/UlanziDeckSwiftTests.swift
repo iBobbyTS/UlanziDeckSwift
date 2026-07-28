@@ -7366,6 +7366,7 @@ struct UlanziDeckSwiftTests {
         #expect(display.codexUsageButtonContent == CodexUsageButtonContent(
             accountNickname: nil,
             percentageText: "74%",
+            resetLabelText: "下次重设",
             resetAfterText: "6天 20:53",
             percentageColor: .yellow,
             resetAfterColor: .red

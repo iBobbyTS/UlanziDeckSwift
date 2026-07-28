@@ -233,6 +233,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                     codexUsageButtonContent = CodexUsageButtonContent(
                         accountNickname: configuration.codexUsage.displayAccountNickname,
                         percentageText: "\(quota.remainingPercent)%",
+                        resetLabelText: "下次重设",
                         resetAfterText: quota.resetAfterText,
                         percentageColor: configuration.codexUsage.colorMode.metricColor(
                             for: quota.remainingPercent
@@ -371,6 +372,7 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
 nonisolated struct CodexUsageButtonContent: Equatable, Sendable {
     let accountNickname: String?
     let percentageText: String
+    let resetLabelText: String
     let resetAfterText: String
     let percentageColor: MihoyoGameMetricColor
     let resetAfterColor: MihoyoGameMetricColor

@@ -608,13 +608,14 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         in rect: NSRect,
         buttonRect: NSRect
     ) {
-        let percentageHeight = buttonRect.height * 0.42
-        let resetHeight = buttonRect.height * 0.19
-        let gap = buttonRect.height * 0.035
-        let nicknameHeight = buttonRect.height * 0.13
-        let nicknameGap = buttonRect.height * 0.02
+        let percentageHeight = buttonRect.height * 0.36
+        let resetLabelHeight = buttonRect.height * 0.10
+        let resetHeight = buttonRect.height * 0.16
+        let gap = buttonRect.height * 0.012
+        let nicknameHeight = buttonRect.height * 0.125
+        let nicknameGap = buttonRect.height * 0.015
         let nicknameExtraHeight = content.accountNickname == nil ? 0 : nicknameHeight + nicknameGap
-        let metricsHeight = percentageHeight + gap + resetHeight
+        let metricsHeight = percentageHeight + gap + resetLabelHeight + gap + resetHeight
         let totalHeight = nicknameExtraHeight + metricsHeight
         let top = rect.midY + totalHeight / 2
         let metricsTop = top - nicknameExtraHeight
@@ -625,7 +626,7 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
                 accountNickname,
                 weight: .semibold,
                 maxFontSize: buttonRect.height * 0.12,
-                minFontSize: buttonRect.height * 0.08,
+                minFontSize: buttonRect.height * 0.09,
                 color: NSColor(calibratedWhite: 0.88, alpha: 1),
                 rect: NSRect(
                     x: rect.minX,
@@ -640,8 +641,8 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         drawCenteredAutoSizedSingleLineText(
             content.percentageText,
             weight: .heavy,
-            maxFontSize: buttonRect.height * 0.39,
-            minFontSize: buttonRect.height * 0.20,
+            maxFontSize: buttonRect.height * 0.35,
+            minFontSize: buttonRect.height * 0.18,
             color: mihoyoGameMetricColor(for: content.percentageColor),
             rect: NSRect(
                 x: rect.minX,
@@ -652,9 +653,23 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             shadow: shadow
         )
         drawCenteredAutoSizedSingleLineText(
+            content.resetLabelText,
+            weight: .semibold,
+            maxFontSize: buttonRect.height * 0.095,
+            minFontSize: buttonRect.height * 0.075,
+            color: .white,
+            rect: NSRect(
+                x: rect.minX,
+                y: metricsTop - percentageHeight - gap - resetLabelHeight,
+                width: rect.width,
+                height: resetLabelHeight
+            ),
+            shadow: shadow
+        )
+        drawCenteredAutoSizedSingleLineText(
             content.resetAfterText,
             weight: .semibold,
-            maxFontSize: buttonRect.height * 0.16,
+            maxFontSize: buttonRect.height * 0.145,
             minFontSize: buttonRect.height * 0.09,
             color: mihoyoGameMetricColor(for: content.resetAfterColor),
             rect: NSRect(
