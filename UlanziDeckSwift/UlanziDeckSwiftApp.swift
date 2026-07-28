@@ -8,9 +8,15 @@
 import SwiftUI
 import AppKit
 import Combine
+import Darwin
 
 @main
 struct UlanziDeckSwiftApp: App {
+    enum TestHostLaunchDecision: Equatable {
+        case proceedWithoutRuntime
+        case stop(message: String)
+    }
+
     private static let mainWindowID = "main-window"
     private let singleInstanceAcquired: Bool
     private let duplicateApplicationAlert: DuplicateApplicationAlert?
@@ -18,10 +24,15 @@ struct UlanziDeckSwiftApp: App {
 
     init() {
         if Self.isRunningTests {
-            singleInstanceAcquired = true
-            duplicateApplicationAlert = nil
-            _appState = StateObject(wrappedValue: UlanziDeckAppState())
-            return
+            switch Self.testHostLaunchDecision(for: SingleInstanceGuard().acquire()) {
+            case .proceedWithoutRuntime:
+                singleInstanceAcquired = true
+                duplicateApplicationAlert = nil
+                _appState = StateObject(wrappedValue: UlanziDeckAppState(isEnabled: false))
+                return
+            case let .stop(message):
+                Self.stopTestHost(message: message)
+            }
         }
 
         switch SingleInstanceGuard().acquire() {
@@ -69,6 +80,30 @@ struct UlanziDeckSwiftApp: App {
 
     static var isRunningTests: Bool {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    }
+
+    static func testHostLaunchDecision(
+        for acquisitionResult: SingleInstanceGuard.AcquisitionResult
+    ) -> TestHostLaunchDecision {
+        switch acquisitionResult {
+        case .acquired:
+            return .proceedWithoutRuntime
+        case let .blockedByExistingApplication(existingApplication):
+            let path = existingApplication.bundleURL?.path ?? "路径未知"
+            return .stop(
+                message: "测试已停止：检测到另一个 Ulanzi Deck 实例正在运行"
+                    + "（PID \(existingApplication.processIdentifier)，路径：\(path)）。"
+            )
+        case .blockedByUnknownApplication:
+            return .stop(
+                message: "测试已停止：Ulanzi Deck 单实例锁已被占用，但无法定位占用进程。"
+            )
+        }
+    }
+
+    private static func stopTestHost(message: String) -> Never {
+        FileHandle.standardError.write(Data("error: \(message)\n".utf8))
+        Darwin.exit(EXIT_FAILURE)
     }
 }
 

@@ -130,8 +130,31 @@ struct UlanziDeckSwiftTests {
         ])
     }
 
-    @Test func appSkipsSingleInstanceGuardDuringTests() {
+    @Test func testHostRequiresSingleInstanceAndReportsBlockingApplication() {
         #expect(UlanziDeckSwiftApp.isRunningTests)
+        #expect(
+            UlanziDeckSwiftApp.testHostLaunchDecision(for: .acquired)
+                == .proceedWithoutRuntime
+        )
+
+        let existingApplication = ExistingApplication(
+            processIdentifier: 2468,
+            bundleURL: URL(filePath: "/Applications/Ulanzi Deck.app")
+        )
+        #expect(
+            UlanziDeckSwiftApp.testHostLaunchDecision(
+                for: .blockedByExistingApplication(existingApplication)
+            ) == .stop(
+                message: "测试已停止：检测到另一个 Ulanzi Deck 实例正在运行"
+                    + "（PID 2468，路径：/Applications/Ulanzi Deck.app）。"
+            )
+        )
+        #expect(
+            UlanziDeckSwiftApp.testHostLaunchDecision(for: .blockedByUnknownApplication)
+                == .stop(
+                    message: "测试已停止：Ulanzi Deck 单实例锁已被占用，但无法定位占用进程。"
+                )
+        )
     }
 
     @MainActor
