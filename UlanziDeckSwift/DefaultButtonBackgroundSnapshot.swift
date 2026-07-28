@@ -26,9 +26,11 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "FolderBackground"
         case .connectSMBServer:
             return "SMBServerBackground"
+        case .codexUsage:
+            return "CodexUsageBackground"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return function.game?.buttonBackgroundAssetName
-        case .none, .tally, .openFile, .openWebPage, .brightness, .sub2API, .codexUsage, .pageFolder, .pageBack, .previousPage, .nextPage:
+        case .none, .tally, .openFile, .openWebPage, .brightness, .sub2API, .pageFolder, .pageBack, .previousPage, .nextPage:
             return nil
         }
     }
@@ -142,6 +144,13 @@ extension DeckKeyConfiguration {
             openWebPage.visual.replaceBackground(with: defaultVisual)
         case .connectSMBServer:
             smbServer.visual.replaceBackground(with: defaultVisual)
+        case .codexUsage:
+            let hadDefaultBackground = codexUsage.visual.backgroundPNGData != nil
+            codexUsage.visual.replaceBackground(with: defaultVisual)
+            if !hadDefaultBackground && !visual.hasCustomBackground {
+                visual.usesBlurredBackground = true
+                visual.dimsBackground = true
+            }
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             mihoyoGame.visual.replaceBackground(with: defaultVisual)
         case .pageFolder:
@@ -150,7 +159,7 @@ extension DeckKeyConfiguration {
             visual.replaceBackground(with: defaultVisual)
         case .previousPage, .nextPage:
             visual.replaceBackground(with: defaultVisual)
-        case .none, .tally, .openFile, .brightness, .sub2API, .codexUsage:
+        case .none, .tally, .openFile, .brightness, .sub2API:
             break
         }
 
@@ -165,6 +174,8 @@ extension DeckKeyConfiguration {
             openWebPage.visual.clearBackground()
         case .connectSMBServer:
             smbServer.visual.clearBackground()
+        case .codexUsage:
+            codexUsage.visual.clearBackground()
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             mihoyoGame.visual.clearBackground()
         case .pageFolder:
@@ -173,7 +184,7 @@ extension DeckKeyConfiguration {
             visual.clearBackground()
         case .previousPage, .nextPage:
             visual.clearBackground()
-        case .none, .tally, .openFile, .brightness, .sub2API, .codexUsage:
+        case .none, .tally, .openFile, .brightness, .sub2API:
             break
         }
 

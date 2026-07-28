@@ -151,6 +151,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     var refreshIntervalMinutes: Int
     var colorMode: CodexUsageColorMode
     var resetDisplayMode: CodexUsageResetDisplayMode
+    var visual: DeckKeyVisualConfiguration
 
     /// 最近一次查询的结果。不参与持久化，反序列化时使用空值。
     var lastResult: CodexUsageResult?
@@ -162,6 +163,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
         colorMode: CodexUsageColorMode = .highIsRed,
         resetDisplayMode: CodexUsageResetDisplayMode = .remainingTime,
+        visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration(),
         lastResult: CodexUsageResult? = nil
     ) {
         self.authFilePath = authFilePath
@@ -170,6 +172,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         self.refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(refreshIntervalMinutes)
         self.colorMode = colorMode
         self.resetDisplayMode = resetDisplayMode
+        self.visual = visual
         self.lastResult = lastResult
     }
 
@@ -178,7 +181,8 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         accountNickname: String = "",
         refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
         colorMode: CodexUsageColorMode = .highIsRed,
-        resetDisplayMode: CodexUsageResetDisplayMode = .remainingTime
+        resetDisplayMode: CodexUsageResetDisplayMode = .remainingTime,
+        visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration()
     ) throws {
         authFilePath = authFileURL.path
         self.accountNickname = accountNickname
@@ -190,6 +194,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         self.refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(refreshIntervalMinutes)
         self.colorMode = colorMode
         self.resetDisplayMode = resetDisplayMode
+        self.visual = visual
         lastResult = nil
     }
 
@@ -209,6 +214,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         case refreshIntervalMinutes
         case colorMode
         case resetDisplayMode
+        case visual
     }
 
     init(from decoder: Decoder) throws {
@@ -226,6 +232,10 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
             CodexUsageResetDisplayMode.self,
             forKey: .resetDisplayMode
         ) ?? .remainingTime
+        visual = try container.decodeIfPresent(
+            DeckKeyVisualConfiguration.self,
+            forKey: .visual
+        ) ?? DeckKeyVisualConfiguration()
         lastResult = nil
     }
 
@@ -237,6 +247,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
         try container.encode(colorMode, forKey: .colorMode)
         try container.encode(resetDisplayMode, forKey: .resetDisplayMode)
+        try container.encode(visual, forKey: .visual)
     }
 
     static func normalizedRefreshIntervalMinutes(_ minutes: Int) -> Int {

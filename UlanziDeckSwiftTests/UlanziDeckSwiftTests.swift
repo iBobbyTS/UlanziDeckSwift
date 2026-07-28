@@ -1365,6 +1365,30 @@ struct UlanziDeckSwiftTests {
         #expect(!secondDisplay.buttonVisualContent.dimsBackground)
     }
 
+    @Test func codexUsageDefaultBackgroundStartsBlurredAndDimmed() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+
+        #expect(state.assign(.codexUsage, to: 2))
+        var configuration = try #require(state.configuration(for: 2))
+        let directBackground = try #require(configuration.defaultButtonBackgroundPNGData)
+        let blurredBackground = try #require(configuration.defaultButtonBlurredBackgroundPNGData)
+
+        #expect(directBackground != blurredBackground)
+        #expect(configuration.visual.usesBlurredBackground)
+        #expect(configuration.visual.dimsBackground)
+        #expect(configuration.selectedButtonBackgroundPNGData == blurredBackground)
+
+        configuration.visual.usesBlurredBackground = false
+        configuration.visual.dimsBackground = false
+        configuration.refreshDefaultButtonBackgroundSnapshot()
+
+        #expect(!configuration.visual.usesBlurredBackground)
+        #expect(!configuration.visual.dimsBackground)
+        #expect(configuration.defaultButtonBackgroundPNGData != nil)
+        #expect(configuration.defaultButtonBlurredBackgroundPNGData != nil)
+    }
+
     @Test func connectSMBServerFunctionDisplaysNameAndPersistsNormalizedAddress() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)

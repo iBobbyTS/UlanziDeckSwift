@@ -1498,7 +1498,9 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return pageFolder.visual.backgroundPNGData
         case .pageBack:
             return visual.backgroundPNGData
-        case .none, .tally, .brightness, .sub2API, .codexUsage:
+        case .codexUsage:
+            return codexUsage.visual.backgroundPNGData
+        case .none, .tally, .brightness, .sub2API:
             return nil
         case .previousPage, .nextPage:
             return visual.backgroundPNGData
@@ -1521,7 +1523,9 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return pageFolder.visual.blurredBackgroundPNGData
         case .pageBack:
             return visual.blurredBackgroundPNGData
-        case .none, .tally, .brightness, .sub2API, .codexUsage:
+        case .codexUsage:
+            return codexUsage.visual.blurredBackgroundPNGData
+        case .none, .tally, .brightness, .sub2API:
             return nil
         case .previousPage, .nextPage:
             return visual.blurredBackgroundPNGData

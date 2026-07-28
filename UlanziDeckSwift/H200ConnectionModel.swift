@@ -626,8 +626,18 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     func setSelectedCodexUsageConfiguration(_ configuration: DeckKeyCodexUsageConfiguration) {
-        guard let selectedKeyID = interactionState.selectedKeyID,
-              interactionState.setCodexUsageConfiguration(configuration, for: selectedKeyID)
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        var updatedConfiguration = configuration
+        updatedConfiguration.visual = interactionState
+            .codexUsageConfiguration(for: selectedKeyID)
+            .visual
+        guard interactionState.setCodexUsageConfiguration(
+            updatedConfiguration,
+            for: selectedKeyID
+        )
         else {
             return
         }
