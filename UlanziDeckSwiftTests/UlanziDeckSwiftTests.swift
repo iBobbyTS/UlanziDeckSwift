@@ -157,6 +157,102 @@ struct UlanziDeckSwiftTests {
         )
     }
 
+    @Test func legacySandboxDefaultsMigrationCopiesKnownConfigurationKeysOnce() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let sourceURL = FileManager.default.temporaryDirectory
+            .appending(path: "UlanziDeckSwiftSandboxDefaults-\(UUID().uuidString).plist")
+        defer {
+            try? FileManager.default.removeItem(at: sourceURL)
+        }
+
+        let deckData = Data("deck-configuration".utf8)
+        let sourceDefaults: [String: Any] = [
+            UserDefaultsDeckConfigurationStore.defaultStorageKey: deckData,
+            UserDefaultsDeckConfigurationStore.defaultBrightnessStorageKey: 42,
+            UserDefaultsDeckConfigurationStore.defaultBrightnessFollowStorageKey: true,
+            LegacySandboxDefaultsMigration.credentialIndexStorageKey: ["credential-id"],
+            "unrelated": "不迁移",
+        ]
+        let sourceData = try PropertyListSerialization.data(
+            fromPropertyList: sourceDefaults,
+            format: .binary,
+            options: 0
+        )
+        try sourceData.write(to: sourceURL)
+
+        LegacySandboxDefaultsMigration.migrateIfNeeded(
+            defaults: defaults,
+            sourceURL: sourceURL
+        )
+
+        #expect(
+            defaults.data(
+                forKey: UserDefaultsDeckConfigurationStore.defaultStorageKey
+            ) == deckData
+        )
+        #expect(
+            defaults.integer(
+                forKey: UserDefaultsDeckConfigurationStore.defaultBrightnessStorageKey
+            ) == 42
+        )
+        #expect(
+            defaults.bool(
+                forKey: UserDefaultsDeckConfigurationStore.defaultBrightnessFollowStorageKey
+            )
+        )
+        #expect(
+            defaults.stringArray(
+                forKey: LegacySandboxDefaultsMigration.credentialIndexStorageKey
+            ) == ["credential-id"]
+        )
+        #expect(defaults.object(forKey: "unrelated") == nil)
+        #expect(defaults.bool(forKey: LegacySandboxDefaultsMigration.markerKey))
+
+        defaults.set(10, forKey: UserDefaultsDeckConfigurationStore.defaultBrightnessStorageKey)
+        LegacySandboxDefaultsMigration.migrateIfNeeded(
+            defaults: defaults,
+            sourceURL: sourceURL
+        )
+        #expect(
+            defaults.integer(
+                forKey: UserDefaultsDeckConfigurationStore.defaultBrightnessStorageKey
+            ) == 10
+        )
+    }
+
+    @Test func legacySandboxDefaultsMigrationPreservesExistingDeckConfiguration() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let existingDeckData = Data("existing".utf8)
+        defaults.set(
+            existingDeckData,
+            forKey: UserDefaultsDeckConfigurationStore.defaultStorageKey
+        )
+        let missingSourceURL = FileManager.default.temporaryDirectory
+            .appending(path: "missing-\(UUID().uuidString).plist")
+
+        LegacySandboxDefaultsMigration.migrateIfNeeded(
+            defaults: defaults,
+            sourceURL: missingSourceURL
+        )
+
+        #expect(
+            defaults.data(
+                forKey: UserDefaultsDeckConfigurationStore.defaultStorageKey
+            ) == existingDeckData
+        )
+        #expect(defaults.bool(forKey: LegacySandboxDefaultsMigration.markerKey))
+    }
+
     @MainActor
     @Test func appStateCreatesConnectionModelAndRegistersBrightnessRuntimeWhenEnabled() async throws {
         let discovery = FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())])
@@ -1375,7 +1471,8 @@ struct UlanziDeckSwiftTests {
         let store = UserDefaultsDeckConfigurationStore(
             defaults: defaults,
             storageKey: "deckConfiguration",
-            brightnessStorageKey: "brightness"
+            brightnessStorageKey: "brightness",
+            brightnessFollowStorageKey: "brightnessFollow"
         )
         var state = DeckGridInteractionState(layout: layout)
         state.setTallyDefaultValue(6, for: 3)
@@ -1392,6 +1489,7 @@ struct UlanziDeckSwiftTests {
 
         store.saveInteractionState(state, for: layout)
         store.saveBrightnessPercent(140)
+        store.saveFollowsBuiltInDisplayBrightness(true)
 
         let restored = try #require(store.loadInteractionState(for: layout))
         #expect(restored.tallyDefaultValue(for: 3) == 6)
@@ -1408,6 +1506,7 @@ struct UlanziDeckSwiftTests {
         #expect(restored.openFileConfiguration(for: 11).bookmarkData == Data("bookmark".utf8))
         #expect(restored.configuration(for: 11)?.buttonVisualConfiguration?.name == "报告")
         #expect(store.loadBrightnessPercent() == 100)
+        #expect(store.loadFollowsBuiltInDisplayBrightness())
         #expect(restored.pressedKeyIDs.isEmpty)
         #expect(restored.selectedKeyID == 1)
     }
@@ -4626,6 +4725,95 @@ struct UlanziDeckSwiftTests {
         )
 
         #expect(model.brightnessPercent == 65)
+    }
+
+    @Test func builtInDisplayBrightnessMapsZeroToSeventyPercentAcrossDeckRange() {
+        #expect(BuiltInDisplayBrightnessMapping.deckPercent(for: 0) == 0)
+        #expect(BuiltInDisplayBrightnessMapping.deckPercent(for: 0.35) == 50)
+        #expect(BuiltInDisplayBrightnessMapping.deckPercent(for: 0.7) == 100)
+        #expect(BuiltInDisplayBrightnessMapping.deckPercent(for: 1) == 100)
+        #expect(BuiltInDisplayBrightnessMapping.deckPercent(for: -0.5) == 0)
+    }
+
+    @MainActor
+    @Test func displayServicesReaderReadsBrightnessInsideApplicationTestHost() {
+        var displayIDs = [CGDirectDisplayID](repeating: 0, count: 16)
+        var displayCount: UInt32 = 0
+        guard CGGetActiveDisplayList(
+            UInt32(displayIDs.count),
+            &displayIDs,
+            &displayCount
+        ) == .success,
+        displayIDs.prefix(Int(displayCount)).contains(where: {
+            CGDisplayIsBuiltin($0) != 0
+        }) else {
+            return
+        }
+
+        let result = DisplayServicesBuiltInDisplayBrightnessReader().readResult()
+
+        guard case let .success(brightness) = result else {
+            Issue.record("DisplayServices 读取失败：\(result)")
+            return
+        }
+        #expect(brightness >= 0)
+        #expect(brightness <= 1)
+    }
+
+    @MainActor
+    @Test func builtInDisplayBrightnessMonitorOnlyReportsChangesWhileEnabled() {
+        let reader = FakeBuiltInDisplayBrightnessReader(brightness: 0.35)
+        let monitor = BuiltInDisplayBrightnessMonitor(reader: reader, pollInterval: 3_600)
+        var observedBrightness: [Double] = []
+        monitor.onBrightnessChange = {
+            observedBrightness.append($0)
+        }
+
+        monitor.start()
+        monitor.refresh()
+        reader.brightness = 0.7
+        monitor.refresh()
+        monitor.stop()
+        reader.brightness = 0.2
+        monitor.refresh()
+
+        #expect(observedBrightness == [0.35, 0.7])
+        #expect(!monitor.isMonitoring)
+    }
+
+    @MainActor
+    @Test func followingBuiltInDisplayBrightnessPersistsAndUpdatesConnectedDeck() async throws {
+        let reader = FakeBuiltInDisplayBrightnessReader(brightness: 0.35)
+        let monitor = BuiltInDisplayBrightnessMonitor(reader: reader, pollInterval: 3_600)
+        let store = FakeDeckConfigurationStore(loadedFollowsBuiltInDisplayBrightness: true)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store,
+            builtInDisplayBrightnessMonitor: monitor
+        )
+
+        #expect(model.followsBuiltInDisplayBrightness)
+        #expect(model.brightnessPercent == 50)
+        #expect(monitor.isMonitoring)
+        #expect(store.savedBrightnessPercents == [50])
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.brightnessPercents == [50]
+        }
+
+        reader.brightness = 0.7
+        monitor.refresh()
+        try await Self.waitUntil {
+            syncer.brightnessPercents == [50, 100]
+        }
+        #expect(model.brightnessPercent == 100)
+
+        model.setFollowsBuiltInDisplayBrightness(false)
+        #expect(store.savedFollowsBuiltInDisplayBrightness == [false])
+        #expect(!monitor.isMonitoring)
     }
 
     @MainActor
@@ -7887,17 +8075,21 @@ private final class FakeWebPageMetadataFetcher: WebPageMetadataFetching, @unchec
 private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
     private let loadedState: DeckGridInteractionState?
     private let loadedBrightnessPercent: Int?
+    private let loadedFollowsBuiltInDisplayBrightness: Bool
     private(set) var savedStates: [DeckGridInteractionState] = []
     private(set) var savedBrightnessPercents: [Int] = []
+    private(set) var savedFollowsBuiltInDisplayBrightness: [Bool] = []
     private let saveResult: DeckConfigurationSaveResult
 
     init(
         loadedState: DeckGridInteractionState? = nil,
         loadedBrightnessPercent: Int? = nil,
+        loadedFollowsBuiltInDisplayBrightness: Bool = false,
         saveResult: DeckConfigurationSaveResult = .success
     ) {
         self.loadedState = loadedState
         self.loadedBrightnessPercent = loadedBrightnessPercent
+        self.loadedFollowsBuiltInDisplayBrightness = loadedFollowsBuiltInDisplayBrightness
         self.saveResult = saveResult
     }
 
@@ -7917,6 +8109,27 @@ private final class FakeDeckConfigurationStore: DeckConfigurationStoring {
 
     func saveBrightnessPercent(_ percent: Int) {
         savedBrightnessPercents.append(percent)
+    }
+
+    func loadFollowsBuiltInDisplayBrightness() -> Bool {
+        loadedFollowsBuiltInDisplayBrightness
+    }
+
+    func saveFollowsBuiltInDisplayBrightness(_ follows: Bool) {
+        savedFollowsBuiltInDisplayBrightness.append(follows)
+    }
+}
+
+@MainActor
+private final class FakeBuiltInDisplayBrightnessReader: BuiltInDisplayBrightnessReading {
+    var brightness: Double?
+
+    init(brightness: Double?) {
+        self.brightness = brightness
+    }
+
+    func currentBrightness() -> Double? {
+        brightness
     }
 }
 

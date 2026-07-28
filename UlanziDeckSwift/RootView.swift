@@ -13,6 +13,7 @@ struct RootView: View {
         ContentView(
             connectedDevice: connectionModel.connectedDevice,
             brightnessPercent: connectionModel.brightnessPercent,
+            followsBuiltInDisplayBrightness: connectionModel.followsBuiltInDisplayBrightness,
             interactionState: connectionModel.interactionState,
             mihoyoLoginState: connectionModel.mihoyoLoginState,
             onKeySelection: { keyID in
@@ -83,6 +84,9 @@ struct RootView: View {
             },
             onBrightnessPercentCommit: { percent in
                 connectionModel.commitBrightnessPercent(percent)
+            },
+            onFollowsBuiltInDisplayBrightnessChange: { follows in
+                connectionModel.setFollowsBuiltInDisplayBrightness(follows)
             },
             onSub2APIBaseURLChange: { baseURL in
                 connectionModel.setSelectedSub2APIBaseURL(baseURL)

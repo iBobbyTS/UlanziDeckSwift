@@ -17,6 +17,7 @@ final class H200ConnectionModel: ObservableObject {
     @Published private(set) var syncSummary: H200DeckSyncSummary?
     @Published private(set) var interactionState = DeckGridInteractionState(layout: .h200Prototype)
     @Published private(set) var brightnessPercent = DeckBrightnessConfiguration.defaultPercent
+    @Published private(set) var followsBuiltInDisplayBrightness = false
     @Published private(set) var mihoyoLoginState: MihoyoLoginState = .notLoggedIn
     @Published var alert: H200ConnectionAlert?
 
@@ -34,6 +35,7 @@ final class H200ConnectionModel: ObservableObject {
     private let mihoyoGameService: MihoyoGameServicing
     private let mihoyoSessionStore: MihoyoSessionStoring
     private let pageFolderAutoReturnTimer: PageFolderAutoReturnTimer
+    private let builtInDisplayBrightnessMonitor: BuiltInDisplayBrightnessMonitor
     private var hasPersistedBrightnessPercent: Bool
     private var mihoyoSession: MihoyoLoginSession?
     private let longPressDurationNanoseconds: UInt64
@@ -103,7 +105,8 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIGroupListMinimumIntervalNanoseconds: UInt64 = 2_000_000_000,
         codexUsageRefreshMinuteDuration: TimeInterval = 60,
         mihoyoGameRefreshMinuteDuration: TimeInterval = 60,
-        pageFolderAutoReturnDurationNanoseconds: UInt64 = 30_000_000_000
+        pageFolderAutoReturnDurationNanoseconds: UInt64 = 30_000_000_000,
+        builtInDisplayBrightnessMonitor: BuiltInDisplayBrightnessMonitor? = nil
     ) {
         self.discovery = discovery
         self.syncer = syncer
@@ -120,6 +123,8 @@ final class H200ConnectionModel: ObservableObject {
         self.pageFolderAutoReturnTimer = PageFolderAutoReturnTimer(
             durationNanoseconds: pageFolderAutoReturnDurationNanoseconds
         )
+        self.builtInDisplayBrightnessMonitor = builtInDisplayBrightnessMonitor
+            ?? BuiltInDisplayBrightnessMonitor()
         self.longPressDurationNanoseconds = longPressDurationNanoseconds
         self.mihoyoLoginPollNanoseconds = mihoyoLoginPollNanoseconds
         self.sub2APIRefreshSecondDuration = sub2APIRefreshSecondDuration
@@ -130,6 +135,7 @@ final class H200ConnectionModel: ObservableObject {
         let loadedBrightnessPercent = configurationStore.loadBrightnessPercent()
         hasPersistedBrightnessPercent = loadedBrightnessPercent != nil
         brightnessPercent = loadedBrightnessPercent ?? DeckBrightnessConfiguration.defaultPercent
+        followsBuiltInDisplayBrightness = configurationStore.loadFollowsBuiltInDisplayBrightness()
         if brightnessPercent == 0 {
             syncer.setInternalRefreshPaused(true)
         }
@@ -139,6 +145,12 @@ final class H200ConnectionModel: ObservableObject {
         }
         pageFolderAutoReturnTimer.onTimeout = { [weak self] in
             self?.goBackPage()
+        }
+        self.builtInDisplayBrightnessMonitor.onBrightnessChange = { [weak self] brightness in
+            self?.builtInDisplayBrightnessChanged(to: brightness)
+        }
+        if followsBuiltInDisplayBrightness {
+            self.builtInDisplayBrightnessMonitor.start()
         }
         self.syncer.setInputHandler { [weak self] event in
             Task { @MainActor [weak self] in
@@ -978,11 +990,30 @@ final class H200ConnectionModel: ObservableObject {
         updateBrightnessPercent(percent, persist: true, forceSend: true)
     }
 
+    func setFollowsBuiltInDisplayBrightness(_ follows: Bool) {
+        guard followsBuiltInDisplayBrightness != follows else {
+            return
+        }
+
+        followsBuiltInDisplayBrightness = follows
+        configurationStore.saveFollowsBuiltInDisplayBrightness(follows)
+        if follows {
+            builtInDisplayBrightnessMonitor.start()
+        } else {
+            builtInDisplayBrightnessMonitor.stop()
+        }
+    }
+
     func setBrightnessPercent(_ percent: Int, forceSend: Bool = false) {
         updateBrightnessPercent(percent, persist: true, forceSend: forceSend)
     }
 
-    private func updateBrightnessPercent(_ percent: Int, persist: Bool, forceSend: Bool = false) {
+    private func updateBrightnessPercent(
+        _ percent: Int,
+        persist: Bool,
+        forceSend: Bool = false,
+        sendToDevice: Bool = true
+    ) {
         let clampedPercent = DeckBrightnessConfiguration.clamped(percent)
         let wasInternalRefreshPaused = isInternalRefreshPaused
         let didChange = brightnessPercent != clampedPercent
@@ -993,11 +1024,23 @@ final class H200ConnectionModel: ObservableObject {
             configurationStore.saveBrightnessPercent(clampedPercent)
         }
         handleInternalRefreshPauseChange(wasPaused: wasInternalRefreshPaused)
-        guard didChange || forceSend else {
+        guard sendToDevice, didChange || forceSend else {
             return
         }
 
         requestBrightnessUpdate(percent: clampedPercent)
+    }
+
+    private func builtInDisplayBrightnessChanged(to normalizedBrightness: Double) {
+        guard followsBuiltInDisplayBrightness else {
+            return
+        }
+
+        updateBrightnessPercent(
+            BuiltInDisplayBrightnessMapping.deckPercent(for: normalizedBrightness),
+            persist: true,
+            sendToDevice: canAdjustBrightness
+        )
     }
 
     private var isInternalRefreshPaused: Bool {

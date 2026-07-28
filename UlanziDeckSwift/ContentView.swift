@@ -22,6 +22,7 @@ struct ContentView: View {
 
     let connectedDevice: H200DeviceIdentity?
     let brightnessPercent: Int
+    let followsBuiltInDisplayBrightness: Bool
     let interactionState: DeckGridInteractionState
     let mihoyoLoginState: MihoyoLoginState
     let onKeySelection: (Int) -> Void
@@ -47,6 +48,7 @@ struct ContentView: View {
     let onSMBServerAddressChange: (String) -> Void
     let onBrightnessPercentPreview: (Int) -> Void
     let onBrightnessPercentCommit: (Int) -> Void
+    let onFollowsBuiltInDisplayBrightnessChange: (Bool) -> Void
     let onSub2APIBaseURLChange: (String) -> Void
     let onSub2APIDataSourceChange: (String?) -> Void
     let onSub2APITargetGroupIDChange: (Int) -> Void
@@ -188,8 +190,22 @@ struct ContentView: View {
         brightnessDraftPercent ?? brightnessPercent
     }
 
+    private var followsBuiltInDisplayBrightnessBinding: Binding<Bool> {
+        Binding(
+            get: { followsBuiltInDisplayBrightness },
+            set: { follows in
+                brightnessDraftPercent = nil
+                onFollowsBuiltInDisplayBrightnessChange(follows)
+            }
+        )
+    }
+
     private var brightnessControl: some View {
         HStack(spacing: 8) {
+            Toggle("跟随屏幕", isOn: followsBuiltInDisplayBrightnessBinding)
+                .toggleStyle(.checkbox)
+                .font(.caption)
+
             Image(systemName: "sun.max")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(.secondary)
@@ -206,16 +222,16 @@ struct ContentView: View {
                 brightnessDraftPercent = nil
             }
                 .frame(width: 150)
-                .disabled(connectedDevice == nil)
+                .disabled(connectedDevice == nil || followsBuiltInDisplayBrightness)
+                .accessibilityLabel("亮度")
+                .accessibilityValue("\(displayedBrightnessPercent)%")
 
             Text("\(displayedBrightnessPercent)%")
                 .font(.caption.monospacedDigit().weight(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(width: 38, alignment: .trailing)
+                .accessibilityHidden(true)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("亮度")
-        .accessibilityValue("\(displayedBrightnessPercent)%")
     }
 
     private var workbench: some View {
@@ -825,6 +841,7 @@ struct MihoyoQRCodeView: View {
             product: ""
         ),
         brightnessPercent: DeckBrightnessConfiguration.defaultPercent,
+        followsBuiltInDisplayBrightness: false,
         interactionState: DeckGridInteractionState(layout: .h200Prototype),
         mihoyoLoginState: .notLoggedIn,
         onKeySelection: { _ in },
@@ -850,6 +867,7 @@ struct MihoyoQRCodeView: View {
         onSMBServerAddressChange: { _ in },
         onBrightnessPercentPreview: { _ in },
         onBrightnessPercentCommit: { _ in },
+        onFollowsBuiltInDisplayBrightnessChange: { _ in },
         onSub2APIBaseURLChange: { _ in },
         onSub2APIDataSourceChange: { _ in },
         onSub2APITargetGroupIDChange: { _ in },

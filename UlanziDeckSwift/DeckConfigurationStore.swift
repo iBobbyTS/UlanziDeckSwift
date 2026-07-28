@@ -6,6 +6,8 @@ nonisolated protocol DeckConfigurationStoring {
     func saveInteractionState(_ state: DeckGridInteractionState, for layout: DeckGridLayout) -> DeckConfigurationSaveResult
     func loadBrightnessPercent() -> Int?
     func saveBrightnessPercent(_ percent: Int)
+    func loadFollowsBuiltInDisplayBrightness() -> Bool
+    func saveFollowsBuiltInDisplayBrightness(_ follows: Bool)
 }
 
 nonisolated enum DeckConfigurationSaveResult: Equatable {
@@ -16,15 +18,19 @@ nonisolated enum DeckConfigurationSaveResult: Equatable {
 extension DeckConfigurationStoring {
     nonisolated func loadBrightnessPercent() -> Int? { nil }
     nonisolated func saveBrightnessPercent(_ percent: Int) {}
+    nonisolated func loadFollowsBuiltInDisplayBrightness() -> Bool { false }
+    nonisolated func saveFollowsBuiltInDisplayBrightness(_ follows: Bool) {}
 }
 
 nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring {
     static let defaultStorageKey = "com.iBobby.UlanziDeckSwift.h200.deckConfiguration.v1"
     static let defaultBrightnessStorageKey = "com.iBobby.UlanziDeckSwift.h200.brightness.v1"
+    static let defaultBrightnessFollowStorageKey = "com.iBobby.UlanziDeckSwift.h200.brightnessFollow.v1"
 
     private let defaults: UserDefaults
     private let storageKey: String
     private let brightnessStorageKey: String
+    private let brightnessFollowStorageKey: String
     private let credentialIndexStorageKey: String
     private let credentialStore: Sub2APICredentialStoring
     private let credentialBaseline = Sub2APICredentialPersistenceBaseline()
@@ -35,12 +41,14 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
         defaults: UserDefaults = .standard,
         storageKey: String = Self.defaultStorageKey,
         brightnessStorageKey: String = Self.defaultBrightnessStorageKey,
+        brightnessFollowStorageKey: String = Self.defaultBrightnessFollowStorageKey,
         credentialIndexStorageKey: String? = nil,
         credentialStore: Sub2APICredentialStoring = KeychainSub2APICredentialStore()
     ) {
         self.defaults = defaults
         self.storageKey = storageKey
         self.brightnessStorageKey = brightnessStorageKey
+        self.brightnessFollowStorageKey = brightnessFollowStorageKey
         self.credentialIndexStorageKey = credentialIndexStorageKey ?? "\(storageKey).sub2APICredentialIDs"
         self.credentialStore = credentialStore
     }
@@ -495,6 +503,14 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
 
     func saveBrightnessPercent(_ percent: Int) {
         defaults.set(DeckBrightnessConfiguration.clamped(percent), forKey: brightnessStorageKey)
+    }
+
+    func loadFollowsBuiltInDisplayBrightness() -> Bool {
+        defaults.bool(forKey: brightnessFollowStorageKey)
+    }
+
+    func saveFollowsBuiltInDisplayBrightness(_ follows: Bool) {
+        defaults.set(follows, forKey: brightnessFollowStorageKey)
     }
 }
 

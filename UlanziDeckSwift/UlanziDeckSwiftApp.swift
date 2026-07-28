@@ -35,6 +35,8 @@ struct UlanziDeckSwiftApp: App {
             }
         }
 
+        LegacySandboxDefaultsMigration.migrateIfNeeded()
+
         switch SingleInstanceGuard().acquire() {
         case .acquired:
             singleInstanceAcquired = true
