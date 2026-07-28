@@ -458,42 +458,40 @@ extension ContentView {
             functionParameterColumn(for: configuration)
 
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .bottom, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Codex auth.json")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Codex auth.json")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
 
-                        Text(configuration.codexUsage.authFilePath ?? "未选择 auth.json")
-                            .font(.callout)
-                            .foregroundStyle(
-                                configuration.codexUsage.authFilePath == nil
-                                    ? Color.secondary
-                                    : Color.primary
-                            )
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-
-                        if configuration.codexUsage.needsReselection {
-                            Text("需要重新选择")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Button {
-                        chooseCodexAuthFile()
-                    } label: {
-                        Label(
-                            configuration.codexUsage.needsReselection
-                                ? "重新选择 auth.json"
-                                : "选择 auth.json",
-                            systemImage: "key.horizontal"
+                    Text(configuration.codexUsage.authFilePath ?? "未选择 auth.json")
+                        .font(.callout)
+                        .foregroundStyle(
+                            configuration.codexUsage.authFilePath == nil
+                                ? Color.secondary
+                                : Color.primary
                         )
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    if configuration.codexUsage.needsReselection {
+                        Text("需要重新选择")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                     }
-                    .buttonStyle(.bordered)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button {
+                    chooseCodexAuthFile()
+                } label: {
+                    Label(
+                        configuration.codexUsage.needsReselection
+                            ? "重新选择 auth.json"
+                            : "选择 auth.json",
+                        systemImage: "key.horizontal"
+                    )
+                }
+                .buttonStyle(.bordered)
 
                 HStack(spacing: 12) {
                     Text("刷新间隔")
