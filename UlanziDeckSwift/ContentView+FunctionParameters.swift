@@ -467,39 +467,71 @@ extension ContentView {
 
             VStack(alignment: .leading, spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Codex auth.json")
+                    Text("认证来源")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    Text(configuration.codexUsage.authFilePath ?? "未选择 auth.json")
-                        .font(.callout)
-                        .foregroundStyle(
-                            configuration.codexUsage.authFilePath == nil
-                                ? Color.secondary
-                                : Color.primary
-                        )
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    Picker("认证来源", selection: selectedCodexUsageAuthSourceBinding) {
+                        ForEach(CodexAuthSource.allCases) { source in
+                            Text(source.title).tag(source)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(width: 180, alignment: .leading)
+                }
 
-                    if configuration.codexUsage.needsReselection {
-                        Text("需要重新选择")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
+                if configuration.codexUsage.authSource == .authFile {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Codex auth.json")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        Text(configuration.codexUsage.authFilePath ?? "未选择 auth.json")
+                            .font(.callout)
+                            .foregroundStyle(
+                                configuration.codexUsage.authFilePath == nil
+                                    ? Color.secondary
+                                    : Color.primary
+                            )
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+
+                        if configuration.codexUsage.needsReselection {
+                            Text("需要重新选择")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Button {
+                        chooseCodexAuthFile()
+                    } label: {
+                        Label(
+                            configuration.codexUsage.needsReselection
+                                ? "重新选择 auth.json"
+                                : "选择 auth.json",
+                            systemImage: "key.horizontal"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("认证 JSON 内容")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        TextEditor(text: selectedCodexUsageManualAuthDataBinding)
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(height: 120)
+                            .scrollContentBackground(.hidden)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                            )
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Button {
-                    chooseCodexAuthFile()
-                } label: {
-                    Label(
-                        configuration.codexUsage.needsReselection
-                            ? "重新选择 auth.json"
-                            : "选择 auth.json",
-                        systemImage: "key.horizontal"
-                    )
-                }
-                .buttonStyle(.bordered)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("账号昵称")
@@ -1057,6 +1089,28 @@ extension ContentView {
             },
             set: { resetDisplayMode in
                 onCodexUsageResetDisplayModeChange(resetDisplayMode)
+            }
+        )
+    }
+
+    var selectedCodexUsageAuthSourceBinding: Binding<CodexAuthSource> {
+        Binding(
+            get: {
+                selectedConfiguration?.codexUsage.authSource ?? .authFile
+            },
+            set: { authSource in
+                onCodexUsageAuthSourceChange(authSource)
+            }
+        )
+    }
+
+    var selectedCodexUsageManualAuthDataBinding: Binding<String> {
+        Binding(
+            get: {
+                selectedConfiguration?.codexUsage.manualAuthData ?? ""
+            },
+            set: { manualAuthData in
+                onCodexUsageManualAuthDataChange(manualAuthData)
             }
         )
     }

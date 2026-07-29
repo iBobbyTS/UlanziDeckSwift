@@ -705,6 +705,32 @@ final class H200ConnectionModel: ObservableObject {
         syncKeyDisplay(keyID: selectedKeyID)
     }
 
+    func setSelectedCodexUsageAuthSource(_ authSource: CodexAuthSource) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.codexUsageConfiguration(for: selectedKeyID).authSource
+                != authSource,
+              interactionState.setCodexUsageAuthSource(authSource, for: selectedKeyID)
+        else {
+            return
+        }
+
+        persistCurrentConfiguration()
+        fetchCodexUsage(for: selectedKeyID)
+    }
+
+    func setSelectedCodexUsageManualAuthData(_ manualAuthData: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.codexUsageConfiguration(for: selectedKeyID).manualAuthData
+                != manualAuthData,
+              interactionState.setCodexUsageManualAuthData(manualAuthData, for: selectedKeyID)
+        else {
+            return
+        }
+
+        persistCurrentConfiguration()
+        fetchCodexUsage(for: selectedKeyID)
+    }
+
     func setSelectedCodexUsageResetDisplayMode(
         _ resetDisplayMode: CodexUsageResetDisplayMode
     ) {
@@ -2142,6 +2168,8 @@ final class H200ConnectionModel: ObservableObject {
         let pageID = resolved.slot.pageID
         let authFilePath = resolved.config.authFilePath
         let bookmarkData = resolved.config.bookmarkData
+        let manualAuthData = resolved.config.manualAuthData
+        let authSource = resolved.config.authSource
         let fetcher = codexUsageFetcher
         codexUsageFetchTasks[instanceID] = Task { @MainActor [weak self] in
             let result = await fetcher.fetchUsage(configuration: resolved.config)
@@ -2149,8 +2177,10 @@ final class H200ConnectionModel: ObservableObject {
                   let self,
                   let latest = self.resolveCurrentCodexUsageSlot(for: instanceID),
                   latest.slot.pageID == pageID,
+                  latest.config.authSource == authSource,
                   latest.config.authFilePath == authFilePath,
-                  latest.config.bookmarkData == bookmarkData
+                  latest.config.bookmarkData == bookmarkData,
+                  latest.config.manualAuthData == manualAuthData
             else {
                 return
             }
@@ -2165,7 +2195,9 @@ final class H200ConnectionModel: ObservableObject {
     private func scheduleNextCodexUsageRefresh(for instanceID: RuntimeInstanceID) {
         guard canRunInternalRefresh,
               let resolved = resolveCurrentCodexUsageSlot(for: instanceID),
-              resolved.config.bookmarkData != nil
+              resolved.config.authSource == .authFile
+                ? resolved.config.bookmarkData != nil
+                : !resolved.config.manualAuthData.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             return
         }

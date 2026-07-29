@@ -1421,6 +1421,30 @@ nonisolated struct DeckGridInteractionState: Equatable {
     }
 
     @discardableResult
+    mutating func setCodexUsageAuthSource(_ authSource: CodexAuthSource, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .codexUsage
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].codexUsage.authSource = authSource
+        return true
+    }
+
+    mutating func setCodexUsageManualAuthData(_ manualAuthData: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .codexUsage
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].codexUsage.manualAuthData = manualAuthData
+        return true
+    }
+
     mutating func setCodexUsageAccountNickname(_ accountNickname: String, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].function == .codexUsage

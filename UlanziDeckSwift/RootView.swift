@@ -55,6 +55,12 @@ struct RootView: View {
             onCodexAuthFileSelection: { configuration in
                 connectionModel.setSelectedCodexUsageConfiguration(configuration)
             },
+            onCodexUsageAuthSourceChange: { authSource in
+                connectionModel.setSelectedCodexUsageAuthSource(authSource)
+            },
+            onCodexUsageManualAuthDataChange: { manualAuthData in
+                connectionModel.setSelectedCodexUsageManualAuthData(manualAuthData)
+            },
             onCodexUsageAccountNicknameChange: { accountNickname in
                 connectionModel.setSelectedCodexUsageAccountNickname(accountNickname)
             },

@@ -1,5 +1,21 @@
 import Foundation
 
+nonisolated enum CodexAuthSource: String, Codable, Equatable, CaseIterable, Identifiable, Sendable {
+    case authFile
+    case manualJSON
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .authFile:
+            return "auth.json 文件"
+        case .manualJSON:
+            return "手动输入 JSON"
+        }
+    }
+}
+
 nonisolated struct CodexUsageQuota: Equatable, Sendable {
     let remainingPercent: Int
     let resetAfterSeconds: Int
@@ -146,8 +162,10 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         try Self(authFileURL: defaultAuthFileURL(homeDirectory: homeDirectory))
     }
 
+    var authSource: CodexAuthSource
     var authFilePath: String?
     var bookmarkData: Data?
+    var manualAuthData: String
     var accountNickname: String
     var refreshIntervalMinutes: Int
     var colorMode: CodexUsageColorMode
@@ -158,8 +176,10 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     var lastResult: CodexUsageResult?
 
     init(
+        authSource: CodexAuthSource = .authFile,
         authFilePath: String? = nil,
         bookmarkData: Data? = nil,
+        manualAuthData: String = "",
         accountNickname: String = "",
         refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
         colorMode: CodexUsageColorMode = .highIsRed,
@@ -167,8 +187,10 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration(),
         lastResult: CodexUsageResult? = nil
     ) {
+        self.authSource = authSource
         self.authFilePath = authFilePath
         self.bookmarkData = bookmarkData
+        self.manualAuthData = manualAuthData
         self.accountNickname = accountNickname
         self.refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(refreshIntervalMinutes)
         self.colorMode = colorMode
@@ -185,7 +207,9 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         resetDisplayMode: CodexUsageResetDisplayMode = .remainingTime,
         visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration()
     ) throws {
+        authSource = .authFile
         authFilePath = authFileURL.path
+        manualAuthData = ""
         self.accountNickname = accountNickname
         bookmarkData = try authFileURL.bookmarkData(
             options: Self.securityScopedBookmarkCreationOptions,
@@ -209,8 +233,10 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     }
 
     enum CodingKeys: CodingKey {
+        case authSource
         case authFilePath
         case bookmarkData
+        case manualAuthData
         case accountNickname
         case refreshIntervalMinutes
         case colorMode
@@ -220,8 +246,10 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        authSource = try container.decodeIfPresent(CodexAuthSource.self, forKey: .authSource) ?? .authFile
         authFilePath = try container.decodeIfPresent(String.self, forKey: .authFilePath)
         bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        manualAuthData = try container.decodeIfPresent(String.self, forKey: .manualAuthData) ?? ""
         accountNickname = try container.decodeIfPresent(String.self, forKey: .accountNickname) ?? ""
         refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(
             try container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes)
@@ -242,8 +270,10 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(authSource, forKey: .authSource)
         try container.encodeIfPresent(authFilePath, forKey: .authFilePath)
         try container.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
+        try container.encode(manualAuthData, forKey: .manualAuthData)
         try container.encode(accountNickname, forKey: .accountNickname)
         try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
         try container.encode(colorMode, forKey: .colorMode)
@@ -320,13 +350,24 @@ nonisolated struct CodexUsageFetcher: CodexUsageFetching {
 
     func fetchUsage(configuration: DeckKeyCodexUsageConfiguration) async -> CodexUsageResult {
         let authData: Data
-        switch authFileLoader.loadAuthData(configuration: configuration) {
-        case let .success(data):
+        if configuration.authSource == .manualJSON {
+            let trimmed = configuration.manualAuthData.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return .authFileNotSelected
+            }
+            guard let data = trimmed.data(using: .utf8) else {
+                return .invalidAuthFile
+            }
             authData = data
-        case .notSelected:
-            return .authFileNotSelected
-        case .needsReselection:
-            return .authFileNeedsReselection
+        } else {
+            switch authFileLoader.loadAuthData(configuration: configuration) {
+            case let .success(data):
+                authData = data
+            case .notSelected:
+                return .authFileNotSelected
+            case .needsReselection:
+                return .authFileNeedsReselection
+            }
         }
 
         guard let authObject = try? JSONSerialization.jsonObject(with: authData) as? [String: Any]
