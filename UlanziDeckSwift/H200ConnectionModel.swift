@@ -1698,11 +1698,40 @@ final class H200ConnectionModel: ObservableObject {
         let baseURL = resolved.baseURL
         let targetGroupID = resolved.config.targetGroupID
         let bearerKey = resolved.bearerKey
+        let authInfo = resolved.config.authInfo
+        let keyID = resolved.slot.keyID
+
         sub2APIFetchTasks[instanceID] = Task { @MainActor [weak self] in
+            var effectiveBearerKey = resolved.config.effectiveAccessToken
+            if effectiveBearerKey.isEmpty {
+                self?.sub2APIFetchTasks[instanceID] = nil
+                self?.interactionState.setSub2APILastResult(
+                    resolved.config.isInvalidJSON
+                        ? .invalidToken : .networkError("认证信息为空"),
+                    for: keyID
+                )
+                return
+            }
+
+            // 如果需要刷新 token，先尝试刷新
+            if let authInfo, authInfo.isExpiringSoon {
+                if let newAuthInfo = await fetcher.refreshBearerToken(
+                    baseURL: baseURL,
+                    refreshToken: authInfo.refreshToken
+                ) {
+                    effectiveBearerKey = newAuthInfo.accessToken
+                    // 更新存储的认证信息
+                    if let jsonString = newAuthInfo.jsonString() {
+                        self?.interactionState.setSub2APIBearerKey(jsonString, for: keyID)
+                        _ = self?.persistCurrentConfiguration()
+                    }
+                }
+            }
+
             let result = await fetcher.fetchCapacitySummary(
                 baseURL: baseURL,
                 targetGroupID: targetGroupID,
-                bearerKey: bearerKey
+                bearerKey: effectiveBearerKey
             )
             guard !Task.isCancelled else { return }
 
@@ -1710,8 +1739,7 @@ final class H200ConnectionModel: ObservableObject {
                   let latest = self.resolveCurrentSub2APISlot(for: instanceID),
                   latest.slot.pageID == pageID,
                   latest.baseURL == baseURL,
-                  latest.config.targetGroupID == targetGroupID,
-                  latest.bearerKey == bearerKey
+                  latest.config.targetGroupID == targetGroupID
             else {
                 return
             }
@@ -1776,19 +1804,39 @@ final class H200ConnectionModel: ObservableObject {
         let dataSourceInstanceID = resolved.dataSourceInstanceID
         let baseURL = resolved.baseURL
         let bearerKey = resolved.bearerKey
+        let authInfo = resolved.config.authInfo
+        let leaderKeyID = resolved.slot.keyID
         let fetcher = sub2APIFetcher
         sub2APIFetchTasks[leaderInstanceID] = Task { @MainActor [weak self] in
+            var effectiveBearerKey = resolved.config.effectiveAccessToken
+            if effectiveBearerKey.isEmpty {
+                self?.sub2APIFetchTasks[leaderInstanceID] = nil
+                return
+            }
+
+            if let authInfo, authInfo.isExpiringSoon {
+                if let newAuthInfo = await fetcher.refreshBearerToken(
+                    baseURL: baseURL,
+                    refreshToken: authInfo.refreshToken
+                ) {
+                    effectiveBearerKey = newAuthInfo.accessToken
+                    if let jsonString = newAuthInfo.jsonString() {
+                        self?.interactionState.setSub2APIBearerKey(jsonString, for: leaderKeyID)
+                        _ = self?.persistCurrentConfiguration()
+                    }
+                }
+            }
+
             let result = await fetcher.fetchCapacityGroups(
                 baseURL: baseURL,
-                bearerKey: bearerKey
+                bearerKey: effectiveBearerKey
             )
             guard !Task.isCancelled,
                   let self,
                   let latestLeader = self.resolveCurrentSub2APISlot(for: leaderInstanceID),
                   latestLeader.slot.pageID == pageID,
                   latestLeader.dataSourceInstanceID == dataSourceInstanceID,
-                  latestLeader.baseURL == baseURL,
-                  latestLeader.bearerKey == bearerKey
+                  latestLeader.baseURL == baseURL
             else {
                 return
             }
@@ -1905,16 +1953,41 @@ final class H200ConnectionModel: ObservableObject {
         let pageID = resolved.slot.pageID
         let fetcher = sub2APIFetcher
         let baseURL = resolved.baseURL
-        let bearerKey = resolved.bearerKey
+        let authInfo = resolved.config.authInfo
+        let keyID = resolved.slot.keyID
+
         sub2APIGroupListTasks[instanceID] = Task { @MainActor [weak self] in
-            let result = await fetcher.fetchCapacityGroups(baseURL: baseURL, bearerKey: bearerKey)
+            var effectiveBearerKey = resolved.config.effectiveAccessToken
+            if effectiveBearerKey.isEmpty {
+                self?.sub2APIGroupListTasks[instanceID] = nil
+                self?.interactionState.setSub2APIGroupListState(
+                    resolved.config.isInvalidJSON
+                        ? .invalidToken : .networkError("认证信息为空"),
+                    for: keyID
+                )
+                return
+            }
+
+            if let authInfo, authInfo.isExpiringSoon {
+                if let newAuthInfo = await fetcher.refreshBearerToken(
+                    baseURL: baseURL,
+                    refreshToken: authInfo.refreshToken
+                ) {
+                    effectiveBearerKey = newAuthInfo.accessToken
+                    if let jsonString = newAuthInfo.jsonString() {
+                        self?.interactionState.setSub2APIBearerKey(jsonString, for: keyID)
+                        _ = self?.persistCurrentConfiguration()
+                    }
+                }
+            }
+
+            let result = await fetcher.fetchCapacityGroups(baseURL: baseURL, bearerKey: effectiveBearerKey)
             guard !Task.isCancelled else { return }
 
             guard let self,
                   let latest = self.resolveCurrentSub2APISlot(for: instanceID),
                   latest.slot.pageID == pageID,
-                  latest.baseURL == baseURL,
-                  latest.bearerKey == bearerKey
+                  latest.baseURL == baseURL
             else {
                 return
             }

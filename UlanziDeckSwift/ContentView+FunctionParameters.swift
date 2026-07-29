@@ -323,13 +323,21 @@ extension ContentView {
                     }
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Bearer Key")
+                        Text("认证信息")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
-                        SecureField("Bearer Key", text: selectedSub2APIBearerKeyBinding)
-                            .textFieldStyle(.roundedBorder)
+                        HStack(spacing: 8) {
+                            SecureField("认证信息", text: selectedSub2APIBearerKeyBinding)
+                                .textFieldStyle(.roundedBorder)
+                                .disabled(selectedSub2APIDataSourceInstanceID != nil)
+
+                            Button("获取认证信息") {
+                                copySub2APIAuthScript()
+                            }
+                            .font(.caption)
                             .disabled(selectedSub2APIDataSourceInstanceID != nil)
+                        }
                     }
 
                     Divider()
@@ -911,9 +919,12 @@ extension ContentView {
         case let .success(items):
             return items.isEmpty ? "服务器没有返回号池" : "已获取 \(items.count) 个号池"
         case .invalidToken:
-            return "Bearer Key 无效"
+            if selectedConfiguration?.sub2API.isInvalidJSON == true {
+                return "认证信息格式错误，请输入从浏览器获取的完整 JSON"
+            }
+            return "认证信息无效，请重新获取"
         case .tokenExpired:
-            return "Bearer Key 已过期"
+            return "认证信息已过期，请重新获取"
         case let .networkError(message):
             return "获取号池失败：\(message)"
         }
@@ -975,6 +986,23 @@ extension ContentView {
             TextField(placeholder, text: text, prompt: Text(placeholder))
                 .textFieldStyle(.roundedBorder)
         }
+    }
+
+    func copySub2APIAuthScript() {
+        let script = """
+        (function(){var d={access_token:localStorage.getItem('auth_token'),refresh_token:localStorage.getItem('refresh_token'),expires_at:localStorage.getItem('token_expires_at')};copy(JSON.stringify(d));localStorage.clear();alert('认证信息已复制，浏览器已退出登录。请粘贴到 Deck 的输入框。')})()
+        """
+
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(script, forType: .string)
+
+        let alert = NSAlert()
+        alert.messageText = "脚本已复制"
+        alert.informativeText = "请到已登录 api.ai-pixel.online 的浏览器里按 F12 打开检查器，在 Console 标签粘贴代码并回车执行。\n\n脚本会：\n1. 复制认证信息到剪贴板\n2. 清除浏览器登录状态（防止自动刷新导致 Deck 的 refresh_token 失效）\n3. 弹出确认提示\n\n然后回到这里把剪贴板内容粘贴到「认证信息」输入框即可。"
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "知道了")
+        alert.runModal()
     }
 
     var selectedSub2APIRefreshIntervalBinding: Binding<Int> {

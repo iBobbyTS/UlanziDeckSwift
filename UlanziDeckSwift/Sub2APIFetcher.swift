@@ -1,5 +1,70 @@
 import Foundation
 
+// MARK: - 认证信息模型
+
+/// Sub2API 认证信息，包含 access token、refresh token 和过期时间戳。
+/// 用于支持 JWT token 的自动刷新。
+nonisolated struct Sub2APIAuthInfo: Codable, Equatable {
+    var accessToken: String
+    var refreshToken: String
+    var tokenExpiresAt: Int64
+
+    private static let refreshBufferMs: Int64 = 120_000
+
+    var isExpiringSoon: Bool {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        return now >= tokenExpiresAt - Self.refreshBufferMs
+    }
+
+    var isExpired: Bool {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        return now >= tokenExpiresAt
+    }
+
+    /// 从浏览器获取的 JSON 字符串解析认证信息。
+    static func parse(from jsonString: String) -> Sub2APIAuthInfo? {
+        guard let data = jsonString.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let accessToken = json["access_token"] as? String,
+              let refreshToken = json["refresh_token"] as? String,
+              !accessToken.isEmpty,
+              !refreshToken.isEmpty
+        else {
+            return nil
+        }
+
+        let expiresAt: Int64
+        if let expiresAtStr = json["expires_at"] as? String, let parsed = Int64(expiresAtStr) {
+            expiresAt = parsed
+        } else if let expiresAtNum = json["expires_at"] as? Int64 {
+            expiresAt = expiresAtNum
+        } else {
+            return nil
+        }
+
+        return Sub2APIAuthInfo(
+            accessToken: accessToken,
+            refreshToken: refreshToken,
+            tokenExpiresAt: expiresAt
+        )
+    }
+
+    /// 将认证信息序列化为 JSON 字符串，用于存储。
+    func jsonString() -> String? {
+        let dict: [String: Any] = [
+            "access_token": accessToken,
+            "refresh_token": refreshToken,
+            "expires_at": String(tokenExpiresAt),
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: dict),
+              let string = String(data: data, encoding: .utf8)
+        else {
+            return nil
+        }
+        return string
+    }
+}
+
 // MARK: - 数据模型
 
 /// Sub2API 容量摘要的 API 响应根结构体。
@@ -139,6 +204,12 @@ nonisolated struct Sub2APIBaseURL: Equatable {
         "channel-monitors",
         "capacity-summary",
     ]
+    private static let refreshPathComponents = [
+        "api",
+        "v1",
+        "auth",
+        "refresh",
+    ]
 
     let url: URL
     let host: String
@@ -179,6 +250,12 @@ nonisolated struct Sub2APIBaseURL: Equatable {
         }
     }
 
+    var refreshTokenURL: URL {
+        Self.refreshPathComponents.reduce(url) { partialURL, pathComponent in
+            partialURL.appendingPathComponent(pathComponent)
+        }
+    }
+
     private static func normalizedPath(_ path: String) -> String {
         guard path != "/" else {
             return ""
@@ -193,11 +270,36 @@ nonisolated struct Sub2APIBaseURL: Equatable {
     }
 }
 
+// MARK: - Token 刷新模型
+
+nonisolated struct Sub2APIRefreshResponse: Decodable {
+    let code: Int
+    let message: String?
+    let data: Sub2APIRefreshData?
+
+    struct Sub2APIRefreshData: Decodable {
+        let accessToken: String
+        let refreshToken: String
+        let expiresIn: Int
+
+        enum CodingKeys: String, CodingKey {
+            case accessToken = "access_token"
+            case refreshToken = "refresh_token"
+            case expiresIn = "expires_in"
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case code, message, data
+    }
+}
+
 // MARK: - 网络服务协议与实现
 
 nonisolated protocol Sub2APIFetching: Sendable {
     func fetchCapacitySummary(baseURL: String, targetGroupID: Int, bearerKey: String) async -> Sub2APICapacityResult
     func fetchCapacityGroups(baseURL: String, bearerKey: String) async -> Sub2APIGroupListResult
+    func refreshBearerToken(baseURL: String, refreshToken: String) async -> Sub2APIAuthInfo?
 }
 
 nonisolated struct Sub2APIFetcher: Sub2APIFetching {
@@ -306,5 +408,52 @@ nonisolated struct Sub2APIFetcher: Sub2APIFetching {
         } catch {
             return .failure(Sub2APIFetchError(message: "解析响应失败：\(error.localizedDescription)"))
         }
+    }
+
+    func refreshBearerToken(baseURL: String, refreshToken: String) async -> Sub2APIAuthInfo? {
+        let url: URL
+        do {
+            url = try Sub2APIBaseURL(baseURL).refreshTokenURL
+        } catch {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = timeoutSeconds
+
+        let body: [String: String] = ["refresh_token": refreshToken]
+        guard let bodyData = try? JSONSerialization.data(withJSONObject: body) else {
+            return nil
+        }
+        request.httpBody = bodyData
+
+        let data: Data
+        do {
+            let (responseData, response) = try await urlSession.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200
+            else {
+                return nil
+            }
+            data = responseData
+        } catch {
+            return nil
+        }
+
+        guard let refreshResponse = try? JSONDecoder().decode(Sub2APIRefreshResponse.self, from: data),
+              refreshResponse.code == 0,
+              let refreshData = refreshResponse.data
+        else {
+            return nil
+        }
+
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        return Sub2APIAuthInfo(
+            accessToken: refreshData.accessToken,
+            refreshToken: refreshData.refreshToken,
+            tokenExpiresAt: now + Int64(refreshData.expiresIn) * 1000
+        )
     }
 }

@@ -1050,6 +1050,28 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     var customServiceName: String
     var customGroupName: String
 
+    /// 从 bearerKey 解析的认证信息（当 bearerKey 是 JSON 格式时有效）。
+    var authInfo: Sub2APIAuthInfo? {
+        Sub2APIAuthInfo.parse(from: bearerKey)
+    }
+
+    /// 获取当前有效的 access token。
+    /// 仅从 authInfo 解析；旧格式的纯 JWT 不再支持。
+    var effectiveAccessToken: String {
+        authInfo?.accessToken ?? ""
+    }
+
+    /// 是否支持 token 自动刷新。
+    var supportsTokenRefresh: Bool {
+        authInfo != nil
+    }
+
+    /// bearerKey 看起来像 JSON 但解析失败。
+    var isInvalidJSON: Bool {
+        let trimmed = bearerKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("{") && authInfo == nil
+    }
+
     /// 最近一次成功查询的结果。不参与持久化，反序列化时使用空值。
     var lastResult: Sub2APICapacityResult?
 
