@@ -60,6 +60,7 @@ nonisolated enum CodexUsageResult: Equatable, Sendable {
     case authFileNotSelected
     case authFileNeedsReselection
     case invalidAuthFile
+    case unsupportedAuthMode
     case unauthorized
     case networkError(String)
 }
@@ -328,8 +329,17 @@ nonisolated struct CodexUsageFetcher: CodexUsageFetching {
             return .authFileNeedsReselection
         }
 
-        guard let authObject = try? JSONSerialization.jsonObject(with: authData) as? [String: Any],
-              let tokens = authObject["tokens"] as? [String: Any],
+        guard let authObject = try? JSONSerialization.jsonObject(with: authData) as? [String: Any]
+        else {
+            return .invalidAuthFile
+        }
+
+        let authMode = authObject["auth_mode"] as? String ?? ""
+        if authMode != "chatgpt" {
+            return .unsupportedAuthMode
+        }
+
+        guard let tokens = authObject["tokens"] as? [String: Any],
               let accessToken = tokens["access_token"] as? String,
               !accessToken.isEmpty
         else {

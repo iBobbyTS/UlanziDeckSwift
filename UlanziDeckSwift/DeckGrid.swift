@@ -254,7 +254,10 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                     subtitle = "需重选文件"
                 case .invalidAuthFile:
                     title = configuration.visual.displayName(fallback: "auth.json")
-                    subtitle = "格式无效"
+                    subtitle = "JSON 格式无效"
+                case .unsupportedAuthMode:
+                    title = configuration.visual.displayName(fallback: "auth.json")
+                    subtitle = "仅支持 ChatGPT 登录"
                 case .unauthorized:
                     title = configuration.visual.displayName(fallback: "Codex 额度")
                     subtitle = "登录已失效"
