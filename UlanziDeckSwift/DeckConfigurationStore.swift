@@ -301,33 +301,41 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
         in configuration: inout DeckKeyConfiguration,
         claimedCredentialIDs: inout Set<String>
     ) {
-        let legacyBearerKey = configuration.sub2API.bearerKey
+        var dataSource = configuration.sub2APIDataSourceConfiguration
+        let legacyBearerKey = dataSource.bearerKey
         if !legacyBearerKey.isEmpty {
-            let existingCredentialID = normalizedCredentialID(configuration.sub2API.credentialID)
-            let credentialID = existingCredentialID.flatMap { candidate in
-                claimedCredentialIDs.contains(candidate) ? nil : candidate
-            } ?? UUID().uuidString
+            let existingCredentialID = normalizedCredentialID(dataSource.credentialID)
+            let credentialID: String
+            if let existingCredentialID,
+               let persisted = credentialBaseline.persistedBearerKey(credentialID: existingCredentialID),
+               persisted != legacyBearerKey {
+                credentialID = UUID().uuidString
+            } else {
+                credentialID = existingCredentialID ?? UUID().uuidString
+            }
             do {
-                try credentialStore.saveBearerKey(
-                    legacyBearerKey,
-                    credentialID: credentialID
-                )
+                if credentialBaseline.persistedBearerKey(credentialID: credentialID) != legacyBearerKey {
+                    try credentialStore.saveBearerKey(legacyBearerKey, credentialID: credentialID)
+                }
                 credentialBaseline.recordPersistedBearerKey(
                     legacyBearerKey,
                     credentialID: credentialID
                 )
-                configuration.sub2API.credentialID = credentialID
+                dataSource.credentialID = credentialID
+                configuration.sub2APIDataSourceConfiguration = dataSource
                 claimedCredentialIDs.insert(credentialID)
             } catch {
-                configuration.sub2API.bearerKey = ""
-                configuration.sub2API.credentialID = nil
+                dataSource.bearerKey = ""
+                dataSource.credentialID = nil
+                configuration.sub2APIDataSourceConfiguration = dataSource
             }
             return
         }
 
-        guard let credentialID = normalizedCredentialID(configuration.sub2API.credentialID) else {
-            configuration.sub2API.bearerKey = ""
-            configuration.sub2API.credentialID = nil
+        guard let credentialID = normalizedCredentialID(dataSource.credentialID) else {
+            dataSource.bearerKey = ""
+            dataSource.credentialID = nil
+            configuration.sub2APIDataSourceConfiguration = dataSource
             return
         }
 
@@ -338,8 +346,9 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
                       !bearerKey.isEmpty
                 else {
                     credentialBaseline.remove(credentialID: credentialID)
-                    configuration.sub2API.bearerKey = ""
-                    configuration.sub2API.credentialID = nil
+                    dataSource.bearerKey = ""
+                    dataSource.credentialID = nil
+                    configuration.sub2APIDataSourceConfiguration = dataSource
                     return
                 }
 
@@ -347,12 +356,14 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
                     bearerKey,
                     credentialID: credentialID
                 )
-                configuration.sub2API.credentialID = credentialID
-                configuration.sub2API.bearerKey = bearerKey
+                dataSource.credentialID = credentialID
+                dataSource.bearerKey = bearerKey
+                configuration.sub2APIDataSourceConfiguration = dataSource
             } catch {
                 credentialBaseline.remove(credentialID: credentialID)
-                configuration.sub2API.credentialID = credentialID
-                configuration.sub2API.bearerKey = ""
+                dataSource.credentialID = credentialID
+                dataSource.bearerKey = ""
+                configuration.sub2APIDataSourceConfiguration = dataSource
                 NSLog("无法从 Keychain 加载 Sub2API Bearer Key：%@", String(describing: error))
             }
             return
@@ -360,28 +371,16 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
 
         guard let bearerKey = credentialBaseline.persistedBearerKey(credentialID: credentialID)
         else {
-            configuration.sub2API.bearerKey = ""
-            configuration.sub2API.credentialID = nil
+            dataSource.bearerKey = ""
+            dataSource.credentialID = nil
+            configuration.sub2APIDataSourceConfiguration = dataSource
             return
         }
 
-        let independentCredentialID = UUID().uuidString
-        do {
-            try credentialStore.saveBearerKey(
-                bearerKey,
-                credentialID: independentCredentialID
-            )
-            credentialBaseline.recordPersistedBearerKey(
-                bearerKey,
-                credentialID: independentCredentialID
-            )
-            configuration.sub2API.bearerKey = bearerKey
-            configuration.sub2API.credentialID = independentCredentialID
-            claimedCredentialIDs.insert(independentCredentialID)
-        } catch {
-            configuration.sub2API.bearerKey = ""
-            configuration.sub2API.credentialID = nil
-        }
+        // 同一 credential ID 的多个消费者是合法共享，不再人为复制 Keychain 项。
+        dataSource.bearerKey = bearerKey
+        dataSource.credentialID = credentialID
+        configuration.sub2APIDataSourceConfiguration = dataSource
     }
 
     private func normalizedCredentialID(_ credentialID: String?) -> String? {
@@ -400,11 +399,12 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
         var credentialWriteFailed = false
         for page in state.persistedPages {
             for configuration in page.configurations.values {
-                guard let credentialID = configuration.sub2API.credentialID else {
+                let dataSource = configuration.sub2APIDataSourceConfiguration
+                guard let credentialID = normalizedCredentialID(dataSource.credentialID) else {
                     continue
                 }
                 referencedCredentialIDs.insert(credentialID)
-                let bearerKey = configuration.sub2API.bearerKey
+                let bearerKey = dataSource.bearerKey
                 guard !bearerKey.isEmpty,
                       !credentialBaseline.matchesPersistedBearerKey(
                         bearerKey,
@@ -457,7 +457,7 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
     private func reconcileCredentialIndexAfterLoad(in state: DeckGridInteractionState) {
         let referencedCredentialIDs = Set(state.persistedPages.flatMap { page in
             page.configurations.values.compactMap { configuration -> String? in
-                return configuration.sub2API.credentialID
+                normalizedCredentialID(configuration.sub2APIDataSourceConfiguration.credentialID)
             }
         })
 

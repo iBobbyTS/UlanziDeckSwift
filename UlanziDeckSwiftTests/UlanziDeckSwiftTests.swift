@@ -2310,8 +2310,7 @@ struct UlanziDeckSwiftTests {
 
         #expect(firstCredential.credentialID == "shared-id")
         #expect(firstCredential.bearerKey == "shared-secret")
-        #expect(copiedCredential.credentialID != nil)
-        #expect(copiedCredential.credentialID != firstCredential.credentialID)
+        #expect(copiedCredential.credentialID == firstCredential.credentialID)
         #expect(copiedCredential.bearerKey == "shared-secret")
         #expect(copiedCredential.credentialID.flatMap { credentials.savedBearerKeys[$0] } == "shared-secret")
         #expect(emptyCredential.credentialID == nil)
@@ -2398,6 +2397,67 @@ struct UlanziDeckSwiftTests {
         #expect(didReferenceRoot)
         #expect(state.resolvedSub2APIDataSourceInstanceID(for: 5) == firstInstanceID)
         #expect(state.resolvedSub2APIBaseURL(for: 5) == "api.example.com")
+    }
+
+    @Test func genericSub2APIDataSourceGraphRejectsSameAndCrossKindCycles() {
+        let pool = Sub2APIDataSourceConfiguration(
+            queryKind: "pool",
+            instanceID: "pool",
+            baseURL: "https://shared.example",
+            refreshInterval: 45,
+            bearerKey: "pool-token"
+        )
+        var sameKindCycle = [
+            "a": Sub2APIDataSourceConfiguration(queryKind: "pool", instanceID: "a", dataSourceInstanceID: "b"),
+            "b": Sub2APIDataSourceConfiguration(queryKind: "pool", instanceID: "b", dataSourceInstanceID: "a")
+        ]
+        #expect(Sub2APIDataSourceGraph.invalidReferenceInstanceIDs(in: sameKindCycle) == Set(["a", "b"]))
+
+        sameKindCycle = [
+            "pool": pool,
+            "balance": Sub2APIDataSourceConfiguration(
+                queryKind: "balance",
+                instanceID: "balance",
+                dataSourceInstanceID: "pool",
+                refreshInterval: 9
+            )
+        ]
+        let resolved = Sub2APIDataSourceGraph.resolvedConfiguration(
+            for: "balance",
+            in: sameKindCycle
+        )
+        #expect(resolved?.baseURL == pool.baseURL)
+        #expect(resolved?.bearerKey == pool.bearerKey)
+        #expect(resolved?.refreshInterval == 9)
+
+        sameKindCycle["pool"]?.dataSourceInstanceID = "balance"
+        #expect(Sub2APIDataSourceGraph.invalidReferenceInstanceIDs(in: sameKindCycle) == Set(["pool", "balance"]))
+    }
+
+    @Test func loadingSub2APISourceWithMissingRootClearsReferenceAndCredentials() {
+        var source = DeckKeyConfiguration.tallyDefault
+        source.function = .sub2API
+        source.sub2API.instanceID = "source"
+        source.sub2API.baseURL = "https://source.example"
+        source.sub2API.bearerKey = "source-secret"
+        source.sub2API.credentialID = "source-credential"
+        var consumer = DeckKeyConfiguration.tallyDefault
+        consumer.function = .sub2API
+        consumer.sub2API.instanceID = "consumer"
+        consumer.sub2API.dataSourceInstanceID = "missing"
+        consumer.sub2API.baseURL = "https://stale.example"
+        consumer.sub2API.bearerKey = "stale-secret"
+        consumer.sub2API.credentialID = "stale-credential"
+
+        let state = DeckGridInteractionState(
+            layout: .h200Prototype,
+            configurations: [3: source, 4: consumer]
+        )
+        let restored = state.sub2APIConfiguration(for: 4)
+        #expect(restored.dataSourceInstanceID == nil)
+        #expect(restored.baseURL.isEmpty)
+        #expect(restored.bearerKey.isEmpty)
+        #expect(restored.credentialID == nil)
     }
 
     @Test func sub2APIDataSourceReferenceRoundTripsWithoutDuplicatingSecret() throws {
@@ -3062,7 +3122,10 @@ struct UlanziDeckSwiftTests {
             _ = loadedState.assign(.sub2API, to: keyID)
         }
         _ = loadedState.setSub2APIBaseURL("api.example.com", for: 3)
-        _ = loadedState.setSub2APIBearerKey("shared-token", for: 3)
+        _ = loadedState.setSub2APIBearerKey(
+            Self.sub2APIAuthJSON(accessToken: "shared-token"),
+            for: 3
+        )
         _ = loadedState.setSub2APITargetGroupID(101, for: 3)
         let sourceInstanceID = loadedState.sub2APIConfiguration(for: 3).instanceID
         _ = loadedState.setSub2APIDataSourceInstanceID(sourceInstanceID, for: 4)
@@ -3108,7 +3171,7 @@ struct UlanziDeckSwiftTests {
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
-        model.setSelectedSub2APIBearerKey("source-token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "source-token"))
         let sourceInstanceID = model.interactionState.sub2APIConfiguration(for: 3).instanceID
 
         model.selectKey(keyID: 4)
@@ -3126,7 +3189,7 @@ struct UlanziDeckSwiftTests {
         }
 
         model.selectKey(keyID: 3)
-        model.setSelectedSub2APIBearerKey("updated-token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "updated-token"))
 
         try await Self.waitUntil {
             fetcher.groupListRequests.contains(
@@ -3137,7 +3200,76 @@ struct UlanziDeckSwiftTests {
             )
         }
 
-        #expect(model.interactionState.resolvedSub2APIBearerKey(for: 4) == "updated-token")
+        #expect(
+            model.interactionState.resolvedSub2APIBearerKey(for: 4)
+                == Self.sub2APIAuthJSON(accessToken: "updated-token")
+        )
+    }
+
+    @MainActor
+    @Test func refreshedSub2APICredentialWritesBackToSourceRootAndKeepsSharedResult() async throws {
+        let item = Self.sub2APICapacityItem(
+            groupID: 1215,
+            groupName: "PLUS共享号池",
+            availableConcurrency: 3078
+        )
+        let expiredAuth = Sub2APIAuthInfo(
+            accessToken: "expired-access",
+            refreshToken: "source-refresh",
+            tokenExpiresAt: 0
+        )
+        let refreshedAuth = Sub2APIAuthInfo(
+            accessToken: "refreshed-access",
+            refreshToken: "rotated-refresh",
+            tokenExpiresAt: 4_102_444_800_000
+        )
+        let fetcher = FakeSub2APIFetcher(
+            groupListResults: [.success(items: [item])],
+            refreshResults: [refreshedAuth]
+        )
+        var loadedState = DeckGridInteractionState(layout: .h200Prototype)
+        _ = loadedState.assign(.sub2API, to: 3)
+        _ = loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = loadedState.setSub2APIBearerKey(try #require(expiredAuth.jsonString()), for: 3)
+        let sourceInstanceID = loadedState.sub2APIConfiguration(for: 3).instanceID
+        _ = loadedState.assign(.sub2API, to: 4)
+        _ = loadedState.setSub2APIDataSourceInstanceID(sourceInstanceID, for: 4)
+        _ = loadedState.setSub2APITargetGroupID(1215, for: 4)
+        let store = FakeDeckConfigurationStore(loadedState: loadedState)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: store,
+            sub2APIFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+
+        try await Self.waitUntil {
+            model.interactionState.sub2APIConfiguration(for: 4).lastResult == .success(item: item)
+        }
+
+        #expect(fetcher.refreshRequests == [
+            FakeSub2APIFetcher.RefreshRequest(
+                baseURL: "api.example.com",
+                refreshToken: "source-refresh"
+            ),
+        ])
+        #expect(fetcher.groupListRequests == [
+            FakeSub2APIFetcher.GroupListRequest(
+                baseURL: "api.example.com",
+                bearerKey: "refreshed-access"
+            ),
+        ])
+        #expect(model.interactionState.sub2APIConfiguration(for: 3).authInfo == refreshedAuth)
+        #expect(model.interactionState.sub2APIConfiguration(for: 4).bearerKey.isEmpty)
+        #expect(
+            Sub2APIAuthInfo.parse(
+                from: model.interactionState.resolvedSub2APIBearerKey(for: 4)
+            ) == refreshedAuth
+        )
+        #expect(store.savedStates.last?.sub2APIConfiguration(for: 3).authInfo == refreshedAuth)
+        #expect(store.savedStates.last?.sub2APIConfiguration(for: 4).bearerKey.isEmpty == true)
     }
 
     @MainActor
@@ -3159,7 +3291,7 @@ struct UlanziDeckSwiftTests {
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
-        model.setSelectedSub2APIBearerKey("token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"))
 
         try await Self.waitUntil {
             fetcher.groupListRequests.count == 1
@@ -3205,7 +3337,7 @@ struct UlanziDeckSwiftTests {
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
-        model.setSelectedSub2APIBearerKey("token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"))
 
         try await Self.waitUntil {
             model.interactionState.sub2APIConfiguration(for: 3).groupListState == .invalidToken
@@ -3217,7 +3349,7 @@ struct UlanziDeckSwiftTests {
             FakeSub2APIFetcher.GroupListRequest(baseURL: "api.example.com", bearerKey: "token"),
         ])
 
-        model.setSelectedSub2APIBearerKey("new-token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "new-token"))
 
         try await Self.waitUntil {
             model.interactionState.sub2APIConfiguration(for: 3).groupListState == .tokenExpired
@@ -3248,14 +3380,14 @@ struct UlanziDeckSwiftTests {
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
-        model.setSelectedSub2APIBearerKey("old-token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "old-token"))
 
         try await Self.waitUntil {
             fetcher.groupListRequests.count == 1
                 && model.interactionState.sub2APIConfiguration(for: 3).groupListState == .invalidToken
         }
 
-        model.setSelectedSub2APIBearerKey("token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"))
         try await Task.sleep(nanoseconds: 50_000_000)
         #expect(fetcher.groupListRequests.count == 1)
 
@@ -3299,7 +3431,7 @@ struct UlanziDeckSwiftTests {
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
-        model.setSelectedSub2APIBearerKey("token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"))
         model.setSelectedSub2APIRefreshInterval(5)
         try await Self.waitUntil {
             syncer.partialDisplays.count >= 3
@@ -3336,7 +3468,7 @@ struct UlanziDeckSwiftTests {
         loadedState.assign(.sub2API, to: 3)
         loadedState.setSub2APIBaseURL("api.example.com", for: 3)
         loadedState.setSub2APITargetGroupID(1215, for: 3)
-        loadedState.setSub2APIBearerKey("old-token", for: 3)
+        loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "old-token"), for: 3)
         loadedState.setSub2APIRefreshInterval(5, for: 3)
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
@@ -3362,7 +3494,7 @@ struct UlanziDeckSwiftTests {
         #expect(fetcher.requests.count == 1)
 
         model.selectKey(keyID: 3)
-        model.setSelectedSub2APIBearerKey("old-token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "old-token"))
         try await Task.sleep(nanoseconds: 50_000_000)
         #expect(fetcher.requests.count == 1)
 
@@ -3370,7 +3502,7 @@ struct UlanziDeckSwiftTests {
         try await Task.sleep(nanoseconds: 50_000_000)
         #expect(fetcher.requests.count == 1)
 
-        model.setSelectedSub2APIBearerKey("new-token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "new-token"))
 
         try await Self.waitUntil {
             fetcher.requests.count >= 2
@@ -3395,7 +3527,7 @@ struct UlanziDeckSwiftTests {
         loadedState.assign(.sub2API, to: 3)
         loadedState.setSub2APIBaseURL("api.example.com", for: 3)
         loadedState.setSub2APITargetGroupID(1215, for: 3)
-        loadedState.setSub2APIBearerKey("old-token", for: 3)
+        loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "old-token"), for: 3)
         loadedState.setSub2APIRefreshInterval(5, for: 3)
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
@@ -3425,7 +3557,7 @@ struct UlanziDeckSwiftTests {
         #expect(fetcher.requests.count == 1)
 
         model.selectKey(keyID: 4)
-        model.setSelectedSub2APIBearerKey("new-token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "new-token"))
 
         try await Self.waitUntil {
             fetcher.requests.count >= 2
@@ -3449,7 +3581,7 @@ struct UlanziDeckSwiftTests {
         loadedState.assign(.sub2API, to: 3)
         loadedState.setSub2APIBaseURL("api.example.com", for: 3)
         loadedState.setSub2APITargetGroupID(1215, for: 3)
-        loadedState.setSub2APIBearerKey("stale-token", for: 3)
+        loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "stale-token"), for: 3)
         loadedState.setSub2APIRefreshInterval(5, for: 3)
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
@@ -3470,7 +3602,7 @@ struct UlanziDeckSwiftTests {
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
-        model.setSelectedSub2APIBearerKey("stale-token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "stale-token"))
         model.setSelectedSub2APITargetGroupID(1215)
 
         try await Self.waitUntil {
@@ -3497,7 +3629,7 @@ struct UlanziDeckSwiftTests {
         loadedState.assign(.sub2API, to: 3)
         loadedState.setSub2APIBaseURL("api.example.com", for: 3)
         loadedState.setSub2APITargetGroupID(1215, for: 3)
-        loadedState.setSub2APIBearerKey("token", for: 3)
+        loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
         loadedState.setSub2APIRefreshInterval(5, for: 3)
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
@@ -3545,7 +3677,7 @@ struct UlanziDeckSwiftTests {
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
-        model.setSelectedSub2APIBearerKey("token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"))
         model.setSelectedSub2APITargetGroupID(1215)
         try await Self.waitUntil {
             fetcher.requests.count == 1
@@ -3579,13 +3711,13 @@ struct UlanziDeckSwiftTests {
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
-        model.setSelectedSub2APIBearerKey("old-token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "old-token"))
         try await Self.waitUntil {
             fetcher.groupListRequests.count == 1
                 && model.interactionState.sub2APIConfiguration(for: 3).groupListState == .success(items: [oldPool])
         }
 
-        model.setSelectedSub2APIBearerKey("new-token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "new-token"))
         model.swapSquareKeyConfigurations(sourceKeyID: 3, targetKeyID: 4)
 
         try await Self.waitUntil {
@@ -3612,7 +3744,7 @@ struct UlanziDeckSwiftTests {
         loadedState.assign(.sub2API, to: 3)
         loadedState.setSub2APIBaseURL("api.example.com", for: 3)
         loadedState.setSub2APITargetGroupID(1215, for: 3)
-        loadedState.setSub2APIBearerKey("token", for: 3)
+        loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
         loadedState.setSub2APIRefreshInterval(5, for: 3)
         loadedState.assign(.pageFolder, to: 4)
         let model = H200ConnectionModel(
@@ -3664,7 +3796,7 @@ struct UlanziDeckSwiftTests {
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
-        model.setSelectedSub2APIBearerKey("old-token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "old-token"))
         model.setSelectedSub2APITargetGroupID(1215)
         try await Self.waitUntil {
             fetcher.requests.count == 1
@@ -3695,7 +3827,7 @@ struct UlanziDeckSwiftTests {
         loadedState.assign(.sub2API, to: 3)
         loadedState.setSub2APIBaseURL("api.example.com", for: 3)
         loadedState.setSub2APITargetGroupID(1215, for: 3)
-        loadedState.setSub2APIBearerKey("token", for: 3)
+        loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
         loadedState.setSub2APIRefreshInterval(5, for: 3)
         let fetcher = FakeSub2APIFetcher()
         let store = FakeDeckConfigurationStore(loadedState: loadedState)
@@ -3710,7 +3842,7 @@ struct UlanziDeckSwiftTests {
         model.setSelectedSub2APIBaseURL("  api.example.com  ")
         model.setSelectedSub2APITargetGroupID(1215)
         model.setSelectedSub2APIRefreshInterval(1)
-        model.setSelectedSub2APIBearerKey("token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"))
 
         #expect(store.savedStates.isEmpty)
         #expect(fetcher.requests.isEmpty)
@@ -3786,7 +3918,7 @@ struct UlanziDeckSwiftTests {
         loadedState.assign(.sub2API, to: 3)
         loadedState.setSub2APIBaseURL("api.example.com", for: 3)
         loadedState.setSub2APITargetGroupID(1215, for: 3)
-        loadedState.setSub2APIBearerKey("old-token", for: 3)
+        loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "old-token"), for: 3)
         let store = FakeDeckConfigurationStore(
             loadedState: loadedState,
             saveResult: .credentialFailure("Keychain 不可用")
@@ -3806,10 +3938,10 @@ struct UlanziDeckSwiftTests {
         }
 
         model.selectKey(keyID: 3)
-        model.setSelectedSub2APIBearerKey("new-token")
+        model.setSelectedSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "new-token"))
 
         let configuration = model.interactionState.sub2APIConfiguration(for: 3)
-        #expect(configuration.bearerKey == "old-token")
+        #expect(configuration.bearerKey == Self.sub2APIAuthJSON(accessToken: "old-token"))
         #expect(configuration.groupListState == .networkError("Keychain 不可用"))
 
         syncer.emitInput(H200InputEvent(state: 1, index: 2, type: .button, action: .press))
@@ -3839,7 +3971,7 @@ struct UlanziDeckSwiftTests {
         loadedState.assign(.sub2API, to: 3)
         loadedState.setSub2APIBaseURL("api.example.com", for: 3)
         loadedState.setSub2APITargetGroupID(1215, for: 3)
-        loadedState.setSub2APIBearerKey("token", for: 3)
+        loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
         loadedState.setSub2APIRefreshInterval(5, for: 3)
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
@@ -4659,7 +4791,7 @@ struct UlanziDeckSwiftTests {
         loadedState.assign(.sub2API, to: 3)
         loadedState.setSub2APIBaseURL("api.example.com", for: 3)
         loadedState.setSub2APITargetGroupID(1215, for: 3)
-        loadedState.setSub2APIBearerKey("token", for: 3)
+        loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
         let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
@@ -4702,7 +4834,7 @@ struct UlanziDeckSwiftTests {
         storedState.assign(.sub2API, to: 3)
         storedState.setSub2APIBaseURL("api.example.com", for: 3)
         storedState.setSub2APITargetGroupID(1215, for: 3)
-        storedState.setSub2APIBearerKey("token", for: 3)
+        storedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
         #expect(store.saveInteractionState(storedState, for: .h200Prototype) == .success)
         let saveCallCountBeforeRefresh = credentials.saveCallCount
         let fetcher = FakeSub2APIFetcher(results: [.success(item: item)])
@@ -5081,7 +5213,7 @@ struct UlanziDeckSwiftTests {
         loadedState.assign(.sub2API, to: 3)
         loadedState.setSub2APIBaseURL("api.example.com", for: 3)
         loadedState.setSub2APITargetGroupID(1215, for: 3)
-        loadedState.setSub2APIBearerKey("token", for: 3)
+        loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
         loadedState.setSub2APIRefreshInterval(5, for: 3)
         loadedState.assign(.genshinStatus, to: 4)
         loadedState.setMihoyoGameRefreshIntervalMinutes(1, for: 4)
@@ -7863,6 +7995,11 @@ struct UlanziDeckSwiftTests {
         )
     }
 
+    /// Runtime 夹具使用受支持的认证载荷，请求断言仍核对实际发送的 access token。
+    private static func sub2APIAuthJSON(accessToken: String) -> String {
+        #"{"access_token":"\#(accessToken)","refresh_token":"refresh-token","expires_at":"4102444800000"}"#
+    }
+
     private static func mihoyoRole(game: MihoyoGame, uid: String = "100000001") -> MihoyoBoundRole {
         MihoyoBoundRole(
             game: game,
@@ -8190,15 +8327,22 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         let bearerKey: String
     }
 
+    struct RefreshRequest: Equatable {
+        let baseURL: String
+        let refreshToken: String
+    }
+
     private let lock = NSLock()
     private var results: [Sub2APICapacityResult]
     private let defaultResult: Sub2APICapacityResult
     private var groupListResults: [Sub2APIGroupListResult]
     private let defaultGroupListResult: Sub2APIGroupListResult
+    private var refreshResults: [Sub2APIAuthInfo?]
     private let fetchDelayNanoseconds: UInt64?
     private let groupListFetchDelayNanoseconds: UInt64?
     private var storedRequests: [Request] = []
     private var storedGroupListRequests: [GroupListRequest] = []
+    private var storedRefreshRequests: [RefreshRequest] = []
 
     var requests: [Request] {
         locked { storedRequests }
@@ -8208,11 +8352,16 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         locked { storedGroupListRequests }
     }
 
+    var refreshRequests: [RefreshRequest] {
+        locked { storedRefreshRequests }
+    }
+
     init(
         results: [Sub2APICapacityResult] = [],
         defaultResult: Sub2APICapacityResult = .networkError("未配置响应"),
         groupListResults: [Sub2APIGroupListResult] = [],
         defaultGroupListResult: Sub2APIGroupListResult = .networkError("未配置响应"),
+        refreshResults: [Sub2APIAuthInfo?] = [],
         fetchDelayNanoseconds: UInt64? = nil,
         groupListFetchDelayNanoseconds: UInt64? = nil
     ) {
@@ -8220,6 +8369,7 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         self.defaultResult = defaultResult
         self.groupListResults = groupListResults
         self.defaultGroupListResult = defaultGroupListResult
+        self.refreshResults = refreshResults
         self.fetchDelayNanoseconds = fetchDelayNanoseconds
         self.groupListFetchDelayNanoseconds = groupListFetchDelayNanoseconds
     }
@@ -8254,6 +8404,19 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         }
 
         return result
+    }
+
+    func refreshBearerToken(baseURL: String, refreshToken: String) async -> Sub2APIAuthInfo? {
+        locked {
+            storedRefreshRequests.append(RefreshRequest(
+                baseURL: baseURL,
+                refreshToken: refreshToken
+            ))
+            guard !refreshResults.isEmpty else {
+                return nil
+            }
+            return refreshResults.removeFirst()
+        }
     }
 
     private func locked<Value>(_ body: () -> Value) -> Value {

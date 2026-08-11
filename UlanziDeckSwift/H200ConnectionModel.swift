@@ -1633,6 +1633,7 @@ final class H200ConnectionModel: ObservableObject {
     ) -> (
         slot: RuntimeSlotID,
         config: DeckKeySub2APIConfiguration,
+        dataSource: Sub2APIDataSourceConfiguration,
         dataSourceInstanceID: String,
         baseURL: String,
         bearerKey: String,
@@ -1648,9 +1649,20 @@ final class H200ConnectionModel: ObservableObject {
             return nil
         }
 
+        let dataSourceConfigurationSource = Sub2APIDataSourceConfiguration(
+            queryKind: Sub2APIDataSourceConfiguration.capacityPoolQueryKind,
+            instanceID: dataSourceConfiguration.instanceID,
+            baseURL: dataSourceConfiguration.baseURL,
+            dataSourceInstanceID: dataSourceConfiguration.dataSourceInstanceID,
+            refreshInterval: dataSourceConfiguration.refreshInterval,
+            bearerKey: dataSourceConfiguration.bearerKey,
+            credentialID: dataSourceConfiguration.credentialID
+        )
+
         return (
             slot,
             interactionState.sub2APIConfiguration(for: slot.keyID),
+            dataSourceConfigurationSource,
             interactionState.resolvedSub2APIDataSourceInstanceID(for: slot.keyID),
             dataSourceConfiguration.baseURL,
             interactionState.resolvedSub2APIBearerKey(for: slot.keyID),
@@ -1698,7 +1710,7 @@ final class H200ConnectionModel: ObservableObject {
 
     private func fetchSub2API(for instanceID: RuntimeInstanceID) {
         guard canRunInternalRefresh,
-              let resolved = resolveCurrentSub2APISlot(for: instanceID),
+        let resolved = resolveCurrentSub2APISlot(for: instanceID),
               !isSub2APITokenPaused(for: instanceID),
               !resolved.baseURL.isEmpty,
               !resolved.bearerKey.isEmpty
@@ -1724,15 +1736,16 @@ final class H200ConnectionModel: ObservableObject {
         let baseURL = resolved.baseURL
         let targetGroupID = resolved.config.targetGroupID
         let bearerKey = resolved.bearerKey
-        let authInfo = resolved.config.authInfo
+        let authInfo = resolved.dataSource.authInfo
         let keyID = resolved.slot.keyID
 
         sub2APIFetchTasks[instanceID] = Task { @MainActor [weak self] in
-            var effectiveBearerKey = resolved.config.effectiveAccessToken
+            var effectiveBearerKey = resolved.dataSource.effectiveAccessToken
+            var expectedBearerKey = bearerKey
             if effectiveBearerKey.isEmpty {
                 self?.sub2APIFetchTasks[instanceID] = nil
                 self?.interactionState.setSub2APILastResult(
-                    resolved.config.isInvalidJSON
+                    resolved.dataSource.isInvalidJSON
                         ? .invalidToken : .networkError("认证信息为空"),
                     for: keyID
                 )
@@ -1748,7 +1761,11 @@ final class H200ConnectionModel: ObservableObject {
                     effectiveBearerKey = newAuthInfo.accessToken
                     // 更新存储的认证信息
                     if let jsonString = newAuthInfo.jsonString() {
-                        self?.interactionState.setSub2APIBearerKey(jsonString, for: keyID)
+                        self?.interactionState.setSub2APIBearerKey(
+                            jsonString,
+                            forDataSourceInstanceID: resolved.dataSourceInstanceID
+                        )
+                        expectedBearerKey = jsonString
                         _ = self?.persistCurrentConfiguration()
                     }
                 }
@@ -1785,7 +1802,7 @@ final class H200ConnectionModel: ObservableObject {
                       let latest = self.resolveCurrentSub2APISlot(for: instanceID),
                       latest.baseURL == baseURL,
                       latest.config.targetGroupID == targetGroupID,
-                      latest.bearerKey == bearerKey,
+                      latest.bearerKey == expectedBearerKey,
                       !self.isSub2APITokenPaused(for: instanceID)
                 else {
                     return
@@ -1830,11 +1847,11 @@ final class H200ConnectionModel: ObservableObject {
         let dataSourceInstanceID = resolved.dataSourceInstanceID
         let baseURL = resolved.baseURL
         let bearerKey = resolved.bearerKey
-        let authInfo = resolved.config.authInfo
-        let leaderKeyID = resolved.slot.keyID
+        let authInfo = resolved.dataSource.authInfo
         let fetcher = sub2APIFetcher
         sub2APIFetchTasks[leaderInstanceID] = Task { @MainActor [weak self] in
-            var effectiveBearerKey = resolved.config.effectiveAccessToken
+            var effectiveBearerKey = resolved.dataSource.effectiveAccessToken
+            var expectedBearerKey = bearerKey
             if effectiveBearerKey.isEmpty {
                 self?.sub2APIFetchTasks[leaderInstanceID] = nil
                 return
@@ -1847,7 +1864,11 @@ final class H200ConnectionModel: ObservableObject {
                 ) {
                     effectiveBearerKey = newAuthInfo.accessToken
                     if let jsonString = newAuthInfo.jsonString() {
-                        self?.interactionState.setSub2APIBearerKey(jsonString, for: leaderKeyID)
+                        self?.interactionState.setSub2APIBearerKey(
+                            jsonString,
+                            forDataSourceInstanceID: dataSourceInstanceID
+                        )
+                        expectedBearerKey = jsonString
                         _ = self?.persistCurrentConfiguration()
                     }
                 }
@@ -1861,8 +1882,9 @@ final class H200ConnectionModel: ObservableObject {
                   let self,
                   let latestLeader = self.resolveCurrentSub2APISlot(for: leaderInstanceID),
                   latestLeader.slot.pageID == pageID,
-                  latestLeader.dataSourceInstanceID == dataSourceInstanceID,
-                  latestLeader.baseURL == baseURL
+                      latestLeader.dataSourceInstanceID == dataSourceInstanceID,
+                      latestLeader.baseURL == baseURL,
+                      latestLeader.bearerKey == expectedBearerKey
             else {
                 return
             }
@@ -1905,7 +1927,7 @@ final class H200ConnectionModel: ObservableObject {
                       let latestLeader = self.resolveCurrentSub2APISlot(for: currentLeaderInstanceID),
                       latestLeader.dataSourceInstanceID == dataSourceInstanceID,
                       latestLeader.baseURL == baseURL,
-                      latestLeader.bearerKey == bearerKey,
+                      latestLeader.bearerKey == expectedBearerKey,
                       !self.isSub2APITokenPaused(for: currentLeaderInstanceID)
                 else {
                     return
@@ -1979,15 +2001,15 @@ final class H200ConnectionModel: ObservableObject {
         let pageID = resolved.slot.pageID
         let fetcher = sub2APIFetcher
         let baseURL = resolved.baseURL
-        let authInfo = resolved.config.authInfo
+        let authInfo = resolved.dataSource.authInfo
         let keyID = resolved.slot.keyID
 
         sub2APIGroupListTasks[instanceID] = Task { @MainActor [weak self] in
-            var effectiveBearerKey = resolved.config.effectiveAccessToken
+            var effectiveBearerKey = resolved.dataSource.effectiveAccessToken
             if effectiveBearerKey.isEmpty {
                 self?.sub2APIGroupListTasks[instanceID] = nil
                 self?.interactionState.setSub2APIGroupListState(
-                    resolved.config.isInvalidJSON
+                    resolved.dataSource.isInvalidJSON
                         ? .invalidToken : .networkError("认证信息为空"),
                     for: keyID
                 )
@@ -2001,7 +2023,10 @@ final class H200ConnectionModel: ObservableObject {
                 ) {
                     effectiveBearerKey = newAuthInfo.accessToken
                     if let jsonString = newAuthInfo.jsonString() {
-                        self?.interactionState.setSub2APIBearerKey(jsonString, for: keyID)
+                        self?.interactionState.setSub2APIBearerKey(
+                            jsonString,
+                            forDataSourceInstanceID: resolved.dataSourceInstanceID
+                        )
                         _ = self?.persistCurrentConfiguration()
                     }
                 }

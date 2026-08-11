@@ -539,6 +539,96 @@ nonisolated struct DeckKeySub2APIReferenceOption: Identifiable, Equatable {
     var id: String { instanceID }
 }
 
+/// 公共 Sub2API 来源图工具。来源只允许指向自定义根，因而同类型和跨类型
+/// 的循环都在加载和编辑时由同一份规则拒绝。
+nonisolated enum Sub2APIDataSourceGraph {
+    static func resolvedSourceInstanceID(
+        for instanceID: String,
+        in configurations: [String: Sub2APIDataSourceConfiguration]
+    ) -> String? {
+        var current = instanceID
+        var visited: Set<String> = []
+        while visited.insert(current).inserted {
+            guard let configuration = configurations[current] else {
+                return nil
+            }
+            guard let sourceID = configuration.dataSourceInstanceID else {
+                return current
+            }
+            current = sourceID
+        }
+        return nil
+    }
+
+    static func resolvedConfiguration(
+        for instanceID: String,
+        in configurations: [String: Sub2APIDataSourceConfiguration]
+    ) -> Sub2APIDataSourceConfiguration? {
+        guard let consumer = configurations[instanceID],
+              let sourceID = resolvedSourceInstanceID(for: instanceID, in: configurations),
+              let source = configurations[sourceID]
+        else {
+            return nil
+        }
+
+        var resolved = source
+        resolved.instanceID = sourceID
+        // 跨查询类型只共享 Base URL/认证；同类型才继承刷新间隔。
+        if source.queryKind != consumer.queryKind {
+            resolved.queryKind = consumer.queryKind
+            resolved.refreshInterval = consumer.refreshInterval
+        }
+        return resolved
+    }
+
+    static func invalidReferenceInstanceIDs(
+        in configurations: [String: Sub2APIDataSourceConfiguration]
+    ) -> Set<String> {
+        var invalid: Set<String> = []
+        for (instanceID, configuration) in configurations {
+            guard let sourceID = configuration.dataSourceInstanceID else {
+                continue
+            }
+
+            guard sourceID != instanceID,
+                  let source = configurations[sourceID],
+                  source.dataSourceInstanceID == nil,
+                  resolvedSourceInstanceID(for: instanceID, in: configurations) != nil
+            else {
+                invalid.insert(instanceID)
+                invalid.insert(sourceID)
+                continue
+            }
+        }
+        return invalid
+    }
+
+    static func canReference(
+        candidateInstanceID: String,
+        from instanceID: String,
+        in configurations: [String: Sub2APIDataSourceConfiguration]
+    ) -> Bool {
+        guard candidateInstanceID != instanceID,
+              configurations[instanceID] != nil,
+              let candidate = configurations[candidateInstanceID],
+              candidate.dataSourceInstanceID == nil,
+              !invalidReferenceInstanceIDs(in: configurations).contains(instanceID),
+              !invalidReferenceInstanceIDs(in: configurations).contains(candidateInstanceID)
+        else {
+            return false
+        }
+        return !isReferenced(instanceID, in: configurations)
+            && resolvedSourceInstanceID(for: candidateInstanceID, in: configurations) != instanceID
+    }
+
+    private static func isReferenced(
+        _ instanceID: String,
+        in configurations: [String: Sub2APIDataSourceConfiguration]
+    ) -> Bool {
+        configurations.values.contains { $0.dataSourceInstanceID == instanceID }
+    }
+}
+
 nonisolated struct DeckGridInteractionState: Equatable {
     static let rootPageID = "root"
     static let maximumRootPageCount = 10
@@ -981,6 +1071,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
         let deletedIndex = currentRootPageIndex
         rootPageIDs.removeAll { $0 == deletedPageID }
         removePageSubtree(deletedPageID)
+        normalizeSub2APIDataSources()
         let nextIndex = max(0, min(deletedIndex - 1, rootPageIDs.count - 1))
         currentPageID = rootPageIDs[nextIndex]
         selectedKeyID = firstSelectableKeyID()
@@ -1079,15 +1170,32 @@ nonisolated struct DeckGridInteractionState: Equatable {
             return ""
         }
 
-        let instanceID = configurations[keyID, default: .tallyDefault].sub2API.instanceID
-        return resolvedSub2APIDataSourceInstanceID(
+        let instanceID = configurations[keyID, default: .tallyDefault]
+            .sub2APIDataSourceConfiguration.instanceID
+        return Sub2APIDataSourceGraph.resolvedSourceInstanceID(
             for: instanceID,
-            visitedInstanceIDs: []
+            in: activeSub2APIDataSourceConfigurationsByInstanceID()
         ) ?? instanceID
     }
 
     func resolvedSub2APIDataSourceConfiguration(for keyID: Int) -> DeckKeySub2APIConfiguration? {
-        activeSub2APIConfigurationsByInstanceID()[resolvedSub2APIDataSourceInstanceID(for: keyID)]
+        guard let configuration = configurations[keyID], configuration.function == .sub2API,
+              let resolved = Sub2APIDataSourceGraph.resolvedConfiguration(
+                for: configuration.sub2APIDataSourceConfiguration.instanceID,
+                in: activeSub2APIDataSourceConfigurationsByInstanceID()
+              )
+        else {
+            return nil
+        }
+
+        var result = configuration.sub2API
+        result.instanceID = resolved.instanceID
+        result.baseURL = resolved.baseURL
+        result.dataSourceInstanceID = nil
+        result.refreshInterval = resolved.refreshInterval
+        result.bearerKey = resolved.bearerKey
+        result.credentialID = resolved.credentialID
+        return result
     }
 
     func resolvedSub2APIBaseURL(for keyID: Int) -> String {
@@ -1179,18 +1287,22 @@ nonisolated struct DeckGridInteractionState: Equatable {
     mutating func setSub2APIBaseURL(_ baseURL: String, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].function == .sub2API,
-              configurations[keyID, default: .tallyDefault].sub2API.dataSourceInstanceID == nil
+              configurations[keyID, default: .tallyDefault]
+                .sub2APIDataSourceConfiguration.dataSourceInstanceID == nil
         else {
             return false
         }
 
         selectedKeyID = keyID
         let normalizedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if configurations[keyID, default: .tallyDefault].sub2API.baseURL != normalizedBaseURL {
+        var dataSource = configurations[keyID, default: .tallyDefault]
+            .sub2APIDataSourceConfiguration
+        if dataSource.baseURL != normalizedBaseURL {
             configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
             configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
         }
-        configurations[keyID, default: .tallyDefault].sub2API.baseURL = normalizedBaseURL
+        dataSource.baseURL = normalizedBaseURL
+        configurations[keyID, default: .tallyDefault].sub2APIDataSourceConfiguration = dataSource
         return true
     }
 
@@ -1214,13 +1326,17 @@ nonisolated struct DeckGridInteractionState: Equatable {
     mutating func setSub2APIRefreshInterval(_ interval: Int, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].function == .sub2API,
-              configurations[keyID, default: .tallyDefault].sub2API.dataSourceInstanceID == nil
+              configurations[keyID, default: .tallyDefault]
+                .sub2APIDataSourceConfiguration.dataSourceInstanceID == nil
         else {
             return false
         }
 
         selectedKeyID = keyID
-        configurations[keyID, default: .tallyDefault].sub2API.refreshInterval = max(5, interval)
+        var dataSource = configurations[keyID, default: .tallyDefault]
+            .sub2APIDataSourceConfiguration
+        dataSource.refreshInterval = max(5, interval)
+        configurations[keyID, default: .tallyDefault].sub2APIDataSourceConfiguration = dataSource
         return true
     }
 
@@ -1228,24 +1344,62 @@ nonisolated struct DeckGridInteractionState: Equatable {
     mutating func setSub2APIBearerKey(_ bearerKey: String, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].function == .sub2API,
-              configurations[keyID, default: .tallyDefault].sub2API.dataSourceInstanceID == nil
+              configurations[keyID, default: .tallyDefault]
+                .sub2APIDataSourceConfiguration.dataSourceInstanceID == nil
         else {
             return false
         }
 
         selectedKeyID = keyID
-        if configurations[keyID, default: .tallyDefault].sub2API.bearerKey != bearerKey {
+        var dataSource = configurations[keyID, default: .tallyDefault]
+            .sub2APIDataSourceConfiguration
+        if dataSource.bearerKey != bearerKey {
             configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
             configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
         }
-        if !bearerKey.isEmpty,
-           configurations[keyID, default: .tallyDefault].sub2API.credentialID == nil {
-            configurations[keyID, default: .tallyDefault].sub2API.credentialID = UUID().uuidString
+        if !bearerKey.isEmpty, dataSource.credentialID == nil {
+            dataSource.credentialID = UUID().uuidString
         } else if bearerKey.isEmpty {
-            configurations[keyID, default: .tallyDefault].sub2API.credentialID = nil
+            dataSource.credentialID = nil
         }
-        configurations[keyID, default: .tallyDefault].sub2API.bearerKey = bearerKey
+        dataSource.bearerKey = bearerKey
+        configurations[keyID, default: .tallyDefault].sub2APIDataSourceConfiguration = dataSource
         return true
+    }
+
+    /// 将刷新后的认证写回真实来源根，而不是写回触发请求的引用消费者。
+    @discardableResult
+    mutating func setSub2APIBearerKey(
+        _ bearerKey: String,
+        forDataSourceInstanceID instanceID: String
+    ) -> Bool {
+        for pageID in pages.keys.sorted() {
+            guard var page = pages[pageID] else { continue }
+            for keyID in page.configurations.keys.sorted() {
+                guard var configuration = page.configurations[keyID],
+                      configuration.function == .sub2API,
+                      configuration.sub2APIDataSourceConfiguration.instanceID == instanceID,
+                      configuration.sub2APIDataSourceConfiguration.dataSourceInstanceID == nil
+                else { continue }
+
+                var dataSource = configuration.sub2APIDataSourceConfiguration
+                if dataSource.bearerKey != bearerKey {
+                    configuration.sub2API.groupListState = .idle
+                    configuration.sub2API.lastResult = nil
+                }
+                if !bearerKey.isEmpty, dataSource.credentialID == nil {
+                    dataSource.credentialID = UUID().uuidString
+                } else if bearerKey.isEmpty {
+                    dataSource.credentialID = nil
+                }
+                dataSource.bearerKey = bearerKey
+                configuration.sub2APIDataSourceConfiguration = dataSource
+                page.configurations[keyID] = configuration
+                pages[pageID] = page
+                return true
+            }
+        }
+        return false
     }
 
     @discardableResult
@@ -1260,17 +1414,15 @@ nonisolated struct DeckGridInteractionState: Equatable {
         let candidateSourceInstanceID = normalizedSourceInstanceID?.isEmpty == false
             ? normalizedSourceInstanceID
             : nil
-        let currentInstanceID = configurations[keyID, default: .tallyDefault].sub2API.instanceID
+        let currentInstanceID = configurations[keyID, default: .tallyDefault]
+            .sub2APIDataSourceConfiguration.instanceID
         if let candidateSourceInstanceID {
-            let configurationsByInstanceID = activeSub2APIConfigurationsByInstanceID()
-            guard candidateSourceInstanceID != currentInstanceID,
-                  let candidateConfiguration = configurationsByInstanceID[candidateSourceInstanceID],
-                  isSub2APICustomReferenceRoot(candidateConfiguration),
-                  !isSub2APIInstanceReferenced(currentInstanceID, in: configurationsByInstanceID),
-                  !sub2APIReferenceChain(
-                      startingAt: candidateSourceInstanceID,
-                      contains: currentInstanceID
-                  )
+            let configurationsByInstanceID = activeSub2APIDataSourceConfigurationsByInstanceID()
+            guard Sub2APIDataSourceGraph.canReference(
+                candidateInstanceID: candidateSourceInstanceID,
+                from: currentInstanceID,
+                in: configurationsByInstanceID
+            )
             else {
                 return false
             }
@@ -1282,7 +1434,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         else {
             return false
         }
-        configurations[keyID, default: .tallyDefault].sub2API.dataSourceInstanceID = candidateSourceInstanceID
+        var dataSource = configurations[keyID, default: .tallyDefault]
+            .sub2APIDataSourceConfiguration
+        dataSource.dataSourceInstanceID = candidateSourceInstanceID
+        configurations[keyID, default: .tallyDefault].sub2APIDataSourceConfiguration = dataSource
         configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
         configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
         return true
@@ -1300,8 +1455,11 @@ nonisolated struct DeckGridInteractionState: Equatable {
             return false
         }
 
-        configurations[keyID, default: .tallyDefault].sub2API.bearerKey = bearerKey
-        configurations[keyID, default: .tallyDefault].sub2API.credentialID = credentialID
+        var dataSource = configurations[keyID, default: .tallyDefault]
+            .sub2APIDataSourceConfiguration
+        dataSource.bearerKey = bearerKey
+        dataSource.credentialID = credentialID
+        configurations[keyID, default: .tallyDefault].sub2APIDataSourceConfiguration = dataSource
         return true
     }
 
@@ -1792,6 +1950,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
             ensureUniqueSub2APIInstanceID(for: keyID)
         }
         configurations[keyID, default: .tallyDefault].refreshDefaultButtonBackgroundSnapshot()
+        normalizeSub2APIDataSources()
         return true
     }
 
@@ -1819,6 +1978,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
         removeChildPageIfNeeded(for: keyID)
         pressedKeyIDs.remove(keyID)
         configurations[keyID] = .empty
+        normalizeSub2APIDataSources()
         return true
     }
 
@@ -1838,59 +1998,36 @@ nonisolated struct DeckGridInteractionState: Equatable {
         pressedKeyIDs.contains(keyID)
     }
 
-    private func activeSub2APIConfigurationsByInstanceID() -> [String: DeckKeySub2APIConfiguration] {
-        var configurationsByInstanceID: [String: DeckKeySub2APIConfiguration] = [:]
+    private func activeSub2APIDataSourceConfigurationsByInstanceID() -> [String: Sub2APIDataSourceConfiguration] {
+        var configurationsByInstanceID: [String: Sub2APIDataSourceConfiguration] = [:]
         for page in pages.values {
             for configuration in page.configurations.values where configuration.function == .sub2API {
-                configurationsByInstanceID[configuration.sub2API.instanceID] = configuration.sub2API
+                let dataSource = configuration.sub2APIDataSourceConfiguration
+                configurationsByInstanceID[dataSource.instanceID] = dataSource
             }
         }
         return configurationsByInstanceID
     }
 
-    private func resolvedSub2APIDataSourceInstanceID(
-        for instanceID: String,
-        visitedInstanceIDs: Set<String>
-    ) -> String? {
-        guard !visitedInstanceIDs.contains(instanceID),
-              let configuration = activeSub2APIConfigurationsByInstanceID()[instanceID]
-        else {
-            return nil
-        }
-
-        guard let sourceInstanceID = configuration.dataSourceInstanceID else {
-            return instanceID
-        }
-
-        var visitedInstanceIDs = visitedInstanceIDs
-        visitedInstanceIDs.insert(instanceID)
-        return resolvedSub2APIDataSourceInstanceID(
-            for: sourceInstanceID,
-            visitedInstanceIDs: visitedInstanceIDs
-        )
-    }
-
     private func sub2APIReferenceOptions(
         for currentInstanceID: String
     ) -> [DeckKeySub2APIReferenceOption] {
-        let configurationsByInstanceID = activeSub2APIConfigurationsByInstanceID()
-        guard !isSub2APIInstanceReferenced(currentInstanceID, in: configurationsByInstanceID) else {
+        let configurationsByInstanceID = activeSub2APIDataSourceConfigurationsByInstanceID()
+        guard !configurationsByInstanceID.values.contains(where: {
+            $0.dataSourceInstanceID == currentInstanceID
+        }) else {
             return []
         }
 
         return configurationsByInstanceID
             .filter { instanceID, configuration in
                 instanceID != currentInstanceID
-                    && isSub2APICustomReferenceRoot(configuration)
-                    && !sub2APIReferenceChain(
-                        startingAt: instanceID,
-                        contains: currentInstanceID
-                    )
+                    && configuration.dataSourceInstanceID == nil
             }
             .map { instanceID, configuration in
                 DeckKeySub2APIReferenceOption(
                     instanceID: instanceID,
-                    title: "\(configuration.serviceDisplayName) (\(configuration.displayName))"
+                    title: referenceTitle(for: instanceID, fallback: configuration)
                 )
             }
             .sorted { first, second in
@@ -1901,36 +2038,19 @@ nonisolated struct DeckGridInteractionState: Equatable {
             }
     }
 
-    private func isSub2APICustomReferenceRoot(_ configuration: DeckKeySub2APIConfiguration) -> Bool {
-        configuration.dataSourceInstanceID == nil
-    }
-
-    private func isSub2APIInstanceReferenced(
-        _ instanceID: String,
-        in configurationsByInstanceID: [String: DeckKeySub2APIConfiguration]
-    ) -> Bool {
-        configurationsByInstanceID.values.contains { configuration in
-            configuration.dataSourceInstanceID == instanceID
-        }
-    }
-
-    private func sub2APIReferenceChain(
-        startingAt instanceID: String,
-        contains targetInstanceID: String
-    ) -> Bool {
-        var nextInstanceID: String? = instanceID
-        var visitedInstanceIDs: Set<String> = []
-        let configurationsByInstanceID = activeSub2APIConfigurationsByInstanceID()
-
-        while let instanceID = nextInstanceID,
-              visitedInstanceIDs.insert(instanceID).inserted {
-            if instanceID == targetInstanceID {
-                return true
+    private func referenceTitle(
+        for instanceID: String,
+        fallback: Sub2APIDataSourceConfiguration
+    ) -> String {
+        for page in pages.values {
+            if let configuration = page.configurations.values.first(where: {
+                $0.function == .sub2API
+                    && $0.sub2APIDataSourceConfiguration.instanceID == instanceID
+            }) {
+                return "\(configuration.sub2API.serviceDisplayName) (\(configuration.sub2API.displayName))"
             }
-            nextInstanceID = configurationsByInstanceID[instanceID]?.dataSourceInstanceID
         }
-
-        return false
+        return instanceID.isEmpty ? fallback.baseURL : instanceID
     }
 
     private mutating func normalizeSub2APIInstanceIDs() {
@@ -1954,6 +2074,39 @@ nonisolated struct DeckGridInteractionState: Equatable {
                 } else {
                     configuration.sub2API.instanceID = instanceID
                 }
+                page.configurations[keyID] = configuration
+            }
+            pages[pageID] = page
+        }
+        normalizeSub2APIDataSources()
+    }
+
+    private mutating func normalizeSub2APIDataSources() {
+        let configurationsByInstanceID = activeSub2APIDataSourceConfigurationsByInstanceID()
+        let invalidInstanceIDs = Sub2APIDataSourceGraph.invalidReferenceInstanceIDs(
+            in: configurationsByInstanceID
+        )
+        guard !invalidInstanceIDs.isEmpty else { return }
+
+        for pageID in pages.keys.sorted() {
+            guard var page = pages[pageID] else { continue }
+            for keyID in page.configurations.keys.sorted() {
+                guard var configuration = page.configurations[keyID],
+                      configuration.function == .sub2API,
+                      invalidInstanceIDs.contains(
+                        configuration.sub2APIDataSourceConfiguration.instanceID
+                      ),
+                      configuration.sub2APIDataSourceConfiguration.dataSourceInstanceID != nil
+                else { continue }
+
+                var dataSource = configuration.sub2APIDataSourceConfiguration
+                dataSource.dataSourceInstanceID = nil
+                dataSource.baseURL = ""
+                dataSource.bearerKey = ""
+                dataSource.credentialID = nil
+                configuration.sub2APIDataSourceConfiguration = dataSource
+                configuration.sub2API.lastResult = nil
+                configuration.sub2API.groupListState = .idle
                 page.configurations[keyID] = configuration
             }
             pages[pageID] = page

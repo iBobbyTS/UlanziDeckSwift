@@ -1039,6 +1039,86 @@ nonisolated struct Sub2APIButtonContent: Equatable {
     }
 }
 
+/// 所有 Sub2API 查询接入数据来源图时使用的公共值模型。
+///
+/// `queryKind` 只用于判断刷新间隔是否可以随来源共享；Base URL 和认证信息
+/// 始终从最终来源根解析。凭据明文仅供运行时使用，持久化仍由 Keychain store 负责。
+nonisolated struct Sub2APIDataSourceConfiguration: Codable, Equatable {
+    static let capacityPoolQueryKind = "capacityPool"
+
+    var queryKind: String
+    var instanceID: String
+    var baseURL: String
+    var dataSourceInstanceID: String?
+    var refreshInterval: Int
+    var bearerKey: String
+    var credentialID: String?
+
+    init(
+        queryKind: String,
+        instanceID: String,
+        baseURL: String = "",
+        dataSourceInstanceID: String? = nil,
+        refreshInterval: Int = 30,
+        bearerKey: String = "",
+        credentialID: String? = nil
+    ) {
+        self.queryKind = queryKind
+        self.instanceID = instanceID
+        self.baseURL = baseURL
+        self.dataSourceInstanceID = dataSourceInstanceID
+        self.refreshInterval = refreshInterval
+        self.bearerKey = bearerKey
+        self.credentialID = credentialID
+    }
+
+    var authInfo: Sub2APIAuthInfo? {
+        Sub2APIAuthInfo.parse(from: bearerKey)
+    }
+
+    var effectiveAccessToken: String {
+        authInfo?.accessToken ?? ""
+    }
+
+    var isInvalidJSON: Bool {
+        let trimmed = bearerKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.hasPrefix("{") && authInfo == nil
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case queryKind
+        case instanceID
+        case baseURL
+        case dataSourceInstanceID
+        case refreshInterval
+        case bearerKey
+        case credentialID
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        queryKind = try container.decodeIfPresent(String.self, forKey: .queryKind)
+            ?? Self.capacityPoolQueryKind
+        instanceID = try container.decodeIfPresent(String.self, forKey: .instanceID) ?? UUID().uuidString
+        baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL) ?? ""
+        dataSourceInstanceID = try container.decodeIfPresent(String.self, forKey: .dataSourceInstanceID)
+        refreshInterval = try container.decodeIfPresent(Int.self, forKey: .refreshInterval) ?? 30
+        // 只为旧内存/迁移 payload 读取；新的编码路径永远省略明文。
+        bearerKey = try container.decodeIfPresent(String.self, forKey: .bearerKey) ?? ""
+        credentialID = try container.decodeIfPresent(String.self, forKey: .credentialID)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(queryKind, forKey: .queryKind)
+        try container.encode(instanceID, forKey: .instanceID)
+        try container.encode(baseURL, forKey: .baseURL)
+        try container.encodeIfPresent(dataSourceInstanceID, forKey: .dataSourceInstanceID)
+        try container.encode(refreshInterval, forKey: .refreshInterval)
+        try container.encodeIfPresent(credentialID, forKey: .credentialID)
+    }
+}
+
 nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     var instanceID: String
     var baseURL: String
@@ -1389,6 +1469,33 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         self.mihoyoGame = mihoyoGame
         self.pageFolder = pageFolder
         self.visual = visual
+    }
+
+    /// Deck 上所有 Sub2API 查询配置接入公共来源图和凭据存储的唯一入口。
+    var sub2APIDataSourceConfiguration: Sub2APIDataSourceConfiguration {
+        get {
+            Sub2APIDataSourceConfiguration(
+                queryKind: Sub2APIDataSourceConfiguration.capacityPoolQueryKind,
+                instanceID: sub2API.instanceID,
+                baseURL: sub2API.baseURL,
+                dataSourceInstanceID: sub2API.dataSourceInstanceID,
+                refreshInterval: sub2API.refreshInterval,
+                bearerKey: sub2API.bearerKey,
+                credentialID: sub2API.credentialID
+            )
+        }
+        set {
+            guard newValue.queryKind == Sub2APIDataSourceConfiguration.capacityPoolQueryKind else {
+                return
+            }
+
+            sub2API.instanceID = newValue.instanceID
+            sub2API.baseURL = newValue.baseURL
+            sub2API.dataSourceInstanceID = newValue.dataSourceInstanceID
+            sub2API.refreshInterval = newValue.refreshInterval
+            sub2API.bearerKey = newValue.bearerKey
+            sub2API.credentialID = newValue.credentialID
+        }
     }
 
     init(
