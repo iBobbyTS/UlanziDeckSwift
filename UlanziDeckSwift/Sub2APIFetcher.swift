@@ -194,7 +194,17 @@ nonisolated enum Sub2APIBalanceResult: Equatable {
         if remaining.rounded() == remaining {
             return String(format: "%.0f", locale: Locale(identifier: "en_US_POSIX"), remaining)
         }
-        return String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), remaining)
+        // 先按 JSON 数值的十进制表示做四舍五入，避免 Double 对 12.345 这类值的
+        // 二进制近似让 `String(format:)` 显示为 12.34。
+        var decimal = Decimal(string: String(remaining), locale: Locale(identifier: "en_US_POSIX"))
+            ?? Decimal(remaining)
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &decimal, 2, .plain)
+        return String(
+            format: "%.2f",
+            locale: Locale(identifier: "en_US_POSIX"),
+            NSDecimalNumber(decimal: rounded).doubleValue
+        )
     }
 }
 
