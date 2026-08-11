@@ -303,16 +303,18 @@ extension ContentView {
 
                 VStack(alignment: .leading, spacing: 12) {
                     sub2APIHeader()
-                    sub2APINameParameterRow(
-                        label: "服务名",
-                        placeholder: selectedSub2APIAutomaticServiceName,
-                        text: selectedSub2APIServiceNameBinding
-                    )
-                    sub2APINameParameterRow(
-                        label: "单位",
-                        placeholder: "$",
-                        text: selectedSub2APIBalanceUnitBinding
-                    )
+                    HStack(alignment: .top, spacing: 8) {
+                        sub2APINameParameterRow(
+                            label: "服务名",
+                            placeholder: selectedSub2APIAutomaticServiceName,
+                            text: selectedSub2APIServiceNameBinding
+                        )
+                        sub2APINameParameterRow(
+                            label: "单位",
+                            placeholder: "",
+                            text: selectedSub2APIBalanceUnitBinding
+                        )
+                    }
                 }
                 .frame(maxWidth: 360, alignment: .leading)
 
@@ -1172,7 +1174,7 @@ extension ContentView {
 
     var selectedSub2APIBalanceUnitBinding: Binding<String> {
         Binding(
-            get: { selectedConfiguration?.sub2APIBalance.unit ?? "$" },
+            get: { selectedConfiguration?.sub2APIBalance.unit ?? "" },
             set: { onSub2APIBalanceUnitChange($0) }
         )
     }

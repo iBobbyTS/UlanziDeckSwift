@@ -1166,7 +1166,7 @@ nonisolated struct DeckKeySub2APIBalanceConfiguration: Codable, Equatable {
         bearerKey: String = "",
         credentialID: String? = nil,
         customServiceName: String = "",
-        unit: String = "$",
+        unit: String = "",
         lastResult: Sub2APIBalanceResult? = nil
     ) {
         self.instanceID = instanceID
@@ -1190,7 +1190,7 @@ nonisolated struct DeckKeySub2APIBalanceConfiguration: Codable, Equatable {
 
     var displayUnit: String {
         let trimmed = unit.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "$" : trimmed
+        return trimmed
     }
 
     enum CodingKeys: CodingKey {
@@ -1214,7 +1214,7 @@ nonisolated struct DeckKeySub2APIBalanceConfiguration: Codable, Equatable {
         bearerKey = try container.decodeIfPresent(String.self, forKey: .bearerKey) ?? ""
         credentialID = try container.decodeIfPresent(String.self, forKey: .credentialID)
         customServiceName = try container.decodeIfPresent(String.self, forKey: .customServiceName) ?? ""
-        unit = try container.decodeIfPresent(String.self, forKey: .unit) ?? "$"
+        unit = try container.decodeIfPresent(String.self, forKey: .unit) ?? ""
         lastResult = nil
     }
 

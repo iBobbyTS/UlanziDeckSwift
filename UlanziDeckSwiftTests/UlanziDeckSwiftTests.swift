@@ -3474,6 +3474,12 @@ struct UlanziDeckSwiftTests {
         #expect(display.sub2APIButtonContent?.availableConcurrencyText == "¥42.33")
     }
 
+    @Test func sub2APIBalanceUnitDefaultsToEmptyWithoutCurrencyFallback() throws {
+        let configuration = DeckKeySub2APIBalanceConfiguration()
+        #expect(configuration.unit.isEmpty)
+        #expect(configuration.displayUnit.isEmpty)
+    }
+
     @MainActor
     @Test func sub2APIBalanceAutomaticallyRefreshesAtItsOwnInterval() async throws {
         let fetcher = FakeSub2APIFetcher(
