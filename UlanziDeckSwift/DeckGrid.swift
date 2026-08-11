@@ -233,7 +233,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 let isFailure: Bool
                 if let result = balance.lastResult,
                    let formattedValue = result.displayValue {
-                    valueText = "\(balance.displayUnit) \(formattedValue)"
+                    valueText = "\(balance.displayUnit)\(formattedValue)"
                     isFailure = false
                 } else if balance.lastResult != nil {
                     valueText = "失败"

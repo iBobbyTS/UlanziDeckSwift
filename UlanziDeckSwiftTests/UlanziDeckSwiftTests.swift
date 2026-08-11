@@ -3447,6 +3447,16 @@ struct UlanziDeckSwiftTests {
         #expect(display.sub2APIButtonContent?.availableConcurrencyText == "失败")
     }
 
+    @Test func sub2APIBalanceJoinsCurrencyAndValueWithoutSpace() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIBalance, to: 3)
+        _ = state.setSub2APIBalanceUnit("¥", for: 3)
+        _ = state.setSub2APIBalanceLastResult(.success(remaining: 42.33), for: 3)
+
+        let display = try #require(state.displays(for: .h200Prototype).first(where: { $0.id == 3 }))
+        #expect(display.sub2APIButtonContent?.availableConcurrencyText == "¥42.33")
+    }
+
     @MainActor
     @Test func sub2APIBalanceAutomaticallyRefreshesAtItsOwnInterval() async throws {
         let fetcher = FakeSub2APIFetcher(
