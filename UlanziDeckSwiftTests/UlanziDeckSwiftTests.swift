@@ -3278,29 +3278,48 @@ struct UlanziDeckSwiftTests {
         #expect(expiredTokenResponse.data == nil)
     }
 
-    @Test func sub2APIBalanceFetcherParsesSupportedShapesAndFormatsValues() async throws {
-        let remainingURL = try #require(URL(string: "https://api.example.com/remaining/v1/usage"))
-        let quotaURL = try #require(URL(string: "https://api.example.com/quota/v1/usage"))
-        let balanceURL = try #require(URL(string: "https://api.example.com/v1/usage"))
+    @Test func sub2APIBalanceFetcherParsesAuthMeBalanceAndFormatsValues() async throws {
+        let integerURL = try #require(URL(string: "https://api.example.com/integer/api/v1/auth/me"))
+        let decimalURL = try #require(URL(string: "https://api.example.com/decimal/api/v1/auth/me"))
+        let invalidURL = try #require(URL(string: "https://api.example.com/invalid/api/v1/auth/me"))
+        let malformedURL = try #require(URL(string: "https://api.example.com/malformed/api/v1/auth/me"))
         WebPageMetadataURLProtocol.setStubs([
-            remainingURL: .init(statusCode: 200, mimeType: "application/json", data: Data(#"{"remaining":12}"#.utf8)),
-            quotaURL: .init(statusCode: 200, mimeType: "application/json", data: Data(#"{"quota":{"remaining":"3.456"}}"#.utf8)),
-            balanceURL: .init(statusCode: 200, mimeType: "application/json", data: Data(#"{"balance":7.5}"#.utf8)),
+            integerURL: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"code":0,"message":"success","data":{"balance":12}}"#.utf8)
+            ),
+            decimalURL: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"code":0,"message":"success","data":{"balance":"3.456"}}"#.utf8)
+            ),
+            invalidURL: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"code":"INVALID_TOKEN","message":"Invalid token","data":{"balance":99}}"#.utf8)
+            ),
+            malformedURL: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"code":0,"message":"success","data":{"balance":true}}"#.utf8)
+            ),
         ])
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [WebPageMetadataURLProtocol.self]
         let fetcher = Sub2APIFetcher(urlSession: URLSession(configuration: configuration))
 
-        let remaining = await fetcher.fetchBalance(baseURL: "api.example.com/remaining", bearerKey: "token")
-        let quota = await fetcher.fetchBalance(baseURL: "api.example.com/quota", bearerKey: "token")
-        let balance = await fetcher.fetchBalance(baseURL: "api.example.com/v1", bearerKey: "token")
+        let integer = await fetcher.fetchBalance(baseURL: "api.example.com/integer", bearerKey: "token")
+        let decimal = await fetcher.fetchBalance(baseURL: "api.example.com/decimal", bearerKey: "token")
+        let invalid = await fetcher.fetchBalance(baseURL: "api.example.com/invalid", bearerKey: "token")
+        let malformed = await fetcher.fetchBalance(baseURL: "api.example.com/malformed", bearerKey: "token")
 
-        #expect(remaining == .success(remaining: 12))
-        #expect(remaining.displayValue == "12")
-        #expect(quota == .success(remaining: 3.456))
-        #expect(quota.displayValue == "3.46")
-        #expect(balance == .success(remaining: 7.5))
-        #expect(balance.displayValue == "7.50")
+        #expect(integer == .success(remaining: 12))
+        #expect(integer.displayValue == "12")
+        #expect(decimal == .success(remaining: 3.456))
+        #expect(decimal.displayValue == "3.46")
+        #expect(invalid == .invalidToken)
+        #expect(malformed == .networkError("响应缺少有效余额"))
         #expect(WebPageMetadataURLProtocol.receivedRequests.allSatisfy {
             $0.value(forHTTPHeaderField: "Authorization") == "Bearer token"
         })

@@ -235,7 +235,7 @@ nonisolated struct Sub2APIBaseURL: Equatable {
         "auth",
         "refresh",
     ]
-    private static let usagePathComponents = ["v1", "usage"]
+    private static let currentUserPathComponents = ["api", "v1", "auth", "me"]
 
     let url: URL
     let host: String
@@ -282,11 +282,8 @@ nonisolated struct Sub2APIBaseURL: Equatable {
         }
     }
 
-    var usageURL: URL {
-        if url.pathComponents.last?.lowercased() == "v1" {
-            return url.appendingPathComponent("usage")
-        }
-        return Self.usagePathComponents.reduce(url) { partialURL, pathComponent in
+    var currentUserURL: URL {
+        Self.currentUserPathComponents.reduce(url) { partialURL, pathComponent in
             partialURL.appendingPathComponent(pathComponent)
         }
     }
@@ -413,7 +410,7 @@ nonisolated struct Sub2APIFetcher: Sub2APIFetching {
     func fetchBalance(baseURL: String, bearerKey: String) async -> Sub2APIBalanceResult {
         let url: URL
         do {
-            url = try Sub2APIBaseURL(baseURL).usageURL
+            url = try Sub2APIBaseURL(baseURL).currentUserURL
         } catch {
             return .networkError("无效的 Base URL")
         }
@@ -445,10 +442,12 @@ nonisolated struct Sub2APIFetcher: Sub2APIFetching {
         if Self.responseIndicatesInvalidToken(object) {
             return .invalidToken
         }
-        let quota = object["quota"] as? [String: Any]
-        guard let remaining = Self.doubleValue(object["remaining"])
-            ?? Self.doubleValue(quota?["remaining"])
-            ?? Self.doubleValue(object["balance"]),
+        if let code = object["code"], String(describing: code) != "0" {
+            let message = object["message"].map(String.init(describing:)) ?? "余额查询失败"
+            return .networkError(message)
+        }
+        let responseData = object["data"] as? [String: Any]
+        guard let remaining = Self.doubleValue(responseData?["balance"]),
               remaining.isFinite
         else {
             return .networkError("响应缺少有效余额")
@@ -457,7 +456,10 @@ nonisolated struct Sub2APIFetcher: Sub2APIFetching {
     }
 
     private static func doubleValue(_ value: Any?) -> Double? {
-        if let number = value as? NSNumber { return number.doubleValue }
+        if let number = value as? NSNumber {
+            guard CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+            return number.doubleValue
+        }
         if let string = value as? String { return Double(string) }
         return nil
     }
