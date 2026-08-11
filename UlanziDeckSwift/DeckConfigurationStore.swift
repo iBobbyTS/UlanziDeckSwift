@@ -157,8 +157,10 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
     ) {
         let allConfigurations = stored.keys.map(\.configuration)
             + stored.pages.flatMap { $0.keys.map(\.configuration) }
-        let containsLegacyBearerKey = allConfigurations.contains {
-            !$0.sub2API.bearerKey.isEmpty
+        let containsLegacyBearerKey = allConfigurations.contains { configuration in
+            configuration.allSub2APIDataSourceConfigurations.contains {
+                !$0.bearerKey.isEmpty
+            }
         }
         let containsRecognizableCredential = containsLegacyBearerKey
             || Self.containsRecognizablePlaintextCredential(in: originalData)
@@ -172,23 +174,23 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
             return
         }
 
-        var claimedCredentialIDs = Set(allConfigurations.compactMap { configuration -> String? in
-            guard configuration.sub2API.bearerKey.isEmpty else {
-                return nil
+        var claimedCredentialIDs = Set(allConfigurations.flatMap { configuration in
+            configuration.allSub2APIDataSourceConfigurations.compactMap { dataSource -> String? in
+                guard dataSource.bearerKey.isEmpty else {
+                    return nil
+                }
+                return normalizedCredentialID(dataSource.credentialID)
             }
-            return normalizedCredentialID(configuration.sub2API.credentialID)
         })
 
         func sanitizedKey(_ key: StoredDeckKeyConfiguration) -> StoredDeckKeyConfiguration {
             var configuration = key.configuration
-            if !configuration.sub2API.bearerKey.isEmpty {
-                for var dataSource in configuration.allSub2APIDataSourceConfigurations {
-                    hydrateSub2APICredential(
-                        in: &dataSource,
-                        claimedCredentialIDs: &claimedCredentialIDs
-                    )
-                    configuration.sub2APIDataSourceConfiguration = dataSource
-                }
+            for var dataSource in configuration.allSub2APIDataSourceConfigurations {
+                hydrateSub2APICredential(
+                    in: &dataSource,
+                    claimedCredentialIDs: &claimedCredentialIDs
+                )
+                configuration.sub2APIDataSourceConfiguration = dataSource
             }
             return StoredDeckKeyConfiguration(id: key.id, configuration: configuration)
         }
@@ -209,8 +211,10 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
         persistSanitizedStoredConfiguration(sanitized)
 
         let migratedCredentialIDs = Set(
-            (sanitized.keys + sanitized.pages.flatMap(\.keys)).compactMap { key in
-                normalizedCredentialID(key.configuration.sub2API.credentialID)
+            (sanitized.keys + sanitized.pages.flatMap(\.keys)).flatMap { key in
+                key.configuration.allSub2APIDataSourceConfigurations.compactMap { dataSource in
+                    normalizedCredentialID(dataSource.credentialID)
+                }
             }
         )
         let previouslyTrackedCredentialIDs = Set(
