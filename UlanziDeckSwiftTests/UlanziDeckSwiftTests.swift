@@ -2534,6 +2534,23 @@ struct UlanziDeckSwiftTests {
         #expect(state.resolvedSub2APIBaseURL(for: 5) == "api.example.com")
     }
 
+    @Test func sub2APICrossQueryKindRefreshIntervalsRemainIndependent() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIBalance, to: 3)
+        _ = state.assign(.sub2API, to: 4)
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        let sourceID = try #require(state.configuration(for: 3)?.sub2APIDataSourceConfiguration.instanceID)
+
+        let assignedSource = state.setSub2APIDataSourceInstanceID(sourceID, for: 4)
+        #expect(assignedSource)
+        #expect(state.canSetSub2APIRefreshInterval(for: 4))
+        let assignedInterval = state.setSub2APIRefreshInterval(75, for: 4)
+        #expect(assignedInterval)
+        #expect(state.sub2APIConfiguration(for: 4).refreshInterval == 75)
+        #expect(state.sub2APIBalanceConfiguration(for: 3).refreshInterval == 30)
+        #expect(state.resolvedSub2APIRefreshInterval(for: 4) == 75)
+    }
+
     @Test func genericSub2APIDataSourceGraphRejectsSameAndCrossKindCycles() {
         let pool = Sub2APIDataSourceConfiguration(
             queryKind: "pool",

@@ -1244,6 +1244,26 @@ nonisolated struct DeckGridInteractionState: Equatable {
         resolvedSub2APIDataSourceValue(for: keyID)?.refreshInterval ?? 30
     }
 
+    func canSetSub2APIRefreshInterval(for keyID: Int) -> Bool {
+        guard let configuration = configurations[keyID],
+              configuration.function.isSub2APIQuery
+        else {
+            return false
+        }
+
+        let consumer = configuration.sub2APIDataSourceConfiguration
+        guard let sourceID = consumer.dataSourceInstanceID else {
+            return true
+        }
+
+        guard let source = activeSub2APIDataSourceConfigurationsByInstanceID()[sourceID] else {
+            return false
+        }
+
+        // 同类查询共享来源的刷新间隔；跨余额/号池查询只共享认证和 Base URL。
+        return source.queryKind != consumer.queryKind
+    }
+
     func sub2APIDataSourceReferenceOptions(for keyID: Int) -> [DeckKeySub2APIReferenceOption] {
         guard configurations[keyID]?.function.isSub2APIQuery == true else {
             return []
@@ -1363,9 +1383,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
     @discardableResult
     mutating func setSub2APIRefreshInterval(_ interval: Int, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function.isSub2APIQuery,
-              configurations[keyID, default: .tallyDefault]
-                .sub2APIDataSourceConfiguration.dataSourceInstanceID == nil
+              canSetSub2APIRefreshInterval(for: keyID)
         else {
             return false
         }

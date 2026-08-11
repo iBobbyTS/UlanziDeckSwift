@@ -393,7 +393,7 @@ extension ContentView {
                 Stepper("刷新间隔", value: selectedSub2APIRefreshIntervalBinding, in: 5...3600)
                     .labelsHidden()
             }
-            .disabled(selectedSub2APIDataSourceInstanceID != nil)
+            .disabled(!canEditSelectedSub2APIRefreshInterval)
         }
 
         Divider()
@@ -1083,6 +1083,13 @@ extension ContentView {
                 onSub2APIRefreshIntervalChange(interval)
             }
         )
+    }
+
+    var canEditSelectedSub2APIRefreshInterval: Bool {
+        guard let selectedKeyID = interactionState.selectedKeyID else {
+            return false
+        }
+        return interactionState.canSetSub2APIRefreshInterval(for: selectedKeyID)
     }
 
     var selectedCodexUsageRefreshIntervalMinutesBinding: Binding<Int> {
