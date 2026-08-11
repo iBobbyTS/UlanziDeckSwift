@@ -3427,6 +3427,194 @@ struct UlanziDeckSwiftTests {
         #expect(store.savedStates.last?.sub2APIDailyCostConfiguration(for: 3).timezone == .standard)
     }
 
+    @MainActor
+    @Test func sub2APIQueryKindsShareSourceButRequestAndKeepIntervalsIndependently() async throws {
+        let item = Self.sub2APICapacityItem(groupID: 10, groupName: "号池", availableConcurrency: 8)
+        let fetcher = FakeSub2APIFetcher(
+            results: [.success(item: item)],
+            groupListResults: [.success(items: [item])],
+            balanceResults: [.success(remaining: 9)],
+            dailyCostResults: [.success(actualCost: 3)]
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2API, to: 3)
+        _ = state.assign(.sub2APIBalance, to: 4)
+        _ = state.assign(.sub2APIDailyCost, to: 5)
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        _ = state.setSub2APITargetGroupID(10, for: 3)
+        _ = state.setSub2APIRefreshInterval(5, for: 3)
+        _ = state.setSub2APIRefreshInterval(10, for: 4)
+        _ = state.setSub2APIRefreshInterval(15, for: 5)
+        let sourceID = state.configuration(for: 3)?.sub2APIDataSourceConfiguration.instanceID
+        _ = state.setSub2APIDataSourceInstanceID(sourceID, for: 4)
+        _ = state.setSub2APIDataSourceInstanceID(sourceID, for: 5)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: state),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 1_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+                && fetcher.balanceRequests.count == 1
+                && fetcher.dailyCostRequests.count == 1
+        }
+
+        #expect(model.interactionState.resolvedSub2APIDataSourceInstanceID(for: 3) == sourceID)
+        #expect(model.interactionState.resolvedSub2APIDataSourceInstanceID(for: 4) == sourceID)
+        #expect(model.interactionState.resolvedSub2APIDataSourceInstanceID(for: 5) == sourceID)
+        #expect(model.interactionState.resolvedSub2APIRefreshInterval(for: 3) == 5)
+        #expect(model.interactionState.resolvedSub2APIRefreshInterval(for: 4) == 10)
+        #expect(model.interactionState.resolvedSub2APIRefreshInterval(for: 5) == 15)
+    }
+
+    @MainActor
+    @Test func physicalButtonPressRefreshesSub2APIDailyCost() async throws {
+        let fetcher = FakeSub2APIFetcher(dailyCostResults: [
+            .success(actualCost: 1),
+            .success(actualCost: 2),
+        ])
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIDailyCost, to: 3)
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: state),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 1_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult
+                == .success(actualCost: 1)
+        }
+        syncer.emitInput(H200InputEvent(state: 1, index: 2, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 2, type: .button, action: .release))
+
+        try await Self.waitUntil {
+            fetcher.dailyCostRequests.count == 2
+                && model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult
+                    == .success(actualCost: 2)
+        }
+    }
+
+    @MainActor
+    @Test func sub2APIDailyCostAutomaticallyRefreshesAtItsOwnInterval() async throws {
+        let fetcher = FakeSub2APIFetcher(
+            dailyCostResults: [.success(actualCost: 1), .success(actualCost: 2)]
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIDailyCost, to: 3)
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        _ = state.setSub2APIRefreshInterval(5, for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: state),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 0.01
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.dailyCostRequests.count >= 2
+                && model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult
+                    == .success(actualCost: 2)
+        }
+    }
+
+    @MainActor
+    @Test func sub2APIDailyCostRefreshesExpiringTokenAndPersistsRotation() async throws {
+        let expiringAuth = Sub2APIAuthInfo(
+            accessToken: "expired-access",
+            refreshToken: "source-refresh",
+            tokenExpiresAt: 0
+        )
+        let refreshedAuth = Sub2APIAuthInfo(
+            accessToken: "refreshed-access",
+            refreshToken: "rotated-refresh",
+            tokenExpiresAt: 4_102_444_800_000
+        )
+        let fetcher = FakeSub2APIFetcher(
+            dailyCostResults: [.success(actualCost: 4)],
+            refreshResults: [refreshedAuth]
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIDailyCost, to: 3)
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIBearerKey(try #require(expiringAuth.jsonString()), for: 3)
+        let store = FakeDeckConfigurationStore(loadedState: state)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: store,
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 1_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult
+                == .success(actualCost: 4)
+        }
+
+        #expect(fetcher.refreshRequests == [
+            .init(baseURL: "api.example.com", refreshToken: "source-refresh"),
+        ])
+        #expect(fetcher.dailyCostRequests.first?.bearerKey == "refreshed-access")
+        #expect(Sub2APIAuthInfo.parse(
+            from: model.interactionState.sub2APIDailyCostConfiguration(for: 3).bearerKey
+        ) == refreshedAuth)
+        #expect(Sub2APIAuthInfo.parse(
+            from: store.savedStates.last?.sub2APIDailyCostConfiguration(for: 3).bearerKey ?? ""
+        ) == refreshedAuth)
+    }
+
+    @MainActor
+    @Test func localTimezoneChangeDuringDailyCostRequestRefetchesWithoutStaleWriteOrLock() async throws {
+        var localTimezoneID = "America/Edmonton"
+        let fetcher = FakeSub2APIFetcher(
+            dailyCostResults: [.success(actualCost: 99), .success(actualCost: 7)],
+            dailyCostFetchDelaySequenceNanoseconds: [150_000_000, nil]
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIDailyCost, to: 3)
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: state),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 1_000,
+            sub2APILocalTimezoneIDResolver: { localTimezoneID }
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil { fetcher.dailyCostRequests.count == 1 }
+        localTimezoneID = "Asia/Shanghai"
+
+        try await Self.waitUntil {
+            fetcher.dailyCostRequests.count == 2
+                && model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult
+                    == .success(actualCost: 7)
+        }
+        #expect(fetcher.dailyCostRequests.map(\.timezoneID) == [
+            "America/Edmonton",
+            "Asia/Shanghai",
+        ])
+        #expect(model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult != .success(actualCost: 99))
+    }
+
     @Test func sub2APIBalanceFetcherParsesAuthMeBalanceAndFormatsValues() async throws {
         let integerURL = try #require(URL(string: "https://api.example.com/integer/api/v1/auth/me"))
         let decimalURL = try #require(URL(string: "https://api.example.com/decimal/api/v1/auth/me"))

@@ -70,6 +70,7 @@ final class H200ConnectionModel: ObservableObject {
     private var sub2APIDailyCostTimers: [RuntimeInstanceID: Timer] = [:]
     private var sub2APIDailyCostNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var sub2APIDailyCostFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
+    private var sub2APIDailyCostRequestIDs: [RuntimeInstanceID: UUID] = [:]
     private var sub2APIDailyCostTokenPausedInstances: Set<RuntimeInstanceID> = []
     private var sub2APIAuthRefreshTasks: [String: Task<Sub2APIAuthInfo?, Never>] = [:]
     private var codexUsageTimers: [RuntimeInstanceID: Timer] = [:]
@@ -85,6 +86,7 @@ final class H200ConnectionModel: ObservableObject {
     private let sub2APIGroupListMinimumIntervalNanoseconds: UInt64
     private let codexUsageRefreshMinuteDuration: TimeInterval
     private let mihoyoGameRefreshMinuteDuration: TimeInterval
+    private let sub2APILocalTimezoneIDResolver: () -> String
 
     private struct BrightnessUpdateRequest {
         let percent: Int
@@ -118,7 +120,8 @@ final class H200ConnectionModel: ObservableObject {
         mihoyoGameRefreshMinuteDuration: TimeInterval = 60,
         pageFolderAutoReturnDurationNanoseconds: UInt64 = 30_000_000_000,
         builtInDisplayBrightnessMonitor: BuiltInDisplayBrightnessMonitor? = nil,
-        nightShiftMonitor: NightShiftMonitor? = nil
+        nightShiftMonitor: NightShiftMonitor? = nil,
+        sub2APILocalTimezoneIDResolver: @escaping () -> String = { TimeZone.current.identifier }
     ) {
         self.discovery = discovery
         self.syncer = syncer
@@ -144,6 +147,7 @@ final class H200ConnectionModel: ObservableObject {
         self.sub2APIGroupListMinimumIntervalNanoseconds = sub2APIGroupListMinimumIntervalNanoseconds
         self.codexUsageRefreshMinuteDuration = codexUsageRefreshMinuteDuration
         self.mihoyoGameRefreshMinuteDuration = mihoyoGameRefreshMinuteDuration
+        self.sub2APILocalTimezoneIDResolver = sub2APILocalTimezoneIDResolver
         interactionState = configurationStore.loadInteractionState(for: layout) ?? DeckGridInteractionState(layout: layout)
         let loadedBrightnessPercent = configurationStore.loadBrightnessPercent()
         hasPersistedBrightnessPercent = loadedBrightnessPercent != nil
@@ -2856,8 +2860,16 @@ final class H200ConnectionModel: ObservableObject {
             dataSource.baseURL,
             dataSource.bearerKey,
             dataSource.refreshInterval,
-            interactionState.sub2APIDailyCostConfiguration(for: slot.keyID).timezone.effectiveTimezoneID
+            resolveSub2APIDailyCostTimezoneID(
+                interactionState.sub2APIDailyCostConfiguration(for: slot.keyID).timezone
+            )
         )
+    }
+
+    private func resolveSub2APIDailyCostTimezoneID(
+        _ timezone: Sub2APIDailyCostTimezone
+    ) -> String {
+        timezone == .local ? sub2APILocalTimezoneIDResolver() : timezone.effectiveTimezoneID
     }
 
     private func sub2APIDailyCostConsumerInstanceIDs(
@@ -2870,8 +2882,9 @@ final class H200ConnectionModel: ObservableObject {
                   interactionState.configuration(for: slot.keyID)?.function == .sub2APIDailyCost,
                   interactionState.resolvedSub2APIDataSourceInstanceID(for: slot.keyID)
                     == dataSourceInstanceID,
-                  interactionState.sub2APIDailyCostConfiguration(for: slot.keyID)
-                    .timezone.effectiveTimezoneID == timezoneID
+                  resolveSub2APIDailyCostTimezoneID(
+                    interactionState.sub2APIDailyCostConfiguration(for: slot.keyID).timezone
+                  ) == timezoneID
             else { return nil }
             return instanceID
         }
@@ -2933,7 +2946,9 @@ final class H200ConnectionModel: ObservableObject {
         let baseURL = resolved.baseURL
         let bearerKey = resolved.bearerKey
         let timezoneID = resolved.timezoneID
+        let requestID = UUID()
         let fetcher = sub2APIFetcher
+        sub2APIDailyCostRequestIDs[leaderInstanceID] = requestID
         sub2APIDailyCostFetchTasks[leaderInstanceID] = Task { @MainActor [weak self] in
             var effectiveToken = resolved.dataSource.effectiveAccessToken
             var expectedBearerKey = bearerKey
@@ -2947,7 +2962,8 @@ final class H200ConnectionModel: ObservableObject {
                     dataSourceInstanceID: dataSourceInstanceID,
                     timezoneID: timezoneID,
                     baseURL: baseURL,
-                    expectedBearerKey: expectedBearerKey
+                    expectedBearerKey: expectedBearerKey,
+                    requestID: requestID
                 )
                 return
             }
@@ -2982,7 +2998,8 @@ final class H200ConnectionModel: ObservableObject {
                 dataSourceInstanceID: dataSourceInstanceID,
                 timezoneID: timezoneID,
                 baseURL: baseURL,
-                expectedBearerKey: expectedBearerKey
+                expectedBearerKey: expectedBearerKey,
+                requestID: requestID
             )
         }
     }
@@ -2994,17 +3011,23 @@ final class H200ConnectionModel: ObservableObject {
         dataSourceInstanceID: String,
         timezoneID: String,
         baseURL: String,
-        expectedBearerKey: String
+        expectedBearerKey: String,
+        requestID: UUID
     ) {
+        guard sub2APIDailyCostRequestIDs[leaderInstanceID] == requestID else { return }
+        sub2APIDailyCostRequestIDs[leaderInstanceID] = nil
+        sub2APIDailyCostFetchTasks[leaderInstanceID] = nil
         guard let latestLeader = resolveCurrentSub2APIDailyCostSlot(for: leaderInstanceID),
               latestLeader.slot.pageID == pageID,
               latestLeader.dataSourceInstanceID == dataSourceInstanceID,
-              latestLeader.timezoneID == timezoneID,
               latestLeader.baseURL == baseURL,
               latestLeader.bearerKey == expectedBearerKey
         else { return }
+        guard latestLeader.timezoneID == timezoneID else {
+            fetchSub2APIDailyCost(for: leaderInstanceID)
+            return
+        }
 
-        sub2APIDailyCostFetchTasks[leaderInstanceID] = nil
         var keyIDs: Set<Int> = []
         let consumers = sub2APIDailyCostConsumerInstanceIDs(
             for: dataSourceInstanceID,
