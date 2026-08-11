@@ -127,6 +127,12 @@ struct RootView: View {
             onSub2APIBalanceUnitChange: { unit in
                 connectionModel.setSelectedSub2APIBalanceUnit(unit)
             },
+            onSub2APIDailyCostUnitChange: { unit in
+                connectionModel.setSelectedSub2APIDailyCostUnit(unit)
+            },
+            onSub2APIDailyCostTimezoneChange: { timezone in
+                connectionModel.setSelectedSub2APIDailyCostTimezone(timezone)
+            },
             onMihoyoQRCodeLoginRequest: {
                 connectionModel.beginMihoyoQRCodeLogin()
             },

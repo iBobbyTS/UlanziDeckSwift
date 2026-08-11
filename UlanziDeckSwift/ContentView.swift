@@ -76,6 +76,8 @@ struct ContentView: View {
     let onSub2APIServiceNameChange: (String) -> Void
     let onSub2APIGroupNameChange: (String) -> Void
     let onSub2APIBalanceUnitChange: (String) -> Void
+    let onSub2APIDailyCostUnitChange: (String) -> Void
+    let onSub2APIDailyCostTimezoneChange: (Sub2APIDailyCostTimezone) -> Void
     let onMihoyoQRCodeLoginRequest: () -> Void
     let onMihoyoGameRefreshIntervalChange: (Int) -> Void
     let onMihoyoGameStatusRefresh: () -> Void
@@ -914,6 +916,8 @@ struct MihoyoQRCodeView: View {
         onSub2APIServiceNameChange: { _ in },
         onSub2APIGroupNameChange: { _ in },
         onSub2APIBalanceUnitChange: { _ in },
+        onSub2APIDailyCostUnitChange: { _ in },
+        onSub2APIDailyCostTimezoneChange: { _ in },
         onMihoyoQRCodeLoginRequest: {},
         onMihoyoGameRefreshIntervalChange: { _ in },
         onMihoyoGameStatusRefresh: {}

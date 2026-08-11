@@ -321,6 +321,44 @@ extension ContentView {
                 Spacer()
             }
 
+        case .sub2APIDailyCost:
+            HStack(alignment: .top, spacing: 28) {
+                functionParameterColumn(for: configuration)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    sub2APIHeader()
+                    HStack(alignment: .top, spacing: 8) {
+                        sub2APINameParameterRow(
+                            label: "服务名",
+                            placeholder: selectedSub2APIAutomaticServiceName,
+                            text: selectedSub2APIServiceNameBinding
+                        )
+                        sub2APINameParameterRow(
+                            label: "单位",
+                            placeholder: "",
+                            text: selectedSub2APIDailyCostUnitBinding
+                        )
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("时区")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Picker("时区", selection: selectedSub2APIDailyCostTimezoneBinding) {
+                            ForEach(Sub2APIDailyCostTimezone.allCases) { timezone in
+                                Text(timezone.title).tag(timezone)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .frame(maxWidth: 360, alignment: .leading)
+
+                Spacer()
+            }
+
         case .codexUsage:
             codexUsageParameterContent(for: configuration)
 
@@ -736,7 +774,7 @@ extension ContentView {
             FunctionSection(
                 title: "网站",
                 systemImageName: "globe",
-                functions: [.openWebPage, .sub2API, .sub2APIBalance, .codexUsage]
+                functions: [.openWebPage, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .codexUsage]
             ),
             FunctionSection(
                 title: "游戏",
@@ -1014,9 +1052,14 @@ extension ContentView {
 
     var selectedSub2APIAutomaticServiceName: String {
         guard let configuration = selectedConfiguration else { return "Sub2API" }
-        return configuration.function == .sub2APIBalance
-            ? configuration.sub2APIBalance.serviceDisplayName
-            : configuration.sub2API.automaticServiceDisplayName
+        switch configuration.function {
+        case .sub2APIBalance:
+            return configuration.sub2APIBalance.serviceDisplayName
+        case .sub2APIDailyCost:
+            return configuration.sub2APIDailyCost.serviceDisplayName
+        default:
+            return configuration.sub2API.automaticServiceDisplayName
+        }
     }
 
     var selectedSub2APIAutomaticGroupName: String {
@@ -1027,9 +1070,11 @@ extension ContentView {
         Binding(
             get: {
                 guard let configuration = selectedConfiguration else { return "" }
-                return configuration.function == .sub2APIBalance
-                    ? configuration.sub2APIBalance.customServiceName
-                    : configuration.sub2API.customServiceName
+                switch configuration.function {
+                case .sub2APIBalance: return configuration.sub2APIBalance.customServiceName
+                case .sub2APIDailyCost: return configuration.sub2APIDailyCost.customServiceName
+                default: return configuration.sub2API.customServiceName
+                }
             },
             set: { serviceName in
                 onSub2APIServiceNameChange(serviceName)
@@ -1176,6 +1221,20 @@ extension ContentView {
         Binding(
             get: { selectedConfiguration?.sub2APIBalance.unit ?? "" },
             set: { onSub2APIBalanceUnitChange($0) }
+        )
+    }
+
+    var selectedSub2APIDailyCostUnitBinding: Binding<String> {
+        Binding(
+            get: { selectedConfiguration?.sub2APIDailyCost.unit ?? "" },
+            set: { onSub2APIDailyCostUnitChange($0) }
+        )
+    }
+
+    var selectedSub2APIDailyCostTimezoneBinding: Binding<Sub2APIDailyCostTimezone> {
+        Binding(
+            get: { selectedConfiguration?.sub2APIDailyCost.timezone ?? .local },
+            set: { onSub2APIDailyCostTimezoneChange($0) }
         )
     }
 

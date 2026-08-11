@@ -208,6 +208,29 @@ nonisolated enum Sub2APIBalanceResult: Equatable {
     }
 }
 
+nonisolated enum Sub2APIDailyCostResult: Equatable {
+    case success(actualCost: Double)
+    case invalidToken
+    case tokenExpired
+    case networkError(String)
+
+    var displayValue: String? {
+        guard case let .success(actualCost) = self else { return nil }
+        if actualCost.rounded() == actualCost {
+            return String(format: "%.0f", locale: Locale(identifier: "en_US_POSIX"), actualCost)
+        }
+        var decimal = Decimal(string: String(actualCost), locale: Locale(identifier: "en_US_POSIX"))
+            ?? Decimal(actualCost)
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &decimal, 2, .plain)
+        return String(
+            format: "%.2f",
+            locale: Locale(identifier: "en_US_POSIX"),
+            NSDecimalNumber(decimal: rounded).doubleValue
+        )
+    }
+}
+
 private nonisolated struct Sub2APIFetchError: Error {
     let message: String
     let isUnauthorized: Bool
@@ -236,6 +259,7 @@ nonisolated struct Sub2APIBaseURL: Equatable {
         "refresh",
     ]
     private static let currentUserPathComponents = ["api", "v1", "auth", "me"]
+    private static let dailyCostPathComponents = ["api", "v1", "usage", "dashboard", "stats"]
 
     let url: URL
     let host: String
@@ -288,6 +312,22 @@ nonisolated struct Sub2APIBaseURL: Equatable {
         }
     }
 
+    func dailyCostURL(timezoneID: String) throws -> URL {
+        let endpoint = Self.dailyCostPathComponents.reduce(url) { partialURL, pathComponent in
+            partialURL.appendingPathComponent(pathComponent)
+        }
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        guard let encodedTimezone = timezoneID.addingPercentEncoding(withAllowedCharacters: allowed),
+              var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
+        else {
+            throw Sub2APIBaseURLError.invalid
+        }
+        components.percentEncodedQuery = "timezone=\(encodedTimezone)"
+        guard let result = components.url else { throw Sub2APIBaseURLError.invalid }
+        return result
+    }
+
     private static func normalizedPath(_ path: String) -> String {
         guard path != "/" else {
             return ""
@@ -332,6 +372,7 @@ nonisolated protocol Sub2APIFetching: Sendable {
     func fetchCapacitySummary(baseURL: String, targetGroupID: Int, bearerKey: String) async -> Sub2APICapacityResult
     func fetchCapacityGroups(baseURL: String, bearerKey: String) async -> Sub2APIGroupListResult
     func fetchBalance(baseURL: String, bearerKey: String) async -> Sub2APIBalanceResult
+    func fetchDailyCost(baseURL: String, timezoneID: String, bearerKey: String) async -> Sub2APIDailyCostResult
     func refreshBearerToken(baseURL: String, refreshToken: String) async -> Sub2APIAuthInfo?
 }
 
@@ -453,6 +494,51 @@ nonisolated struct Sub2APIFetcher: Sub2APIFetching {
             return .networkError("响应缺少有效余额")
         }
         return .success(remaining: remaining)
+    }
+
+    func fetchDailyCost(
+        baseURL: String,
+        timezoneID: String,
+        bearerKey: String
+    ) async -> Sub2APIDailyCostResult {
+        let url: URL
+        do {
+            url = try Sub2APIBaseURL(baseURL).dailyCostURL(timezoneID: timezoneID)
+        } catch {
+            return .networkError("无效的 Base URL")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(bearerKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = timeoutSeconds
+
+        let data: Data
+        do {
+            data = try await AuthenticatedHTTPResponseLoader.data(for: request, urlSession: urlSession)
+        } catch AuthenticatedHTTPResponseError.unauthorized {
+            return .invalidToken
+        } catch {
+            return .networkError(error.localizedDescription)
+        }
+
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .networkError("解析响应失败")
+        }
+        if Self.responseIndicatesTokenExpired(object) { return .tokenExpired }
+        if Self.responseIndicatesInvalidToken(object) { return .invalidToken }
+        if let code = object["code"], String(describing: code) != "0" {
+            let message = object["message"].map(String.init(describing:)) ?? "今日消费查询失败"
+            return .networkError(message)
+        }
+        let responseData = object["data"] as? [String: Any]
+        guard let actualCost = Self.doubleValue(responseData?["today_actual_cost"]),
+              actualCost.isFinite
+        else {
+            return .networkError("响应缺少有效今日消费")
+        }
+        return .success(actualCost: actualCost)
     }
 
     private static func doubleValue(_ value: Any?) -> Double? {

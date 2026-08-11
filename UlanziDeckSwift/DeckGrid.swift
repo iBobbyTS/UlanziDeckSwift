@@ -251,6 +251,26 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 title = configuration.visual.displayName(fallback: valueText)
                 subtitle = "\(content.serviceName) 余额"
                 sub2APIButtonContent = content
+            case .sub2APIDailyCost:
+                let dailyCost = configuration.sub2APIDailyCost
+                let valueText: String
+                let isFailure: Bool
+                if let formattedValue = dailyCost.lastResult?.displayValue {
+                    valueText = "\(dailyCost.displayUnit)\(formattedValue)"
+                    isFailure = false
+                } else {
+                    valueText = "失败"
+                    isFailure = true
+                }
+                let content = Sub2APIButtonContent(
+                    serviceName: dailyCost.serviceDisplayName,
+                    label: "今日消费",
+                    valueText: valueText,
+                    isFailure: isFailure
+                )
+                title = configuration.visual.displayName(fallback: valueText)
+                subtitle = "\(content.serviceName) 今日消费"
+                sub2APIButtonContent = content
             case .codexUsage:
                 switch configuration.codexUsage.lastResult {
                 case let .success(quota):
@@ -1185,6 +1205,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations[keyID, default: .tallyDefault].sub2APIBalance
     }
 
+    func sub2APIDailyCostConfiguration(for keyID: Int) -> DeckKeySub2APIDailyCostConfiguration {
+        configurations[keyID, default: .tallyDefault].sub2APIDailyCost
+    }
+
     func codexUsageConfiguration(for keyID: Int) -> DeckKeyCodexUsageConfiguration {
         configurations[keyID, default: .tallyDefault].codexUsage
     }
@@ -1454,8 +1478,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
                     if configuration.function == .sub2API {
                         configuration.sub2API.groupListState = .idle
                         configuration.sub2API.lastResult = nil
-                    } else {
+                    } else if configuration.function == .sub2APIBalance {
                         configuration.sub2APIBalance.lastResult = nil
+                    } else {
+                        configuration.sub2APIDailyCost.lastResult = nil
                     }
                 }
                 if !bearerKey.isEmpty, dataSource.credentialID == nil {
@@ -1579,8 +1605,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         let normalized = serviceName.trimmingCharacters(in: .whitespacesAndNewlines)
         if configurations[keyID, default: .tallyDefault].function == .sub2API {
             configurations[keyID, default: .tallyDefault].sub2API.customServiceName = normalized
-        } else {
+        } else if configurations[keyID, default: .tallyDefault].function == .sub2APIBalance {
             configurations[keyID, default: .tallyDefault].sub2APIBalance.customServiceName = normalized
+        } else {
+            configurations[keyID, default: .tallyDefault].sub2APIDailyCost.customServiceName = normalized
         }
         return true
     }
@@ -1613,12 +1641,60 @@ nonisolated struct DeckGridInteractionState: Equatable {
         return true
     }
 
+    @discardableResult
+    mutating func setSub2APIDailyCostUnit(_ unit: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2APIDailyCost
+        else { return false }
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].sub2APIDailyCost.unit = unit
+        return true
+    }
+
+    @discardableResult
+    mutating func setSub2APIDailyCostTimezone(
+        _ timezone: Sub2APIDailyCostTimezone,
+        for keyID: Int
+    ) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2APIDailyCost,
+              configurations[keyID, default: .tallyDefault].sub2APIDailyCost.timezone != timezone
+        else { return false }
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].sub2APIDailyCost.timezone = timezone
+        configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastResult = nil
+        return true
+    }
+
+    @discardableResult
+    mutating func setSub2APIDailyCostLastResult(
+        _ result: Sub2APIDailyCostResult,
+        for keyID: Int
+    ) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2APIDailyCost
+        else { return false }
+        configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastResult = result
+        return true
+    }
+
+    @discardableResult
+    mutating func clearSub2APIDailyCostRuntimeState(for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastResult != nil
+        else { return false }
+        configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastResult = nil
+        return true
+    }
+
     private mutating func clearSub2APIQueryRuntimeState(for keyID: Int) {
         if configurations[keyID, default: .tallyDefault].function == .sub2API {
             configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
             configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
-        } else {
+        } else if configurations[keyID, default: .tallyDefault].function == .sub2APIBalance {
             configurations[keyID, default: .tallyDefault].sub2APIBalance.lastResult = nil
+        } else {
+            configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastResult = nil
         }
     }
 
@@ -2195,7 +2271,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
                 if configuration.function == .sub2API {
                     return "\(configuration.sub2API.serviceDisplayName) (\(configuration.sub2API.displayName))"
                 }
-                return "\(configuration.sub2APIBalance.serviceDisplayName) (余额)"
+                if configuration.function == .sub2APIBalance {
+                    return "\(configuration.sub2APIBalance.serviceDisplayName) (余额)"
+                }
+                return "\(configuration.sub2APIDailyCost.serviceDisplayName) (今日消费)"
             }
         }
         return instanceID.isEmpty ? fallback.baseURL : instanceID
@@ -2260,8 +2339,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
                 if configuration.function == .sub2API {
                     configuration.sub2API.lastResult = nil
                     configuration.sub2API.groupListState = .idle
-                } else {
+                } else if configuration.function == .sub2APIBalance {
                     configuration.sub2APIBalance.lastResult = nil
+                } else {
+                    configuration.sub2APIDailyCost.lastResult = nil
                 }
                 page.configurations[keyID] = configuration
             }

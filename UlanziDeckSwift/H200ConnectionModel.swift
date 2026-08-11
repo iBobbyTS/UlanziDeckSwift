@@ -67,6 +67,10 @@ final class H200ConnectionModel: ObservableObject {
     private var sub2APIBalanceNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var sub2APIBalanceFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
     private var sub2APIBalanceTokenPausedInstances: Set<RuntimeInstanceID> = []
+    private var sub2APIDailyCostTimers: [RuntimeInstanceID: Timer] = [:]
+    private var sub2APIDailyCostNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
+    private var sub2APIDailyCostFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
+    private var sub2APIDailyCostTokenPausedInstances: Set<RuntimeInstanceID> = []
     private var sub2APIAuthRefreshTasks: [String: Task<Sub2APIAuthInfo?, Never>] = [:]
     private var codexUsageTimers: [RuntimeInstanceID: Timer] = [:]
     private var codexUsageNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
@@ -189,6 +193,8 @@ final class H200ConnectionModel: ObservableObject {
         }
         for timer in sub2APIBalanceTimers.values { timer.invalidate() }
         for task in sub2APIBalanceFetchTasks.values { task.cancel() }
+        for timer in sub2APIDailyCostTimers.values { timer.invalidate() }
+        for task in sub2APIDailyCostFetchTasks.values { task.cancel() }
         for task in sub2APIAuthRefreshTasks.values { task.cancel() }
         for timer in codexUsageTimers.values {
             timer.invalidate()
@@ -489,6 +495,8 @@ final class H200ConnectionModel: ObservableObject {
             fetchSub2API(for: keyID)
         case .refreshSub2APIBalance:
             fetchSub2APIBalance(for: keyID)
+        case .refreshSub2APIDailyCost:
+            fetchSub2APIDailyCost(for: keyID)
         case .refreshCodexUsage:
             fetchCodexUsage(for: keyID)
         case .refreshMihoyoGame:
@@ -538,6 +546,10 @@ final class H200ConnectionModel: ObservableObject {
             if function == .sub2APIBalance {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
                 fetchSub2APIBalance(for: selectedKeyID)
+            }
+            if function == .sub2APIDailyCost {
+                _ = ensureRuntimeInstance(for: selectedKeyID)
+                fetchSub2APIDailyCost(for: selectedKeyID)
             }
             if function == .codexUsage {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
@@ -915,8 +927,10 @@ final class H200ConnectionModel: ObservableObject {
             persistCurrentConfiguration()
             if interactionState.configuration(for: selectedKeyID)?.function == .sub2API {
                 restartSub2APITimerForDataSource(containing: selectedKeyID)
-            } else {
+            } else if interactionState.configuration(for: selectedKeyID)?.function == .sub2APIBalance {
                 restartSub2APIBalanceTimerForDataSource(containing: selectedKeyID)
+            } else {
+                restartSub2APIDailyCostTimerForDataSource(containing: selectedKeyID)
             }
         }
     }
@@ -944,8 +958,10 @@ final class H200ConnectionModel: ObservableObject {
                 _ = persistCurrentConfiguration()
                 if interactionState.configuration(for: selectedKeyID)?.function == .sub2API {
                     interactionState.setSub2APIGroupListState(.networkError(message), for: selectedKeyID)
-                } else {
+                } else if interactionState.configuration(for: selectedKeyID)?.function == .sub2APIBalance {
                     interactionState.setSub2APIBalanceLastResult(.networkError(message), for: selectedKeyID)
+                } else {
+                    interactionState.setSub2APIDailyCostLastResult(.networkError(message), for: selectedKeyID)
                 }
                 return
             }
@@ -1004,6 +1020,42 @@ final class H200ConnectionModel: ObservableObject {
             persistCurrentConfiguration()
             syncKeyDisplay(keyID: selectedKeyID)
         }
+    }
+
+    func setSelectedSub2APIDailyCostUnit(_ unit: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else { return }
+        if interactionState.setSub2APIDailyCostUnit(unit, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: selectedKeyID)
+        }
+    }
+
+    func setSelectedSub2APIDailyCostTimezone(_ timezone: Sub2APIDailyCostTimezone) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              let instanceID = ensureRuntimeInstance(for: selectedKeyID),
+              let previous = resolveCurrentSub2APIDailyCostSlot(for: instanceID)
+        else { return }
+        let previousLeader = sharedSub2APIDailyCostLeaderInstanceID(
+            for: previous.dataSourceInstanceID,
+            timezoneID: previous.timezoneID
+        ) ?? instanceID
+        guard interactionState.setSub2APIDailyCostTimezone(timezone, for: selectedKeyID) else {
+            return
+        }
+        persistCurrentConfiguration()
+        stopSub2APIDailyCostTimer(for: instanceID, preservesNextFire: false)
+        if previousLeader == instanceID {
+            sub2APIDailyCostFetchTasks[previousLeader]?.cancel()
+            sub2APIDailyCostFetchTasks[previousLeader] = nil
+            if let remaining = sub2APIDailyCostConsumerInstanceIDs(
+                for: previous.dataSourceInstanceID,
+                timezoneID: previous.timezoneID
+            ).first {
+                fetchSub2APIDailyCost(for: remaining)
+            }
+        }
+        syncKeyDisplay(keyID: selectedKeyID)
+        fetchSub2APIDailyCost(for: instanceID)
     }
 
     func refreshSelectedSub2APIGroupList() {
@@ -1498,6 +1550,8 @@ final class H200ConnectionModel: ObservableObject {
             _ = interactionState.clearSub2APIRuntimeState(for: slot.keyID)
         case .sub2APIBalance:
             _ = interactionState.clearSub2APIBalanceRuntimeState(for: slot.keyID)
+        case .sub2APIDailyCost:
+            _ = interactionState.clearSub2APIDailyCostRuntimeState(for: slot.keyID)
         case .codexUsage:
             _ = interactionState.clearCodexUsageRuntimeState(for: slot.keyID)
         case .mihoyoGame:
@@ -1533,6 +1587,13 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIBalanceFetchTasks[instanceID]?.cancel()
         sub2APIBalanceFetchTasks[instanceID] = nil
         sub2APIBalanceTokenPausedInstances.remove(instanceID)
+
+        sub2APIDailyCostTimers[instanceID]?.invalidate()
+        sub2APIDailyCostTimers[instanceID] = nil
+        sub2APIDailyCostNextFireNanoseconds[instanceID] = nil
+        sub2APIDailyCostFetchTasks[instanceID]?.cancel()
+        sub2APIDailyCostFetchTasks[instanceID] = nil
+        sub2APIDailyCostTokenPausedInstances.remove(instanceID)
 
         codexUsageTimers[instanceID]?.invalidate()
         codexUsageTimers[instanceID] = nil
@@ -1604,6 +1665,11 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIBalanceFetchTasks[instanceID]?.cancel()
         sub2APIBalanceFetchTasks[instanceID] = nil
 
+        sub2APIDailyCostTimers[instanceID]?.invalidate()
+        sub2APIDailyCostTimers[instanceID] = nil
+        sub2APIDailyCostFetchTasks[instanceID]?.cancel()
+        sub2APIDailyCostFetchTasks[instanceID] = nil
+
         codexUsageTimers[instanceID]?.invalidate()
         codexUsageTimers[instanceID] = nil
         codexUsageFetchTasks[instanceID]?.cancel()
@@ -1647,6 +1713,8 @@ final class H200ConnectionModel: ObservableObject {
             resumeSub2APIRuntime(instanceID)
         case .sub2APIBalance:
             resumeSub2APIBalanceRuntime(instanceID)
+        case .sub2APIDailyCost:
+            resumeSub2APIDailyCostRuntime(instanceID)
         case .codexUsage:
             resumeCodexUsageRuntime(instanceID)
         case .mihoyoGame:
@@ -1660,7 +1728,7 @@ final class H200ConnectionModel: ObservableObject {
         sub2APITokenPausedInstances.contains(instanceID)
     }
 
-    /// 同一来源跨号池和余额端点共用一次 refresh-token 轮换，避免并发刷新使
+    /// 同一来源的 Sub2API 查询端点共用一次 refresh-token 轮换，避免并发刷新使
     /// 先返回的新 refresh token 被第二个旧请求立即作废。
     private func refreshSub2APIAuthentication(
         baseURL: String,
@@ -2761,6 +2829,288 @@ final class H200ConnectionModel: ObservableObject {
         scheduleNextSub2APIBalanceRefresh(for: leader)
     }
 
+    private func resolveCurrentSub2APIDailyCostSlot(
+        for instanceID: RuntimeInstanceID
+    ) -> (
+        slot: RuntimeSlotID,
+        config: DeckKeySub2APIDailyCostConfiguration,
+        dataSource: Sub2APIDataSourceConfiguration,
+        dataSourceInstanceID: String,
+        baseURL: String,
+        bearerKey: String,
+        refreshInterval: Int,
+        timezoneID: String
+    )? {
+        guard let slot = runtimeSlotsByInstance[instanceID],
+              slot.pageID == interactionState.currentPageID,
+              interactionState.configuration(for: slot.keyID)?.displayMode == .function,
+              interactionState.configuration(for: slot.keyID)?.function == .sub2APIDailyCost,
+              let dataSource = interactionState.resolvedSub2APIDataSourceValue(for: slot.keyID)
+        else { return nil }
+
+        return (
+            slot,
+            interactionState.sub2APIDailyCostConfiguration(for: slot.keyID),
+            dataSource,
+            interactionState.resolvedSub2APIDataSourceInstanceID(for: slot.keyID),
+            dataSource.baseURL,
+            dataSource.bearerKey,
+            dataSource.refreshInterval,
+            interactionState.sub2APIDailyCostConfiguration(for: slot.keyID).timezone.effectiveTimezoneID
+        )
+    }
+
+    private func sub2APIDailyCostConsumerInstanceIDs(
+        for dataSourceInstanceID: String,
+        timezoneID: String
+    ) -> [RuntimeInstanceID] {
+        runtimeInstancesBySlot.compactMap { slot, instanceID in
+            guard slot.pageID == interactionState.currentPageID,
+                  interactionState.configuration(for: slot.keyID)?.displayMode == .function,
+                  interactionState.configuration(for: slot.keyID)?.function == .sub2APIDailyCost,
+                  interactionState.resolvedSub2APIDataSourceInstanceID(for: slot.keyID)
+                    == dataSourceInstanceID,
+                  interactionState.sub2APIDailyCostConfiguration(for: slot.keyID)
+                    .timezone.effectiveTimezoneID == timezoneID
+            else { return nil }
+            return instanceID
+        }
+        .sorted { (runtimeSlotsByInstance[$0]?.keyID ?? .max) < (runtimeSlotsByInstance[$1]?.keyID ?? .max) }
+    }
+
+    private func sharedSub2APIDailyCostLeaderInstanceID(
+        for dataSourceInstanceID: String,
+        timezoneID: String
+    ) -> RuntimeInstanceID? {
+        let consumers = sub2APIDailyCostConsumerInstanceIDs(
+            for: dataSourceInstanceID,
+            timezoneID: timezoneID
+        )
+        guard let first = consumers.first else { return nil }
+        let isShared = consumers.count > 1
+            || resolveCurrentSub2APIDailyCostSlot(for: first)?.config.dataSourceInstanceID != nil
+        return isShared ? first : nil
+    }
+
+    private func fetchSub2APIDailyCost(for keyID: Int) {
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else { return }
+        fetchSub2APIDailyCost(for: instanceID)
+    }
+
+    private func fetchSub2APIDailyCost(for instanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              let resolved = resolveCurrentSub2APIDailyCostSlot(for: instanceID),
+              !sub2APIDailyCostTokenPausedInstances.contains(instanceID),
+              !resolved.baseURL.isEmpty,
+              !resolved.bearerKey.isEmpty
+        else { return }
+
+        let leaderInstanceID = sharedSub2APIDailyCostLeaderInstanceID(
+            for: resolved.dataSourceInstanceID,
+            timezoneID: resolved.timezoneID
+        ) ?? instanceID
+        if leaderInstanceID != instanceID {
+            fetchSub2APIDailyCost(for: leaderInstanceID)
+            return
+        }
+        guard sub2APIDailyCostFetchTasks[leaderInstanceID] == nil else { return }
+
+        let consumerInstanceIDs = sub2APIDailyCostConsumerInstanceIDs(
+            for: resolved.dataSourceInstanceID,
+            timezoneID: resolved.timezoneID
+        )
+        let consumers = consumerInstanceIDs.isEmpty ? [instanceID] : consumerInstanceIDs
+        for consumer in consumers {
+            stopSub2APIDailyCostTimer(for: consumer, preservesNextFire: false)
+            if consumer != leaderInstanceID {
+                sub2APIDailyCostFetchTasks[consumer]?.cancel()
+                sub2APIDailyCostFetchTasks[consumer] = nil
+            }
+        }
+
+        let pageID = resolved.slot.pageID
+        let dataSourceInstanceID = resolved.dataSourceInstanceID
+        let baseURL = resolved.baseURL
+        let bearerKey = resolved.bearerKey
+        let timezoneID = resolved.timezoneID
+        let fetcher = sub2APIFetcher
+        sub2APIDailyCostFetchTasks[leaderInstanceID] = Task { @MainActor [weak self] in
+            var effectiveToken = resolved.dataSource.effectiveAccessToken
+            var expectedBearerKey = bearerKey
+            if effectiveToken.isEmpty {
+                let result: Sub2APIDailyCostResult = resolved.dataSource.isInvalidJSON
+                    ? .invalidToken : .networkError("认证信息为空")
+                self?.finishSub2APIDailyCostFetch(
+                    result,
+                    leaderInstanceID: leaderInstanceID,
+                    pageID: pageID,
+                    dataSourceInstanceID: dataSourceInstanceID,
+                    timezoneID: timezoneID,
+                    baseURL: baseURL,
+                    expectedBearerKey: expectedBearerKey
+                )
+                return
+            }
+
+            if let authInfo = resolved.dataSource.authInfo, authInfo.isExpiringSoon,
+               let refreshed = await self?.refreshSub2APIAuthentication(
+                baseURL: baseURL,
+                refreshToken: authInfo.refreshToken,
+                dataSourceInstanceID: dataSourceInstanceID
+               ) {
+                effectiveToken = refreshed.accessToken
+                if let json = refreshed.jsonString() {
+                    self?.interactionState.setSub2APIBearerKey(
+                        json,
+                        forDataSourceInstanceID: dataSourceInstanceID
+                    )
+                    expectedBearerKey = json
+                    _ = self?.persistCurrentConfiguration()
+                }
+            }
+
+            let result = await fetcher.fetchDailyCost(
+                baseURL: baseURL,
+                timezoneID: timezoneID,
+                bearerKey: effectiveToken
+            )
+            guard !Task.isCancelled else { return }
+            self?.finishSub2APIDailyCostFetch(
+                result,
+                leaderInstanceID: leaderInstanceID,
+                pageID: pageID,
+                dataSourceInstanceID: dataSourceInstanceID,
+                timezoneID: timezoneID,
+                baseURL: baseURL,
+                expectedBearerKey: expectedBearerKey
+            )
+        }
+    }
+
+    private func finishSub2APIDailyCostFetch(
+        _ result: Sub2APIDailyCostResult,
+        leaderInstanceID: RuntimeInstanceID,
+        pageID: String,
+        dataSourceInstanceID: String,
+        timezoneID: String,
+        baseURL: String,
+        expectedBearerKey: String
+    ) {
+        guard let latestLeader = resolveCurrentSub2APIDailyCostSlot(for: leaderInstanceID),
+              latestLeader.slot.pageID == pageID,
+              latestLeader.dataSourceInstanceID == dataSourceInstanceID,
+              latestLeader.timezoneID == timezoneID,
+              latestLeader.baseURL == baseURL,
+              latestLeader.bearerKey == expectedBearerKey
+        else { return }
+
+        sub2APIDailyCostFetchTasks[leaderInstanceID] = nil
+        var keyIDs: Set<Int> = []
+        let consumers = sub2APIDailyCostConsumerInstanceIDs(
+            for: dataSourceInstanceID,
+            timezoneID: timezoneID
+        )
+        for consumerInstanceID in consumers.isEmpty ? [leaderInstanceID] : consumers {
+            guard let consumer = resolveCurrentSub2APIDailyCostSlot(for: consumerInstanceID) else { continue }
+            keyIDs.insert(consumer.slot.keyID)
+            interactionState.setSub2APIDailyCostLastResult(result, for: consumer.slot.keyID)
+            if result.isTokenUnavailable {
+                sub2APIDailyCostTokenPausedInstances.insert(consumerInstanceID)
+                stopSub2APIDailyCostTimer(for: consumerInstanceID, preservesNextFire: false)
+            }
+        }
+        syncKeyDisplays(keyIDs: keyIDs)
+        if !result.isTokenUnavailable {
+            scheduleNextSub2APIDailyCostRefresh(for: leaderInstanceID)
+        }
+    }
+
+    private func resumeSub2APIDailyCostRuntime(_ instanceID: RuntimeInstanceID) {
+        guard resolveCurrentSub2APIDailyCostSlot(for: instanceID) != nil,
+              !sub2APIDailyCostTokenPausedInstances.contains(instanceID)
+        else { return }
+        if let nextFire = sub2APIDailyCostNextFireNanoseconds[instanceID] {
+            scheduleSub2APIDailyCostRefresh(for: instanceID, fireAt: nextFire)
+        } else if interactionState.sub2APIDailyCostConfiguration(
+            for: runtimeSlotsByInstance[instanceID]?.keyID ?? -1
+        ).lastResult != nil {
+            scheduleNextSub2APIDailyCostRefresh(for: instanceID)
+        } else {
+            fetchSub2APIDailyCost(for: instanceID)
+        }
+    }
+
+    private func scheduleNextSub2APIDailyCostRefresh(for instanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              let resolved = resolveCurrentSub2APIDailyCostSlot(for: instanceID),
+              !sub2APIDailyCostTokenPausedInstances.contains(instanceID),
+              !resolved.baseURL.isEmpty,
+              !resolved.bearerKey.isEmpty,
+              resolved.refreshInterval >= 5
+        else { return }
+        if let leader = sharedSub2APIDailyCostLeaderInstanceID(
+            for: resolved.dataSourceInstanceID,
+            timezoneID: resolved.timezoneID
+        ),
+           leader != instanceID { return }
+        let interval = UInt64(
+            TimeInterval(resolved.refreshInterval) * sub2APIRefreshSecondDuration * 1_000_000_000
+        )
+        scheduleSub2APIDailyCostRefresh(for: instanceID, fireAt: nowNanoseconds + interval)
+    }
+
+    private func scheduleSub2APIDailyCostRefresh(
+        for instanceID: RuntimeInstanceID,
+        fireAt fireNanoseconds: UInt64
+    ) {
+        stopSub2APIDailyCostTimer(for: instanceID, preservesNextFire: true)
+        guard canRunInternalRefresh,
+              resolveCurrentSub2APIDailyCostSlot(for: instanceID) != nil,
+              !sub2APIDailyCostTokenPausedInstances.contains(instanceID)
+        else { return }
+        sub2APIDailyCostNextFireNanoseconds[instanceID] = fireNanoseconds
+        guard fireNanoseconds > nowNanoseconds else {
+            sub2APIDailyCostNextFireNanoseconds[instanceID] = nil
+            fetchSub2APIDailyCost(for: instanceID)
+            return
+        }
+        let interval = TimeInterval(fireNanoseconds - nowNanoseconds) / 1_000_000_000
+        sub2APIDailyCostTimers[instanceID] = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.sub2APIDailyCostTimers[instanceID] = nil
+                self?.sub2APIDailyCostNextFireNanoseconds[instanceID] = nil
+                self?.fetchSub2APIDailyCost(for: instanceID)
+            }
+        }
+    }
+
+    private func stopSub2APIDailyCostTimer(
+        for instanceID: RuntimeInstanceID,
+        preservesNextFire: Bool
+    ) {
+        sub2APIDailyCostTimers[instanceID]?.invalidate()
+        sub2APIDailyCostTimers[instanceID] = nil
+        if !preservesNextFire { sub2APIDailyCostNextFireNanoseconds[instanceID] = nil }
+    }
+
+    private func restartSub2APIDailyCostTimerForDataSource(containing keyID: Int) {
+        guard let instanceID = ensureRuntimeInstance(for: keyID),
+              let resolved = resolveCurrentSub2APIDailyCostSlot(for: instanceID)
+        else { return }
+        let leader = sharedSub2APIDailyCostLeaderInstanceID(
+            for: resolved.dataSourceInstanceID,
+            timezoneID: resolved.timezoneID
+        )
+            ?? instanceID
+        for consumer in sub2APIDailyCostConsumerInstanceIDs(
+            for: resolved.dataSourceInstanceID,
+            timezoneID: resolved.timezoneID
+        ) {
+            stopSub2APIDailyCostTimer(for: consumer, preservesNextFire: false)
+        }
+        scheduleNextSub2APIDailyCostRefresh(for: leader)
+    }
+
     private func refreshAssignedSub2APIStatuses() {
         guard canRunInternalRefresh else {
             return
@@ -2773,6 +3123,8 @@ final class H200ConnectionModel: ObservableObject {
                 fetchSub2API(for: key.id)
             case .sub2APIBalance:
                 fetchSub2APIBalance(for: key.id)
+            case .sub2APIDailyCost:
+                fetchSub2APIDailyCost(for: key.id)
             default:
                 break
             }
@@ -2823,8 +3175,10 @@ final class H200ConnectionModel: ObservableObject {
             let function = interactionState.configuration(for: keyID)?.function
             if function == .sub2API {
                 _ = interactionState.clearSub2APIRuntimeState(for: keyID)
-            } else {
+            } else if function == .sub2APIBalance {
                 _ = interactionState.clearSub2APIBalanceRuntimeState(for: keyID)
+            } else {
+                _ = interactionState.clearSub2APIDailyCostRuntimeState(for: keyID)
             }
             let previousSignature = previousSignatures[keyID]
             let currentSignature = currentSignatures[keyID]
@@ -2833,8 +3187,11 @@ final class H200ConnectionModel: ObservableObject {
                 || previousSignature?.bearerKey != currentSignature?.bearerKey {
                 if function == .sub2API {
                     resumeSub2APIAfterBearerChange(for: keyID)
-                } else if let instanceID = ensureRuntimeInstance(for: keyID) {
+                } else if function == .sub2APIBalance,
+                          let instanceID = ensureRuntimeInstance(for: keyID) {
                     sub2APIBalanceTokenPausedInstances.remove(instanceID)
+                } else if let instanceID = ensureRuntimeInstance(for: keyID) {
+                    sub2APIDailyCostTokenPausedInstances.remove(instanceID)
                 }
             }
             if let instanceID = ensureRuntimeInstance(for: keyID) {
@@ -2847,6 +3204,9 @@ final class H200ConnectionModel: ObservableObject {
                 stopSub2APIBalanceTimer(for: instanceID, preservesNextFire: false)
                 sub2APIBalanceFetchTasks[instanceID]?.cancel()
                 sub2APIBalanceFetchTasks[instanceID] = nil
+                stopSub2APIDailyCostTimer(for: instanceID, preservesNextFire: false)
+                sub2APIDailyCostFetchTasks[instanceID]?.cancel()
+                sub2APIDailyCostFetchTasks[instanceID] = nil
             }
             syncKeyDisplay(keyID: keyID)
         }
@@ -2856,8 +3216,10 @@ final class H200ConnectionModel: ObservableObject {
                 if interactionState.sub2APIConfiguration(for: keyID).targetGroupID > 0 {
                     fetchSub2API(for: keyID)
                 }
-            } else {
+            } else if interactionState.configuration(for: keyID)?.function == .sub2APIBalance {
                 fetchSub2APIBalance(for: keyID)
+            } else {
+                fetchSub2APIDailyCost(for: keyID)
             }
         }
     }
@@ -3273,6 +3635,17 @@ private extension Sub2APIGroupListResult {
 }
 
 private extension Sub2APIBalanceResult {
+    var isTokenUnavailable: Bool {
+        switch self {
+        case .invalidToken, .tokenExpired:
+            return true
+        case .success, .networkError:
+            return false
+        }
+    }
+}
+
+private extension Sub2APIDailyCostResult {
     var isTokenUnavailable: Bool {
         switch self {
         case .invalidToken, .tokenExpired:

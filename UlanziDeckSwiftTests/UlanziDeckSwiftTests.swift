@@ -3295,6 +3295,138 @@ struct UlanziDeckSwiftTests {
         #expect(expiredTokenResponse.data == nil)
     }
 
+    @Test func sub2APIDailyCostFetcherEncodesTimezonesAndParsesActualCost() async throws {
+        let timezoneIDs = ["UTC", "Asia/Shanghai", TimeZone.current.identifier]
+        let expectedURLs = try timezoneIDs.map {
+            try Sub2APIBaseURL("api.example.com").dailyCostURL(timezoneID: $0)
+        }
+        #expect(expectedURLs[1].absoluteString.hasSuffix("timezone=Asia%2FShanghai"))
+        if TimeZone.current.identifier.contains("/") {
+            #expect(expectedURLs[2].absoluteString.contains("%2F"))
+        }
+        var stubs = expectedURLs.reduce(into: [URL: WebPageMetadataURLProtocol.Stub]()) { result, url in
+            result[url] = .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"code":0,"data":{"today_actual_cost":"12.345"}}"#.utf8)
+            )
+        }
+        let invalidURL = try Sub2APIBaseURL("api.example.com/invalid")
+            .dailyCostURL(timezoneID: "UTC")
+        stubs[invalidURL] = .init(
+            statusCode: 200,
+            mimeType: "application/json",
+            data: Data(#"{"code":0,"data":{"today_actual_cost":true}}"#.utf8)
+        )
+        WebPageMetadataURLProtocol.setStubs(stubs)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let fetcher = Sub2APIFetcher(urlSession: URLSession(configuration: configuration))
+
+        for timezoneID in timezoneIDs {
+            let result = await fetcher.fetchDailyCost(
+                baseURL: "api.example.com",
+                timezoneID: timezoneID,
+                bearerKey: "token"
+            )
+            #expect(result == .success(actualCost: 12.345))
+            #expect(result.displayValue == "12.35")
+        }
+        let invalid = await fetcher.fetchDailyCost(
+            baseURL: "api.example.com/invalid",
+            timezoneID: "UTC",
+            bearerKey: "token"
+        )
+        #expect(invalid == .networkError("响应缺少有效今日消费"))
+        #expect(Set(WebPageMetadataURLProtocol.receivedRequests.compactMap(\.url)) == Set(expectedURLs + [invalidURL]))
+    }
+
+    @Test func sub2APIDailyCostConfigurationPersistsTimezoneWithoutSecretAndRendersThreeLines() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIDailyCost, to: 3)
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "secret-token"), for: 3)
+        _ = state.setSub2APIServiceName("消费服务", for: 3)
+        _ = state.setSub2APIDailyCostUnit("¥", for: 3)
+        _ = state.setSub2APIDailyCostTimezone(.beijing, for: 3)
+        _ = state.setSub2APIDailyCostLastResult(.success(actualCost: 8.5), for: 3)
+
+        let display = try #require(state.displays(for: .h200Prototype).first(where: { $0.id == 3 }))
+        #expect(display.sub2APIButtonContent?.serviceName == "消费服务")
+        #expect(display.sub2APIButtonContent?.groupName == "今日消费")
+        #expect(display.sub2APIButtonContent?.availableConcurrencyText == "¥8.50")
+
+        let encoded = try JSONEncoder().encode(try #require(state.configuration(for: 3)))
+        let payload = try #require(String(data: encoded, encoding: .utf8))
+        #expect(!payload.contains("secret-token"))
+        let decoded = try JSONDecoder().decode(DeckKeyConfiguration.self, from: encoded)
+        #expect(decoded.sub2APIDailyCost.timezone == .beijing)
+        #expect(decoded.sub2APIDailyCost.unit == "¥")
+        #expect(decoded.sub2APIDailyCost.customServiceName == "消费服务")
+        #expect(decoded.sub2APIDailyCost.lastResult == nil)
+    }
+
+    @MainActor
+    @Test func sub2APIDailyCostMergesOnlySameSourceAndEffectiveTimezone() async throws {
+        let fetcher = FakeSub2APIFetcher(
+            dailyCostResults: [.success(actualCost: 1), .success(actualCost: 2)]
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        for keyID in [3, 4, 5] { _ = state.assign(.sub2APIDailyCost, to: keyID) }
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        let sourceID = state.configuration(for: 3)?.sub2APIDataSourceConfiguration.instanceID
+        _ = state.setSub2APIDataSourceInstanceID(sourceID, for: 4)
+        _ = state.setSub2APIDataSourceInstanceID(sourceID, for: 5)
+        _ = state.setSub2APIDailyCostTimezone(.beijing, for: 5)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: state),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 1_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil { fetcher.dailyCostRequests.count == 2 }
+        let requests = fetcher.dailyCostRequests
+        #expect(requests.filter { $0.timezoneID == TimeZone.current.identifier }.count == 1)
+        #expect(requests.filter { $0.timezoneID == "Asia/Shanghai" }.count == 1)
+    }
+
+    @MainActor
+    @Test func sub2APIDailyCostTimezoneChangeCancelsOldResultAndPersistsSelection() async throws {
+        let fetcher = FakeSub2APIFetcher(
+            dailyCostResults: [.success(actualCost: 99), .success(actualCost: 7)],
+            dailyCostFetchDelaySequenceNanoseconds: [200_000_000, 10_000_000]
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIDailyCost, to: 3)
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        let store = FakeDeckConfigurationStore(loadedState: state)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: store,
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 1_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil { fetcher.dailyCostRequests.count == 1 }
+        model.selectKey(keyID: 3)
+        model.setSelectedSub2APIDailyCostTimezone(.standard)
+        try await Self.waitUntil {
+            fetcher.dailyCostRequests.count == 2
+                && model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult
+                    == .success(actualCost: 7)
+        }
+        try await Task.sleep(nanoseconds: 250_000_000)
+        #expect(model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult == .success(actualCost: 7))
+        #expect(store.savedStates.last?.sub2APIDailyCostConfiguration(for: 3).timezone == .standard)
+    }
+
     @Test func sub2APIBalanceFetcherParsesAuthMeBalanceAndFormatsValues() async throws {
         let integerURL = try #require(URL(string: "https://api.example.com/integer/api/v1/auth/me"))
         let decimalURL = try #require(URL(string: "https://api.example.com/decimal/api/v1/auth/me"))
@@ -8730,6 +8862,12 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         let bearerKey: String
     }
 
+    struct DailyCostRequest: Equatable {
+        let baseURL: String
+        let timezoneID: String
+        let bearerKey: String
+    }
+
     struct RefreshRequest: Equatable {
         let baseURL: String
         let refreshToken: String
@@ -8742,12 +8880,16 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
     private let defaultGroupListResult: Sub2APIGroupListResult
     private var balanceResults: [Sub2APIBalanceResult]
     private let defaultBalanceResult: Sub2APIBalanceResult
+    private var dailyCostResults: [Sub2APIDailyCostResult]
+    private let defaultDailyCostResult: Sub2APIDailyCostResult
+    private var dailyCostFetchDelaySequenceNanoseconds: [UInt64?]
     private var refreshResults: [Sub2APIAuthInfo?]
     private let fetchDelayNanoseconds: UInt64?
     private let groupListFetchDelayNanoseconds: UInt64?
     private var storedRequests: [Request] = []
     private var storedGroupListRequests: [GroupListRequest] = []
     private var storedBalanceRequests: [BalanceRequest] = []
+    private var storedDailyCostRequests: [DailyCostRequest] = []
     private var storedRefreshRequests: [RefreshRequest] = []
 
     var requests: [Request] {
@@ -8762,6 +8904,10 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         locked { storedBalanceRequests }
     }
 
+    var dailyCostRequests: [DailyCostRequest] {
+        locked { storedDailyCostRequests }
+    }
+
     var refreshRequests: [RefreshRequest] {
         locked { storedRefreshRequests }
     }
@@ -8773,6 +8919,9 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         defaultGroupListResult: Sub2APIGroupListResult = .networkError("未配置响应"),
         balanceResults: [Sub2APIBalanceResult] = [],
         defaultBalanceResult: Sub2APIBalanceResult = .networkError("未配置响应"),
+        dailyCostResults: [Sub2APIDailyCostResult] = [],
+        defaultDailyCostResult: Sub2APIDailyCostResult = .networkError("未配置响应"),
+        dailyCostFetchDelaySequenceNanoseconds: [UInt64?] = [],
         refreshResults: [Sub2APIAuthInfo?] = [],
         fetchDelayNanoseconds: UInt64? = nil,
         groupListFetchDelayNanoseconds: UInt64? = nil
@@ -8783,6 +8932,9 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         self.defaultGroupListResult = defaultGroupListResult
         self.balanceResults = balanceResults
         self.defaultBalanceResult = defaultBalanceResult
+        self.dailyCostResults = dailyCostResults
+        self.defaultDailyCostResult = defaultDailyCostResult
+        self.dailyCostFetchDelaySequenceNanoseconds = dailyCostFetchDelaySequenceNanoseconds
         self.refreshResults = refreshResults
         self.fetchDelayNanoseconds = fetchDelayNanoseconds
         self.groupListFetchDelayNanoseconds = groupListFetchDelayNanoseconds
@@ -8826,6 +8978,26 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
             guard !balanceResults.isEmpty else { return defaultBalanceResult }
             return balanceResults.removeFirst()
         }
+    }
+
+    func fetchDailyCost(
+        baseURL: String,
+        timezoneID: String,
+        bearerKey: String
+    ) async -> Sub2APIDailyCostResult {
+        let (result, delay) = locked {
+            storedDailyCostRequests.append(.init(
+                baseURL: baseURL,
+                timezoneID: timezoneID,
+                bearerKey: bearerKey
+            ))
+            let result = dailyCostResults.isEmpty ? defaultDailyCostResult : dailyCostResults.removeFirst()
+            let delay = dailyCostFetchDelaySequenceNanoseconds.isEmpty
+                ? nil : dailyCostFetchDelaySequenceNanoseconds.removeFirst()
+            return (result, delay)
+        }
+        if let delay { try? await Task.sleep(nanoseconds: delay) }
+        return result
     }
 
     func refreshBearerToken(baseURL: String, refreshToken: String) async -> Sub2APIAuthInfo? {

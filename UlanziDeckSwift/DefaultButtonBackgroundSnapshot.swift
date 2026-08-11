@@ -30,7 +30,7 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "CodexUsageBackground"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return function.game?.buttonBackgroundAssetName
-        case .none, .tally, .openFile, .openWebPage, .brightness, .sub2API, .sub2APIBalance, .pageFolder, .pageBack, .previousPage, .nextPage:
+        case .none, .tally, .openFile, .openWebPage, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .pageFolder, .pageBack, .previousPage, .nextPage:
             return nil
         }
     }
@@ -47,7 +47,7 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "chevron.left"
         case .nextPage:
             return "chevron.right"
-        case .none, .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus:
+        case .none, .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return nil
         }
     }
@@ -159,7 +159,7 @@ extension DeckKeyConfiguration {
             visual.replaceBackground(with: defaultVisual)
         case .previousPage, .nextPage:
             visual.replaceBackground(with: defaultVisual)
-        case .none, .tally, .openFile, .brightness, .sub2API, .sub2APIBalance:
+        case .none, .tally, .openFile, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost:
             break
         }
 
@@ -184,7 +184,7 @@ extension DeckKeyConfiguration {
             visual.clearBackground()
         case .previousPage, .nextPage:
             visual.clearBackground()
-        case .none, .tally, .openFile, .brightness, .sub2API, .sub2APIBalance:
+        case .none, .tally, .openFile, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost:
             break
         }
 
