@@ -1588,7 +1588,31 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         self.visual = visual
     }
 
-    /// Deck 上所有 Sub2API 查询配置接入公共来源图和凭据存储的唯一入口。
+    /// 持久化层必须独立枚举两种查询配置，不能让当前 `function` 决定哪份凭据存活。
+    var allSub2APIDataSourceConfigurations: [Sub2APIDataSourceConfiguration] {
+        [
+            Sub2APIDataSourceConfiguration(
+                queryKind: Sub2APIDataSourceConfiguration.capacityPoolQueryKind,
+                instanceID: sub2API.instanceID,
+                baseURL: sub2API.baseURL,
+                dataSourceInstanceID: sub2API.dataSourceInstanceID,
+                refreshInterval: sub2API.refreshInterval,
+                bearerKey: sub2API.bearerKey,
+                credentialID: sub2API.credentialID
+            ),
+            Sub2APIDataSourceConfiguration(
+                queryKind: Sub2APIDataSourceConfiguration.balanceQueryKind,
+                instanceID: sub2APIBalance.instanceID,
+                baseURL: sub2APIBalance.baseURL,
+                dataSourceInstanceID: sub2APIBalance.dataSourceInstanceID,
+                refreshInterval: sub2APIBalance.refreshInterval,
+                bearerKey: sub2APIBalance.bearerKey,
+                credentialID: sub2APIBalance.credentialID
+            ),
+        ]
+    }
+
+    /// Deck 上当前 Sub2API 查询配置接入公共来源图和运行时状态的唯一入口。
     var sub2APIDataSourceConfiguration: Sub2APIDataSourceConfiguration {
         get {
             if function == .sub2APIBalance {

@@ -2777,6 +2777,40 @@ struct UlanziDeckSwiftTests {
         #expect(!credentials.deletedCredentialIDs.contains(credentialID))
     }
 
+    @Test func sub2APIBalanceCredentialSurvivesTemporaryFunctionSwitchInRealStore() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: "deckConfiguration",
+            credentialStore: credentials
+        )
+        let bearerKey = Self.sub2APIAuthJSON(accessToken: "balance-switch-token")
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.sub2APIBalance, to: 3)
+        state.setSub2APIBearerKey(bearerKey, for: 3)
+        let credentialID = try #require(state.sub2APIBalanceConfiguration(for: 3).credentialID)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+
+        state.assign(.tally, to: 3)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        var restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        #expect(restored.configuration(for: 3)?.function == .tally)
+        #expect(restored.sub2APIBalanceConfiguration(for: 3).bearerKey == bearerKey)
+        #expect(restored.sub2APIBalanceConfiguration(for: 3).credentialID == credentialID)
+
+        restored.assign(.sub2APIBalance, to: 3)
+        #expect(store.saveInteractionState(restored, for: .h200Prototype) == .success)
+        let reloaded = try #require(store.loadInteractionState(for: .h200Prototype))
+        #expect(reloaded.configuration(for: 3)?.function == .sub2APIBalance)
+        #expect(reloaded.sub2APIBalanceConfiguration(for: 3).bearerKey == bearerKey)
+        #expect(reloaded.sub2APIBalanceConfiguration(for: 3).credentialID == credentialID)
+        #expect(credentials.savedBearerKeys[credentialID] == bearerKey)
+        #expect(!credentials.deletedCredentialIDs.contains(credentialID))
+    }
+
     @Test func failedSub2APICredentialWriteDoesNotDeletePreviousSecretOrForgetIndex() throws {
         let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
