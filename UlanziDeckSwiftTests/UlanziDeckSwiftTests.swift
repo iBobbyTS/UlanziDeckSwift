@@ -1928,32 +1928,42 @@ struct UlanziDeckSwiftTests {
 
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore()
+        let existingCredentialID = "existing-pool-credential"
+        try credentials.saveBearerKey("existing-pool-secret", credentialID: existingCredentialID)
         let store = UserDefaultsDeckConfigurationStore(
             defaults: defaults,
             storageKey: storageKey,
             credentialStore: credentials
         )
         defaults.set(
-            Data(#"{"version":2,"layoutIdentifier":"future-layout","keys":[],"pages":[{"id":"root","keys":[{"id":99,"configuration":{"function":"sub2APIBalance","sub2APIBalance":{"bearerKey":"balance-legacy-secret"}}}]}],"rootPageIDs":["root"]}"#.utf8),
+            Data(#"{"version":2,"layoutIdentifier":"future-layout","keys":[],"pages":[{"id":"root","keys":[{"id":99,"configuration":{"function":"sub2APIBalance","sub2API":{"credentialID":"existing-pool-credential"},"sub2APIBalance":{"bearerKey":"balance-legacy-secret"}}}]}],"rootPageIDs":["root"]}"#.utf8),
             forKey: storageKey
         )
 
         #expect(store.loadInteractionState(for: .h200Prototype) == nil)
         let rewrittenData = try #require(defaults.data(forKey: storageKey))
         let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
-        let credentialID = try #require(credentials.savedBearerKeys.first?.key)
+        let balanceCredentialID = try #require(
+            credentials.savedBearerKeys.first { $0.value == "balance-legacy-secret" }?.key
+        )
         let root = try #require(JSONSerialization.jsonObject(with: rewrittenData) as? [String: Any])
         let pages = try #require(root["pages"] as? [[String: Any]])
         let keys = try #require(pages.first?["keys"] as? [[String: Any]])
         let configuration = try #require(keys.first?["configuration"] as? [String: Any])
+        let pool = try #require(configuration["sub2API"] as? [String: Any])
         let balance = try #require(configuration["sub2APIBalance"] as? [String: Any])
 
         #expect(root["layoutIdentifier"] as? String == "future-layout")
         #expect(!rewrittenJSON.contains("balance-legacy-secret"))
         #expect(!rewrittenJSON.contains("bearerKey"))
-        #expect(balance["credentialID"] as? String == credentialID)
-        #expect(credentials.savedBearerKeys[credentialID] == "balance-legacy-secret")
-        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [credentialID])
+        #expect(pool["credentialID"] as? String == existingCredentialID)
+        #expect(balance["credentialID"] as? String == balanceCredentialID)
+        #expect(credentials.savedBearerKeys[existingCredentialID] == "existing-pool-secret")
+        #expect(credentials.savedBearerKeys[balanceCredentialID] == "balance-legacy-secret")
+        #expect(
+            defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs")
+                == [balanceCredentialID, existingCredentialID].sorted()
+        )
     }
 
     @Test func userDefaultsStoreSanitizesLegacySMBCredentialForDifferentKnownLayout() throws {

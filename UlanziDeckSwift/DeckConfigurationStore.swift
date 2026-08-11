@@ -174,7 +174,7 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
             return
         }
 
-        var claimedCredentialIDs = Set(allConfigurations.flatMap { configuration in
+        let reservedCredentialIDs = Set(allConfigurations.flatMap { configuration in
             configuration.allSub2APIDataSourceConfigurations.compactMap { dataSource -> String? in
                 guard dataSource.bearerKey.isEmpty else {
                     return nil
@@ -182,13 +182,15 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
                 return normalizedCredentialID(dataSource.credentialID)
             }
         })
+        var claimedCredentialIDs: Set<String> = []
 
         func sanitizedKey(_ key: StoredDeckKeyConfiguration) -> StoredDeckKeyConfiguration {
             var configuration = key.configuration
             for var dataSource in configuration.allSub2APIDataSourceConfigurations {
                 hydrateSub2APICredential(
                     in: &dataSource,
-                    claimedCredentialIDs: &claimedCredentialIDs
+                    claimedCredentialIDs: &claimedCredentialIDs,
+                    reservedCredentialIDs: reservedCredentialIDs
                 )
                 configuration.sub2APIDataSourceConfiguration = dataSource
             }
@@ -309,7 +311,8 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
 
     private func hydrateSub2APICredential(
         in dataSource: inout Sub2APIDataSourceConfiguration,
-        claimedCredentialIDs: inout Set<String>
+        claimedCredentialIDs: inout Set<String>,
+        reservedCredentialIDs: Set<String> = []
     ) {
         let legacyBearerKey = dataSource.bearerKey
         if !legacyBearerKey.isEmpty {
@@ -318,6 +321,10 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
             if let existingCredentialID,
                let persisted = credentialBaseline.persistedBearerKey(credentialID: existingCredentialID),
                persisted != legacyBearerKey {
+                credentialID = UUID().uuidString
+            } else if let existingCredentialID,
+                      reservedCredentialIDs.contains(existingCredentialID),
+                      credentialBaseline.persistedBearerKey(credentialID: existingCredentialID) == nil {
                 credentialID = UUID().uuidString
             } else {
                 credentialID = existingCredentialID ?? UUID().uuidString
