@@ -2320,6 +2320,84 @@ struct UlanziDeckSwiftTests {
         #expect(!rewrittenJSON.contains("bearerKey"))
     }
 
+    @Test func sharedCredentialRefreshPrefersNewBearerAcrossPagesOnSaveAndReload() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: "deckConfiguration",
+            credentialStore: credentials
+        )
+        let credentialID = "shared-refresh-credential"
+        var source = DeckKeyConfiguration.tallyDefault
+        source.function = .sub2API
+        source.sub2API.credentialID = credentialID
+        source.sub2API.bearerKey = "refreshed-token"
+        var staleConsumer = DeckKeyConfiguration.tallyDefault
+        staleConsumer.function = .sub2API
+        staleConsumer.sub2API.credentialID = credentialID
+        staleConsumer.sub2API.bearerKey = "old-token"
+        let refreshedState = DeckGridInteractionState(
+            layout: .h200Prototype,
+            pages: [
+                DeckGridPage(id: "root", parentID: nil, configurations: [3: source]),
+                DeckGridPage(id: "page-2", parentID: nil, configurations: [4: staleConsumer]),
+            ],
+            rootPageIDs: ["root", "page-2"]
+        )
+
+        // 建立旧基线后，再保存“来源已刷新、跨页消费者仍旧”的快照。
+        var initialSource = source
+        initialSource.sub2API.bearerKey = "old-token"
+        let initialState = DeckGridInteractionState(
+            layout: .h200Prototype,
+            pages: [
+                DeckGridPage(id: "root", parentID: nil, configurations: [3: initialSource]),
+                DeckGridPage(id: "page-2", parentID: nil, configurations: [4: staleConsumer]),
+            ],
+            rootPageIDs: ["root", "page-2"]
+        )
+        #expect(store.saveInteractionState(initialState, for: .h200Prototype) == .success)
+        #expect(credentials.savedBearerKeys[credentialID] == "old-token")
+        #expect(store.saveInteractionState(refreshedState, for: .h200Prototype) == .success)
+        #expect(credentials.savedBearerKeys[credentialID] == "refreshed-token")
+
+        var reloaded = try #require(store.loadInteractionState(for: .h200Prototype))
+        #expect(reloaded.sub2APIConfiguration(for: 3).bearerKey == "refreshed-token")
+        let didGoToNextPage = reloaded.goToNextRootPage()
+        #expect(didGoToNextPage)
+        #expect(reloaded.sub2APIConfiguration(for: 4).bearerKey == "refreshed-token")
+    }
+
+    @Test func manualSharedCredentialUpdatePropagatesAcrossPages() throws {
+        let credentialID = "shared-manual-credential"
+        var source = DeckKeyConfiguration.tallyDefault
+        source.function = .sub2API
+        source.sub2API.credentialID = credentialID
+        source.sub2API.bearerKey = "old-token"
+        var consumer = DeckKeyConfiguration.tallyDefault
+        consumer.function = .sub2API
+        consumer.sub2API.credentialID = credentialID
+        consumer.sub2API.bearerKey = "old-token"
+        var state = DeckGridInteractionState(
+            layout: .h200Prototype,
+            pages: [
+                DeckGridPage(id: "root", parentID: nil, configurations: [3: source]),
+                DeckGridPage(id: "page-2", parentID: nil, configurations: [4: consumer]),
+            ],
+            rootPageIDs: ["root", "page-2"]
+        )
+
+        let didUpdateBearer = state.setSub2APIBearerKey("new-token", for: 3)
+        #expect(didUpdateBearer)
+        #expect(state.sub2APIConfiguration(for: 3).bearerKey == "new-token")
+        let didGoToNextPage = state.goToNextRootPage()
+        #expect(didGoToNextPage)
+        #expect(state.sub2APIConfiguration(for: 4).bearerKey == "new-token")
+    }
+
     @Test func sub2APIBearerKeysUseIndependentCredentialIDsAndRoundTripThroughCredentialStore() throws {
         let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

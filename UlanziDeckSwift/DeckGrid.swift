@@ -1353,6 +1353,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
         selectedKeyID = keyID
         var dataSource = configurations[keyID, default: .tallyDefault]
             .sub2APIDataSourceConfiguration
+        let previousCredentialID = dataSource.credentialID
         if dataSource.bearerKey != bearerKey {
             configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
             configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
@@ -1364,6 +1365,16 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
         dataSource.bearerKey = bearerKey
         configurations[keyID, default: .tallyDefault].sub2APIDataSourceConfiguration = dataSource
+        if let credentialID = dataSource.credentialID {
+            propagateSub2APIBearerKey(bearerKey, credentialID: credentialID)
+        } else if !bearerKey.isEmpty {
+            // UUID 生成失败不会发生，但不要让一个旧共享 ID 留下过时 token。
+            if let previousCredentialID {
+                propagateSub2APIBearerKey("", credentialID: previousCredentialID)
+            }
+        } else if let previousCredentialID {
+            propagateSub2APIBearerKey("", credentialID: previousCredentialID)
+        }
         return true
     }
 
@@ -1383,6 +1394,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
                 else { continue }
 
                 var dataSource = configuration.sub2APIDataSourceConfiguration
+                let previousCredentialID = dataSource.credentialID
                 if dataSource.bearerKey != bearerKey {
                     configuration.sub2API.groupListState = .idle
                     configuration.sub2API.lastResult = nil
@@ -1396,6 +1408,11 @@ nonisolated struct DeckGridInteractionState: Equatable {
                 configuration.sub2APIDataSourceConfiguration = dataSource
                 page.configurations[keyID] = configuration
                 pages[pageID] = page
+                if let credentialID = dataSource.credentialID {
+                    propagateSub2APIBearerKey(bearerKey, credentialID: credentialID)
+                } else if let previousCredentialID {
+                    propagateSub2APIBearerKey("", credentialID: previousCredentialID)
+                }
                 return true
             }
         }
@@ -1460,7 +1477,26 @@ nonisolated struct DeckGridInteractionState: Equatable {
         dataSource.bearerKey = bearerKey
         dataSource.credentialID = credentialID
         configurations[keyID, default: .tallyDefault].sub2APIDataSourceConfiguration = dataSource
+        if let credentialID {
+            propagateSub2APIBearerKey(bearerKey, credentialID: credentialID)
+        }
         return true
+    }
+
+    /// 将同一 credential ID 的所有持久化消费者同步到一个 bearer 值。
+    /// 共享凭据只有一个逻辑 owner，避免刷新或手动更新后保留旧引用值。
+    private mutating func propagateSub2APIBearerKey(_ bearerKey: String, credentialID: String) {
+        for pageID in pages.keys.sorted() {
+            guard var page = pages[pageID] else { continue }
+            for keyID in page.configurations.keys.sorted() {
+                guard var configuration = page.configurations[keyID],
+                      configuration.sub2APIDataSourceConfiguration.credentialID == credentialID
+                else { continue }
+                configuration.sub2APIDataSourceConfiguration.bearerKey = bearerKey
+                page.configurations[keyID] = configuration
+            }
+            pages[pageID] = page
+        }
     }
 
     @discardableResult

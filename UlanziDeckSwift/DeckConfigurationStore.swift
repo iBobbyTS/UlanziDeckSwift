@@ -395,39 +395,54 @@ nonisolated struct UserDefaultsDeckConfigurationStore: DeckConfigurationStoring 
 
     private func persistSub2APICredentials(in state: DeckGridInteractionState) -> DeckConfigurationSaveResult {
         var referencedCredentialIDs: Set<String> = []
-        var firstErrorMessage: String?
-        var credentialWriteFailed = false
+        // 一个 credential ID 只有一个逻辑 owner。共享消费者可能仍带着刷新前的
+        // bearer；先按稳定的页面/按键顺序聚合，再优先选择相对持久化基线发生变化的
+        // 值，避免无序逐项写入时旧 bearer 覆盖新 token。
+        var bearerCandidates: [String: [String]] = [:]
         for page in state.persistedPages {
-            for configuration in page.configurations.values {
-                let dataSource = configuration.sub2APIDataSourceConfiguration
-                guard let credentialID = normalizedCredentialID(dataSource.credentialID) else {
+            for keyID in page.configurations.keys.sorted() {
+                guard let credentialID = normalizedCredentialID(
+                    page.configurations[keyID]?.sub2APIDataSourceConfiguration.credentialID
+                ) else {
                     continue
                 }
                 referencedCredentialIDs.insert(credentialID)
-                let bearerKey = dataSource.bearerKey
-                guard !bearerKey.isEmpty,
-                      !credentialBaseline.matchesPersistedBearerKey(
-                        bearerKey,
-                        credentialID: credentialID
-                      )
-                else {
-                    continue
-                }
+                let bearerKey = page.configurations[keyID]?.sub2APIDataSourceConfiguration.bearerKey ?? ""
+                guard !bearerKey.isEmpty else { continue }
+                bearerCandidates[credentialID, default: []].append(bearerKey)
+            }
+        }
 
+        var firstErrorMessage: String?
+        var credentialWriteFailed = false
+        for credentialID in bearerCandidates.keys.sorted() {
+            guard let candidates = bearerCandidates[credentialID],
+                  let baseline = credentialBaseline.persistedBearerKey(credentialID: credentialID)
+            else {
+                guard let bearerKey = bearerCandidates[credentialID]?.first else { continue }
                 do {
-                    try credentialStore.saveBearerKey(
-                        bearerKey,
-                        credentialID: credentialID
-                    )
-                    credentialBaseline.recordPersistedBearerKey(
-                        bearerKey,
-                        credentialID: credentialID
-                    )
+                    try credentialStore.saveBearerKey(bearerKey, credentialID: credentialID)
+                    credentialBaseline.recordPersistedBearerKey(bearerKey, credentialID: credentialID)
                 } catch {
                     credentialWriteFailed = true
                     NSLog("无法保存 Sub2API Bearer Key 到 Keychain：%@", String(describing: error))
                     firstErrorMessage = firstErrorMessage ?? "无法安全保存 Bearer Key：\(error.localizedDescription)"
                 }
+                continue
+            }
+
+            // 若存在多个候选，只有脱离旧基线的候选才代表一次更新；相同基线的
+            // stale consumer 不得再次写回 Keychain。若有多个更新，稳定选择首个。
+            let bearerKey = candidates.first(where: { $0 != baseline }) ?? baseline
+            guard bearerKey != baseline else { continue }
+
+            do {
+                try credentialStore.saveBearerKey(bearerKey, credentialID: credentialID)
+                credentialBaseline.recordPersistedBearerKey(bearerKey, credentialID: credentialID)
+            } catch {
+                credentialWriteFailed = true
+                NSLog("无法保存 Sub2API Bearer Key 到 Keychain：%@", String(describing: error))
+                firstErrorMessage = firstErrorMessage ?? "无法安全保存 Bearer Key：\(error.localizedDescription)"
             }
         }
 
