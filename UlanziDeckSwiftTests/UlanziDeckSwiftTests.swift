@@ -3583,16 +3583,22 @@ struct UlanziDeckSwiftTests {
     @Test func localTimezoneChangeDuringDailyCostRequestRefetchesWithoutStaleWriteOrLock() async throws {
         var localTimezoneID = "America/Edmonton"
         let fetcher = FakeSub2APIFetcher(
-            dailyCostResults: [.success(actualCost: 99), .success(actualCost: 7)],
-            dailyCostFetchDelaySequenceNanoseconds: [150_000_000, nil]
+            dailyCostResults: [
+                .success(actualCost: 5),
+                .success(actualCost: 99),
+                .success(actualCost: 7),
+            ],
+            dailyCostFetchDelaySequenceNanoseconds: [nil, 100_000_000, 250_000_000]
         )
         var state = DeckGridInteractionState(layout: .h200Prototype)
         _ = state.assign(.sub2APIDailyCost, to: 3)
         _ = state.setSub2APIBaseURL("api.example.com", for: 3)
         _ = state.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        _ = state.setSub2APIDailyCostUnit("¥", for: 3)
+        let syncer = FakeH200DeckSyncer()
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
-            syncer: FakeH200DeckSyncer(),
+            syncer: syncer,
             configurationStore: FakeDeckConfigurationStore(loadedState: state),
             sub2APIFetcher: fetcher,
             sub2APIRefreshSecondDuration: 1_000,
@@ -3600,15 +3606,30 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
-        try await Self.waitUntil { fetcher.dailyCostRequests.count == 1 }
+        try await Self.waitUntil {
+            model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult
+                == .success(actualCost: 5)
+        }
+        syncer.emitInput(H200InputEvent(state: 1, index: 2, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 2, type: .button, action: .release))
+        try await Self.waitUntil { fetcher.dailyCostRequests.count == 2 }
         localTimezoneID = "Asia/Shanghai"
 
         try await Self.waitUntil {
-            fetcher.dailyCostRequests.count == 2
-                && model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult
-                    == .success(actualCost: 7)
+            fetcher.dailyCostRequests.count == 3
+                && model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult == nil
+        }
+        let clearedDisplay = try #require(
+            model.interactionState.displays(for: .h200Prototype).first(where: { $0.id == 3 })
+        )
+        #expect(clearedDisplay.sub2APIButtonContent?.availableConcurrencyText != "¥5")
+
+        try await Self.waitUntil {
+            model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult
+                == .success(actualCost: 7)
         }
         #expect(fetcher.dailyCostRequests.map(\.timezoneID) == [
+            "America/Edmonton",
             "America/Edmonton",
             "Asia/Shanghai",
         ])

@@ -3024,6 +3024,26 @@ final class H200ConnectionModel: ObservableObject {
               latestLeader.bearerKey == expectedBearerKey
         else { return }
         guard latestLeader.timezoneID == timezoneID else {
+            var clearedKeyIDs: Set<Int> = []
+            let latestConsumers = sub2APIDailyCostConsumerInstanceIDs(
+                for: latestLeader.dataSourceInstanceID,
+                timezoneID: latestLeader.timezoneID
+            )
+            for consumerInstanceID in latestConsumers.isEmpty
+                ? [leaderInstanceID] : latestConsumers {
+                guard let consumer = resolveCurrentSub2APIDailyCostSlot(
+                    for: consumerInstanceID
+                ),
+                      consumer.dataSourceInstanceID == latestLeader.dataSourceInstanceID,
+                      consumer.timezoneID == latestLeader.timezoneID
+                else { continue }
+                if interactionState.clearSub2APIDailyCostRuntimeState(
+                    for: consumer.slot.keyID
+                ) {
+                    clearedKeyIDs.insert(consumer.slot.keyID)
+                }
+            }
+            syncKeyDisplays(keyIDs: clearedKeyIDs)
             fetchSub2APIDailyCost(for: leaderInstanceID)
             return
         }
