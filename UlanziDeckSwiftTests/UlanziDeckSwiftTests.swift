@@ -3516,10 +3516,11 @@ struct UlanziDeckSwiftTests {
         #expect(configurationRequestID != timezoneRequestID)
         #expect(!model.pendingSub2APIDailyCostRequestIDs.contains(timezoneRequestID))
 
-        model.setKeyDisplayMode(.systemStatus, for: 3)
+        let initialPageID = model.interactionState.currentPageID
+        model.addRootPageAfterCurrent()
         #expect(model.pendingSub2APIDailyCostRequestIDs.isEmpty)
 
-        model.setKeyDisplayMode(.function, for: 3)
+        model.selectRootPage(pageID: initialPageID)
         try await Self.waitUntil {
             fetcher.dailyCostRequests.count == 4
                 && model.pendingSub2APIDailyCostRequestIDs.count == 1
@@ -3527,6 +3528,7 @@ struct UlanziDeckSwiftTests {
         let resumedRequestID = try #require(model.pendingSub2APIDailyCostRequestIDs.first)
         #expect(resumedRequestID != configurationRequestID)
 
+        model.selectKey(keyID: 3)
         model.assignSelectedFunction(.tally)
         #expect(model.pendingSub2APIDailyCostRequestIDs.isEmpty)
         try await Task.sleep(nanoseconds: 250_000_000)
