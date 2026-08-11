@@ -242,11 +242,11 @@ extension ContentView {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .top, spacing: 8) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("数据来源")
+                            Text("认证来源")
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(.secondary)
 
-                            Picker("数据来源", selection: selectedSub2APIDataSourceBinding) {
+                            Picker("认证来源", selection: selectedSub2APIDataSourceBinding) {
                                 Text("自定义").tag(String?.none)
 
                                 ForEach(selectedSub2APIDataSourceReferenceOptions) { option in
@@ -255,8 +255,9 @@ extension ContentView {
                             }
                             .labelsHidden()
                             .pickerStyle(.menu)
-                            .frame(width: 150, alignment: .leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
                         VStack(alignment: .leading, spacing: 6) {
                             Text("Base URL")
@@ -267,7 +268,46 @@ extension ContentView {
                                 .textFieldStyle(.roundedBorder)
                                 .disabled(selectedSub2APIDataSourceInstanceID != nil)
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("认证信息")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 8) {
+                            SecureField("认证信息", text: selectedSub2APIBearerKeyBinding)
+                                .textFieldStyle(.roundedBorder)
+                                .disabled(selectedSub2APIDataSourceInstanceID != nil)
+
+                            Button("获取认证信息") {
+                                copySub2APIAuthScript()
+                            }
+                            .font(.caption)
+                            .disabled(selectedSub2APIDataSourceInstanceID != nil)
+                        }
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("刷新间隔（秒）")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 10) {
+                            TextField("刷新间隔", value: selectedSub2APIRefreshIntervalBinding, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 96)
+
+                            Stepper("刷新间隔", value: selectedSub2APIRefreshIntervalBinding, in: 5...3600)
+                                .labelsHidden()
+                        }
+                        .disabled(selectedSub2APIDataSourceInstanceID != nil)
+                    }
+
+                    Divider()
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("目标分组")
@@ -306,43 +346,7 @@ extension ContentView {
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("刷新间隔（秒）")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        HStack(spacing: 10) {
-                            TextField("刷新间隔", value: selectedSub2APIRefreshIntervalBinding, format: .number)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 96)
-
-                            Stepper("刷新间隔", value: selectedSub2APIRefreshIntervalBinding, in: 5...3600)
-                                .labelsHidden()
-                        }
-                        .disabled(selectedSub2APIDataSourceInstanceID != nil)
-                    }
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("认证信息")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-
-                        HStack(spacing: 8) {
-                            SecureField("认证信息", text: selectedSub2APIBearerKeyBinding)
-                                .textFieldStyle(.roundedBorder)
-                                .disabled(selectedSub2APIDataSourceInstanceID != nil)
-
-                            Button("获取认证信息") {
-                                copySub2APIAuthScript()
-                            }
-                            .font(.caption)
-                            .disabled(selectedSub2APIDataSourceInstanceID != nil)
-                        }
-                    }
-
-                    Divider()
-
-                    VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: 8) {
                         sub2APINameParameterRow(
                             label: "服务名",
                             placeholder: selectedSub2APIAutomaticServiceName,
