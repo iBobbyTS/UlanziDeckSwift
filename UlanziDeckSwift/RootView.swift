@@ -124,6 +124,9 @@ struct RootView: View {
             onSub2APIGroupNameChange: { groupName in
                 connectionModel.setSelectedSub2APIGroupName(groupName)
             },
+            onSub2APIBalanceUnitChange: { unit in
+                connectionModel.setSelectedSub2APIBalanceUnit(unit)
+            },
             onMihoyoQRCodeLoginRequest: {
                 connectionModel.beginMihoyoQRCodeLogin()
             },

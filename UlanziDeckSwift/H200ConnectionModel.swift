@@ -63,6 +63,11 @@ final class H200ConnectionModel: ObservableObject {
     private var sub2APIGroupListRefreshFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var sub2APIGroupListLastRequestNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var sub2APITokenPausedInstances: Set<RuntimeInstanceID> = []
+    private var sub2APIBalanceTimers: [RuntimeInstanceID: Timer] = [:]
+    private var sub2APIBalanceNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
+    private var sub2APIBalanceFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
+    private var sub2APIBalanceTokenPausedInstances: Set<RuntimeInstanceID> = []
+    private var sub2APIAuthRefreshTasks: [String: Task<Sub2APIAuthInfo?, Never>] = [:]
     private var codexUsageTimers: [RuntimeInstanceID: Timer] = [:]
     private var codexUsageNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var codexUsageFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
@@ -182,6 +187,9 @@ final class H200ConnectionModel: ObservableObject {
         for task in sub2APIGroupListRefreshTasks.values {
             task.cancel()
         }
+        for timer in sub2APIBalanceTimers.values { timer.invalidate() }
+        for task in sub2APIBalanceFetchTasks.values { task.cancel() }
+        for task in sub2APIAuthRefreshTasks.values { task.cancel() }
         for timer in codexUsageTimers.values {
             timer.invalidate()
         }
@@ -479,6 +487,8 @@ final class H200ConnectionModel: ObservableObject {
             connectSMBServer(for: keyID)
         case .refreshSub2API:
             fetchSub2API(for: keyID)
+        case .refreshSub2APIBalance:
+            fetchSub2APIBalance(for: keyID)
         case .refreshCodexUsage:
             fetchCodexUsage(for: keyID)
         case .refreshMihoyoGame:
@@ -524,6 +534,10 @@ final class H200ConnectionModel: ObservableObject {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
                 fetchSub2API(for: selectedKeyID)
                 scheduleSub2APIGroupListRefresh(for: selectedKeyID)
+            }
+            if function == .sub2APIBalance {
+                _ = ensureRuntimeInstance(for: selectedKeyID)
+                fetchSub2APIBalance(for: selectedKeyID)
             }
             if function == .codexUsage {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
@@ -837,7 +851,8 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         let normalizedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard interactionState.sub2APIConfiguration(for: selectedKeyID).baseURL != normalizedBaseURL else {
+        guard interactionState.configuration(for: selectedKeyID)?
+            .sub2APIDataSourceConfiguration.baseURL != normalizedBaseURL else {
             return
         }
         let previousDataSourceSignatures = currentSub2APIDataSourceSignaturesByKeyID()
@@ -891,13 +906,18 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         let clampedInterval = max(5, interval)
-        guard interactionState.sub2APIConfiguration(for: selectedKeyID).refreshInterval != clampedInterval else {
+        guard interactionState.configuration(for: selectedKeyID)?
+            .sub2APIDataSourceConfiguration.refreshInterval != clampedInterval else {
             return
         }
 
         if interactionState.setSub2APIRefreshInterval(interval, for: selectedKeyID) {
             persistCurrentConfiguration()
-            restartSub2APITimerForDataSource(containing: selectedKeyID)
+            if interactionState.configuration(for: selectedKeyID)?.function == .sub2API {
+                restartSub2APITimerForDataSource(containing: selectedKeyID)
+            } else {
+                restartSub2APIBalanceTimerForDataSource(containing: selectedKeyID)
+            }
         }
     }
 
@@ -906,8 +926,9 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        let previousCredential = interactionState.sub2APIConfiguration(for: selectedKeyID)
-        guard previousCredential.bearerKey != bearerKey else {
+        guard let previousCredential = interactionState.configuration(for: selectedKeyID)?
+            .sub2APIDataSourceConfiguration,
+              previousCredential.bearerKey != bearerKey else {
             return
         }
         let previousDataSourceSignatures = currentSub2APIDataSourceSignaturesByKeyID()
@@ -921,7 +942,11 @@ final class H200ConnectionModel: ObservableObject {
                     for: selectedKeyID
                 )
                 _ = persistCurrentConfiguration()
-                interactionState.setSub2APIGroupListState(.networkError(message), for: selectedKeyID)
+                if interactionState.configuration(for: selectedKeyID)?.function == .sub2API {
+                    interactionState.setSub2APIGroupListState(.networkError(message), for: selectedKeyID)
+                } else {
+                    interactionState.setSub2APIBalanceLastResult(.networkError(message), for: selectedKeyID)
+                }
                 return
             }
             restartSub2APIRuntimesAfterDataSourceResolutionChange(
@@ -935,9 +960,8 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        let previousSourceInstanceID = interactionState
-            .sub2APIConfiguration(for: selectedKeyID)
-            .dataSourceInstanceID
+        let previousSourceInstanceID = interactionState.configuration(for: selectedKeyID)?
+            .sub2APIDataSourceConfiguration.dataSourceInstanceID
         guard previousSourceInstanceID != sourceInstanceID else {
             return
         }
@@ -969,6 +993,14 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         if interactionState.setSub2APIGroupName(groupName, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: selectedKeyID)
+        }
+    }
+
+    func setSelectedSub2APIBalanceUnit(_ unit: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else { return }
+        if interactionState.setSub2APIBalanceUnit(unit, for: selectedKeyID) {
             persistCurrentConfiguration()
             syncKeyDisplay(keyID: selectedKeyID)
         }
@@ -1464,6 +1496,8 @@ final class H200ConnectionModel: ObservableObject {
         switch kind {
         case .sub2API:
             _ = interactionState.clearSub2APIRuntimeState(for: slot.keyID)
+        case .sub2APIBalance:
+            _ = interactionState.clearSub2APIBalanceRuntimeState(for: slot.keyID)
         case .codexUsage:
             _ = interactionState.clearCodexUsageRuntimeState(for: slot.keyID)
         case .mihoyoGame:
@@ -1492,6 +1526,13 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIGroupListRefreshFireNanoseconds[instanceID] = nil
         sub2APIGroupListLastRequestNanoseconds[instanceID] = nil
         sub2APITokenPausedInstances.remove(instanceID)
+
+        sub2APIBalanceTimers[instanceID]?.invalidate()
+        sub2APIBalanceTimers[instanceID] = nil
+        sub2APIBalanceNextFireNanoseconds[instanceID] = nil
+        sub2APIBalanceFetchTasks[instanceID]?.cancel()
+        sub2APIBalanceFetchTasks[instanceID] = nil
+        sub2APIBalanceTokenPausedInstances.remove(instanceID)
 
         codexUsageTimers[instanceID]?.invalidate()
         codexUsageTimers[instanceID] = nil
@@ -1558,6 +1599,11 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIGroupListRefreshTasks[instanceID]?.cancel()
         sub2APIGroupListRefreshTasks[instanceID] = nil
 
+        sub2APIBalanceTimers[instanceID]?.invalidate()
+        sub2APIBalanceTimers[instanceID] = nil
+        sub2APIBalanceFetchTasks[instanceID]?.cancel()
+        sub2APIBalanceFetchTasks[instanceID] = nil
+
         codexUsageTimers[instanceID]?.invalidate()
         codexUsageTimers[instanceID] = nil
         codexUsageFetchTasks[instanceID]?.cancel()
@@ -1599,6 +1645,8 @@ final class H200ConnectionModel: ObservableObject {
         switch runtimeKindsByInstance[instanceID] {
         case .sub2API:
             resumeSub2APIRuntime(instanceID)
+        case .sub2APIBalance:
+            resumeSub2APIBalanceRuntime(instanceID)
         case .codexUsage:
             resumeCodexUsageRuntime(instanceID)
         case .mihoyoGame:
@@ -1610,6 +1658,26 @@ final class H200ConnectionModel: ObservableObject {
 
     private func isSub2APITokenPaused(for instanceID: RuntimeInstanceID) -> Bool {
         sub2APITokenPausedInstances.contains(instanceID)
+    }
+
+    /// 同一来源跨号池和余额端点共用一次 refresh-token 轮换，避免并发刷新使
+    /// 先返回的新 refresh token 被第二个旧请求立即作废。
+    private func refreshSub2APIAuthentication(
+        baseURL: String,
+        refreshToken: String,
+        dataSourceInstanceID: String
+    ) async -> Sub2APIAuthInfo? {
+        if let existing = sub2APIAuthRefreshTasks[dataSourceInstanceID] {
+            return await existing.value
+        }
+        let fetcher = sub2APIFetcher
+        let task = Task {
+            await fetcher.refreshBearerToken(baseURL: baseURL, refreshToken: refreshToken)
+        }
+        sub2APIAuthRefreshTasks[dataSourceInstanceID] = task
+        let result = await task.value
+        sub2APIAuthRefreshTasks[dataSourceInstanceID] = nil
+        return result
     }
 
     private func pauseSub2APIForTokenError(instanceID: RuntimeInstanceID) {
@@ -1754,9 +1822,10 @@ final class H200ConnectionModel: ObservableObject {
 
             // 如果需要刷新 token，先尝试刷新
             if let authInfo, authInfo.isExpiringSoon {
-                if let newAuthInfo = await fetcher.refreshBearerToken(
+                if let newAuthInfo = await self?.refreshSub2APIAuthentication(
                     baseURL: baseURL,
-                    refreshToken: authInfo.refreshToken
+                    refreshToken: authInfo.refreshToken,
+                    dataSourceInstanceID: resolved.dataSourceInstanceID
                 ) {
                     effectiveBearerKey = newAuthInfo.accessToken
                     // 更新存储的认证信息
@@ -1858,9 +1927,10 @@ final class H200ConnectionModel: ObservableObject {
             }
 
             if let authInfo, authInfo.isExpiringSoon {
-                if let newAuthInfo = await fetcher.refreshBearerToken(
+                if let newAuthInfo = await self?.refreshSub2APIAuthentication(
                     baseURL: baseURL,
-                    refreshToken: authInfo.refreshToken
+                    refreshToken: authInfo.refreshToken,
+                    dataSourceInstanceID: dataSourceInstanceID
                 ) {
                     effectiveBearerKey = newAuthInfo.accessToken
                     if let jsonString = newAuthInfo.jsonString() {
@@ -2017,9 +2087,10 @@ final class H200ConnectionModel: ObservableObject {
             }
 
             if let authInfo, authInfo.isExpiringSoon {
-                if let newAuthInfo = await fetcher.refreshBearerToken(
+                if let newAuthInfo = await self?.refreshSub2APIAuthentication(
                     baseURL: baseURL,
-                    refreshToken: authInfo.refreshToken
+                    refreshToken: authInfo.refreshToken,
+                    dataSourceInstanceID: resolved.dataSourceInstanceID
                 ) {
                     effectiveBearerKey = newAuthInfo.accessToken
                     if let jsonString = newAuthInfo.jsonString() {
@@ -2440,14 +2511,271 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    private func resolveCurrentSub2APIBalanceSlot(
+        for instanceID: RuntimeInstanceID
+    ) -> (
+        slot: RuntimeSlotID,
+        config: DeckKeySub2APIBalanceConfiguration,
+        dataSource: Sub2APIDataSourceConfiguration,
+        dataSourceInstanceID: String,
+        baseURL: String,
+        bearerKey: String,
+        refreshInterval: Int
+    )? {
+        guard let slot = runtimeSlotsByInstance[instanceID],
+              slot.pageID == interactionState.currentPageID,
+              interactionState.configuration(for: slot.keyID)?.displayMode == .function,
+              interactionState.configuration(for: slot.keyID)?.function == .sub2APIBalance,
+              let dataSource = interactionState.resolvedSub2APIDataSourceValue(for: slot.keyID)
+        else { return nil }
+
+        return (
+            slot,
+            interactionState.sub2APIBalanceConfiguration(for: slot.keyID),
+            dataSource,
+            interactionState.resolvedSub2APIDataSourceInstanceID(for: slot.keyID),
+            dataSource.baseURL,
+            dataSource.bearerKey,
+            dataSource.refreshInterval
+        )
+    }
+
+    private func sub2APIBalanceConsumerInstanceIDs(
+        for dataSourceInstanceID: String
+    ) -> [RuntimeInstanceID] {
+        runtimeInstancesBySlot.compactMap { slot, instanceID in
+            guard slot.pageID == interactionState.currentPageID,
+                  interactionState.configuration(for: slot.keyID)?.displayMode == .function,
+                  interactionState.configuration(for: slot.keyID)?.function == .sub2APIBalance,
+                  interactionState.resolvedSub2APIDataSourceInstanceID(for: slot.keyID)
+                    == dataSourceInstanceID
+            else { return nil }
+            return instanceID
+        }
+        .sorted { (runtimeSlotsByInstance[$0]?.keyID ?? .max) < (runtimeSlotsByInstance[$1]?.keyID ?? .max) }
+    }
+
+    private func sharedSub2APIBalanceLeaderInstanceID(
+        for dataSourceInstanceID: String
+    ) -> RuntimeInstanceID? {
+        let consumers = sub2APIBalanceConsumerInstanceIDs(for: dataSourceInstanceID)
+        guard let first = consumers.first else { return nil }
+        let isShared = consumers.count > 1
+            || resolveCurrentSub2APIBalanceSlot(for: first)?.config.dataSourceInstanceID != nil
+        return isShared ? first : nil
+    }
+
+    private func fetchSub2APIBalance(for keyID: Int) {
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else { return }
+        fetchSub2APIBalance(for: instanceID)
+    }
+
+    private func fetchSub2APIBalance(for instanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              let resolved = resolveCurrentSub2APIBalanceSlot(for: instanceID),
+              !sub2APIBalanceTokenPausedInstances.contains(instanceID),
+              !resolved.baseURL.isEmpty,
+              !resolved.bearerKey.isEmpty
+        else { return }
+
+        let leaderInstanceID = sharedSub2APIBalanceLeaderInstanceID(
+            for: resolved.dataSourceInstanceID
+        ) ?? instanceID
+        if leaderInstanceID != instanceID {
+            fetchSub2APIBalance(for: leaderInstanceID)
+            return
+        }
+        guard sub2APIBalanceFetchTasks[leaderInstanceID] == nil else { return }
+
+        let consumerInstanceIDs = sub2APIBalanceConsumerInstanceIDs(
+            for: resolved.dataSourceInstanceID
+        )
+        let consumers = consumerInstanceIDs.isEmpty ? [instanceID] : consumerInstanceIDs
+        for consumer in consumers {
+            stopSub2APIBalanceTimer(for: consumer, preservesNextFire: false)
+            if consumer != leaderInstanceID {
+                sub2APIBalanceFetchTasks[consumer]?.cancel()
+                sub2APIBalanceFetchTasks[consumer] = nil
+            }
+        }
+
+        let pageID = resolved.slot.pageID
+        let dataSourceInstanceID = resolved.dataSourceInstanceID
+        let baseURL = resolved.baseURL
+        let bearerKey = resolved.bearerKey
+        let fetcher = sub2APIFetcher
+        sub2APIBalanceFetchTasks[leaderInstanceID] = Task { @MainActor [weak self] in
+            var effectiveToken = resolved.dataSource.effectiveAccessToken
+            var expectedBearerKey = bearerKey
+            if effectiveToken.isEmpty {
+                let result: Sub2APIBalanceResult = resolved.dataSource.isInvalidJSON
+                    ? .invalidToken : .networkError("认证信息为空")
+                self?.finishSub2APIBalanceFetch(
+                    result,
+                    leaderInstanceID: leaderInstanceID,
+                    pageID: pageID,
+                    dataSourceInstanceID: dataSourceInstanceID,
+                    baseURL: baseURL,
+                    expectedBearerKey: expectedBearerKey
+                )
+                return
+            }
+
+            if let authInfo = resolved.dataSource.authInfo, authInfo.isExpiringSoon,
+               let refreshed = await self?.refreshSub2APIAuthentication(
+                baseURL: baseURL,
+                refreshToken: authInfo.refreshToken,
+                dataSourceInstanceID: dataSourceInstanceID
+               ) {
+                effectiveToken = refreshed.accessToken
+                if let json = refreshed.jsonString() {
+                    self?.interactionState.setSub2APIBearerKey(
+                        json,
+                        forDataSourceInstanceID: dataSourceInstanceID
+                    )
+                    expectedBearerKey = json
+                    _ = self?.persistCurrentConfiguration()
+                }
+            }
+
+            let result = await fetcher.fetchBalance(baseURL: baseURL, bearerKey: effectiveToken)
+            guard !Task.isCancelled else { return }
+            self?.finishSub2APIBalanceFetch(
+                result,
+                leaderInstanceID: leaderInstanceID,
+                pageID: pageID,
+                dataSourceInstanceID: dataSourceInstanceID,
+                baseURL: baseURL,
+                expectedBearerKey: expectedBearerKey
+            )
+        }
+    }
+
+    private func finishSub2APIBalanceFetch(
+        _ result: Sub2APIBalanceResult,
+        leaderInstanceID: RuntimeInstanceID,
+        pageID: String,
+        dataSourceInstanceID: String,
+        baseURL: String,
+        expectedBearerKey: String
+    ) {
+        guard let latestLeader = resolveCurrentSub2APIBalanceSlot(for: leaderInstanceID),
+              latestLeader.slot.pageID == pageID,
+              latestLeader.dataSourceInstanceID == dataSourceInstanceID,
+              latestLeader.baseURL == baseURL,
+              latestLeader.bearerKey == expectedBearerKey
+        else { return }
+
+        sub2APIBalanceFetchTasks[leaderInstanceID] = nil
+        var keyIDs: Set<Int> = []
+        let consumers = sub2APIBalanceConsumerInstanceIDs(for: dataSourceInstanceID)
+        for consumerInstanceID in consumers.isEmpty ? [leaderInstanceID] : consumers {
+            guard let consumer = resolveCurrentSub2APIBalanceSlot(for: consumerInstanceID) else { continue }
+            keyIDs.insert(consumer.slot.keyID)
+            interactionState.setSub2APIBalanceLastResult(result, for: consumer.slot.keyID)
+            if result.isTokenUnavailable {
+                sub2APIBalanceTokenPausedInstances.insert(consumerInstanceID)
+                stopSub2APIBalanceTimer(for: consumerInstanceID, preservesNextFire: false)
+            }
+        }
+        syncKeyDisplays(keyIDs: keyIDs)
+        if !result.isTokenUnavailable {
+            scheduleNextSub2APIBalanceRefresh(for: leaderInstanceID)
+        }
+    }
+
+    private func resumeSub2APIBalanceRuntime(_ instanceID: RuntimeInstanceID) {
+        guard resolveCurrentSub2APIBalanceSlot(for: instanceID) != nil,
+              !sub2APIBalanceTokenPausedInstances.contains(instanceID)
+        else { return }
+        if let nextFire = sub2APIBalanceNextFireNanoseconds[instanceID] {
+            scheduleSub2APIBalanceRefresh(for: instanceID, fireAt: nextFire)
+        } else if interactionState.sub2APIBalanceConfiguration(
+            for: runtimeSlotsByInstance[instanceID]?.keyID ?? -1
+        ).lastResult != nil {
+            scheduleNextSub2APIBalanceRefresh(for: instanceID)
+        } else {
+            fetchSub2APIBalance(for: instanceID)
+        }
+    }
+
+    private func scheduleNextSub2APIBalanceRefresh(for instanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              let resolved = resolveCurrentSub2APIBalanceSlot(for: instanceID),
+              !sub2APIBalanceTokenPausedInstances.contains(instanceID),
+              !resolved.baseURL.isEmpty,
+              !resolved.bearerKey.isEmpty,
+              resolved.refreshInterval >= 5
+        else { return }
+        if let leader = sharedSub2APIBalanceLeaderInstanceID(for: resolved.dataSourceInstanceID),
+           leader != instanceID { return }
+        let interval = UInt64(
+            TimeInterval(resolved.refreshInterval) * sub2APIRefreshSecondDuration * 1_000_000_000
+        )
+        scheduleSub2APIBalanceRefresh(for: instanceID, fireAt: nowNanoseconds + interval)
+    }
+
+    private func scheduleSub2APIBalanceRefresh(
+        for instanceID: RuntimeInstanceID,
+        fireAt fireNanoseconds: UInt64
+    ) {
+        stopSub2APIBalanceTimer(for: instanceID, preservesNextFire: true)
+        guard canRunInternalRefresh,
+              resolveCurrentSub2APIBalanceSlot(for: instanceID) != nil,
+              !sub2APIBalanceTokenPausedInstances.contains(instanceID)
+        else { return }
+        sub2APIBalanceNextFireNanoseconds[instanceID] = fireNanoseconds
+        guard fireNanoseconds > nowNanoseconds else {
+            sub2APIBalanceNextFireNanoseconds[instanceID] = nil
+            fetchSub2APIBalance(for: instanceID)
+            return
+        }
+        let interval = TimeInterval(fireNanoseconds - nowNanoseconds) / 1_000_000_000
+        sub2APIBalanceTimers[instanceID] = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.sub2APIBalanceTimers[instanceID] = nil
+                self?.sub2APIBalanceNextFireNanoseconds[instanceID] = nil
+                self?.fetchSub2APIBalance(for: instanceID)
+            }
+        }
+    }
+
+    private func stopSub2APIBalanceTimer(
+        for instanceID: RuntimeInstanceID,
+        preservesNextFire: Bool
+    ) {
+        sub2APIBalanceTimers[instanceID]?.invalidate()
+        sub2APIBalanceTimers[instanceID] = nil
+        if !preservesNextFire { sub2APIBalanceNextFireNanoseconds[instanceID] = nil }
+    }
+
+    private func restartSub2APIBalanceTimerForDataSource(containing keyID: Int) {
+        guard let instanceID = ensureRuntimeInstance(for: keyID),
+              let resolved = resolveCurrentSub2APIBalanceSlot(for: instanceID)
+        else { return }
+        let leader = sharedSub2APIBalanceLeaderInstanceID(for: resolved.dataSourceInstanceID)
+            ?? instanceID
+        for consumer in sub2APIBalanceConsumerInstanceIDs(for: resolved.dataSourceInstanceID) {
+            stopSub2APIBalanceTimer(for: consumer, preservesNextFire: false)
+        }
+        scheduleNextSub2APIBalanceRefresh(for: leader)
+    }
+
     private func refreshAssignedSub2APIStatuses() {
         guard canRunInternalRefresh else {
             return
         }
 
         ensureCurrentPageRuntimeInstances()
-        for key in layout.keys where interactionState.configuration(for: key.id)?.function == .sub2API {
-            fetchSub2API(for: key.id)
+        for key in layout.keys {
+            switch interactionState.configuration(for: key.id)?.function {
+            case .sub2API:
+                fetchSub2API(for: key.id)
+            case .sub2APIBalance:
+                fetchSub2APIBalance(for: key.id)
+            default:
+                break
+            }
         }
     }
 
@@ -2465,7 +2793,7 @@ final class H200ConnectionModel: ObservableObject {
 
     private func currentSub2APIDataSourceSignaturesByKeyID() -> [Int: Sub2APIDataSourceSignature] {
         Dictionary(uniqueKeysWithValues: layout.keys.compactMap { key in
-            guard interactionState.configuration(for: key.id)?.function == .sub2API else {
+            guard interactionState.configuration(for: key.id)?.function.isSub2APIQuery == true else {
                 return nil
             }
             return (
@@ -2492,13 +2820,22 @@ final class H200ConnectionModel: ObservableObject {
                 : nil
         })
         for keyID in changedKeyIDs {
-            _ = interactionState.clearSub2APIRuntimeState(for: keyID)
+            let function = interactionState.configuration(for: keyID)?.function
+            if function == .sub2API {
+                _ = interactionState.clearSub2APIRuntimeState(for: keyID)
+            } else {
+                _ = interactionState.clearSub2APIBalanceRuntimeState(for: keyID)
+            }
             let previousSignature = previousSignatures[keyID]
             let currentSignature = currentSignatures[keyID]
             if resumesTokenPausedKeyIDs.contains(keyID)
                 || previousSignature?.instanceID != currentSignature?.instanceID
                 || previousSignature?.bearerKey != currentSignature?.bearerKey {
-                resumeSub2APIAfterBearerChange(for: keyID)
+                if function == .sub2API {
+                    resumeSub2APIAfterBearerChange(for: keyID)
+                } else if let instanceID = ensureRuntimeInstance(for: keyID) {
+                    sub2APIBalanceTokenPausedInstances.remove(instanceID)
+                }
             }
             if let instanceID = ensureRuntimeInstance(for: keyID) {
                 stopSub2APITimer(for: instanceID, preservesNextFire: false)
@@ -2507,13 +2844,20 @@ final class H200ConnectionModel: ObservableObject {
                 sub2APIGroupListTasks[instanceID]?.cancel()
                 sub2APIGroupListTasks[instanceID] = nil
                 stopSub2APIGroupListRefresh(for: instanceID, preservesNextFire: false)
+                stopSub2APIBalanceTimer(for: instanceID, preservesNextFire: false)
+                sub2APIBalanceFetchTasks[instanceID]?.cancel()
+                sub2APIBalanceFetchTasks[instanceID] = nil
             }
             syncKeyDisplay(keyID: keyID)
         }
         for keyID in changedKeyIDs.sorted() {
-            scheduleSub2APIGroupListRefresh(for: keyID)
-            if interactionState.sub2APIConfiguration(for: keyID).targetGroupID > 0 {
-                fetchSub2API(for: keyID)
+            if interactionState.configuration(for: keyID)?.function == .sub2API {
+                scheduleSub2APIGroupListRefresh(for: keyID)
+                if interactionState.sub2APIConfiguration(for: keyID).targetGroupID > 0 {
+                    fetchSub2API(for: keyID)
+                }
+            } else {
+                fetchSub2APIBalance(for: keyID)
             }
         }
     }
@@ -2918,6 +3262,17 @@ private extension Sub2APICapacityResult {
 }
 
 private extension Sub2APIGroupListResult {
+    var isTokenUnavailable: Bool {
+        switch self {
+        case .invalidToken, .tokenExpired:
+            return true
+        case .success, .networkError:
+            return false
+        }
+    }
+}
+
+private extension Sub2APIBalanceResult {
     var isTokenUnavailable: Bool {
         switch self {
         case .invalidToken, .tokenExpired:

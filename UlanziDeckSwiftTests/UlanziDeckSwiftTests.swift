@@ -3244,6 +3244,183 @@ struct UlanziDeckSwiftTests {
         #expect(expiredTokenResponse.data == nil)
     }
 
+    @Test func sub2APIBalanceFetcherParsesSupportedShapesAndFormatsValues() async throws {
+        let remainingURL = try #require(URL(string: "https://api.example.com/remaining/v1/usage"))
+        let quotaURL = try #require(URL(string: "https://api.example.com/quota/v1/usage"))
+        let balanceURL = try #require(URL(string: "https://api.example.com/v1/usage"))
+        WebPageMetadataURLProtocol.setStubs([
+            remainingURL: .init(statusCode: 200, mimeType: "application/json", data: Data(#"{"remaining":12}"#.utf8)),
+            quotaURL: .init(statusCode: 200, mimeType: "application/json", data: Data(#"{"quota":{"remaining":"3.456"}}"#.utf8)),
+            balanceURL: .init(statusCode: 200, mimeType: "application/json", data: Data(#"{"balance":7.5}"#.utf8)),
+        ])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let fetcher = Sub2APIFetcher(urlSession: URLSession(configuration: configuration))
+
+        let remaining = await fetcher.fetchBalance(baseURL: "api.example.com/remaining", bearerKey: "token")
+        let quota = await fetcher.fetchBalance(baseURL: "api.example.com/quota", bearerKey: "token")
+        let balance = await fetcher.fetchBalance(baseURL: "api.example.com/v1", bearerKey: "token")
+
+        #expect(remaining == .success(remaining: 12))
+        #expect(remaining.displayValue == "12")
+        #expect(quota == .success(remaining: 3.456))
+        #expect(quota.displayValue == "3.46")
+        #expect(balance == .success(remaining: 7.5))
+        #expect(balance.displayValue == "7.50")
+        #expect(WebPageMetadataURLProtocol.receivedRequests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Authorization") == "Bearer token"
+        })
+    }
+
+    @Test func sub2APIBalanceConfigurationUsesSharedSourceContractAndKeepsSecretsOutOfPayload() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIBalance, to: 3)
+        _ = state.assign(.sub2APIBalance, to: 4)
+        _ = state.assign(.sub2API, to: 5)
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIRefreshInterval(45, for: 3)
+        _ = state.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "secret-token"), for: 3)
+        let sourceID = state.configuration(for: 3)?.sub2APIDataSourceConfiguration.instanceID
+        _ = state.setSub2APIDataSourceInstanceID(sourceID, for: 4)
+        _ = state.setSub2APIRefreshInterval(90, for: 5)
+        _ = state.setSub2APIDataSourceInstanceID(sourceID, for: 5)
+
+        #expect(state.resolvedSub2APIRefreshInterval(for: 4) == 45)
+        #expect(state.resolvedSub2APIRefreshInterval(for: 5) == 90)
+        #expect(state.resolvedSub2APIBaseURL(for: 5) == "api.example.com")
+        #expect(state.resolvedSub2APIBearerKey(for: 5).contains("secret-token"))
+
+        let encoded = try JSONEncoder().encode(try #require(state.configuration(for: 3)))
+        let payload = try #require(String(data: encoded, encoding: .utf8))
+        #expect(!payload.contains("secret-token"))
+
+        _ = state.setSub2APIDataSourceInstanceID(nil, for: 4)
+        let custom = try #require(state.configuration(for: 4)?.sub2APIBalance)
+        #expect(custom.dataSourceInstanceID == nil)
+        #expect(custom.baseURL.isEmpty)
+        #expect(custom.bearerKey.isEmpty)
+    }
+
+    @MainActor
+    @Test func sharedSub2APIBalanceUsesOneRequestAndPressRefreshesAllConsumers() async throws {
+        let fetcher = FakeSub2APIFetcher(balanceResults: [
+            .success(remaining: 12.345),
+            .success(remaining: 7),
+        ])
+        var loadedState = DeckGridInteractionState(layout: .h200Prototype)
+        _ = loadedState.assign(.sub2APIBalance, to: 3)
+        _ = loadedState.assign(.sub2APIBalance, to: 4)
+        _ = loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        _ = loadedState.setSub2APIServiceName("主服务", for: 3)
+        _ = loadedState.setSub2APIBalanceUnit("USD", for: 3)
+        let sourceID = loadedState.configuration(for: 3)?.sub2APIDataSourceConfiguration.instanceID
+        _ = loadedState.setSub2APIDataSourceInstanceID(sourceID, for: 4)
+        _ = loadedState.setSub2APIServiceName("副服务", for: 4)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 1_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.balanceRequests.count == 1
+                && model.interactionState.sub2APIBalanceConfiguration(for: 3).lastResult == .success(remaining: 12.345)
+                && model.interactionState.sub2APIBalanceConfiguration(for: 4).lastResult == .success(remaining: 12.345)
+        }
+        let displays = model.interactionState.displays(for: .h200Prototype)
+        let sourceDisplay = try #require(displays.first(where: { $0.id == 3 }))
+        let consumerDisplay = try #require(displays.first(where: { $0.id == 4 }))
+        #expect(sourceDisplay.sub2APIButtonContent?.serviceName == "主服务")
+        #expect(sourceDisplay.sub2APIButtonContent?.groupName == "余额")
+        #expect(sourceDisplay.sub2APIButtonContent?.availableConcurrencyText == "USD 12.35")
+        #expect(consumerDisplay.sub2APIButtonContent?.serviceName == "副服务")
+
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Self.waitUntil {
+            fetcher.balanceRequests.count == 2
+                && model.interactionState.sub2APIBalanceConfiguration(for: 3).lastResult == .success(remaining: 7)
+                && model.interactionState.sub2APIBalanceConfiguration(for: 4).lastResult == .success(remaining: 7)
+        }
+        #expect(fetcher.balanceRequests == [
+            .init(baseURL: "api.example.com", bearerKey: "token"),
+            .init(baseURL: "api.example.com", bearerKey: "token"),
+        ])
+    }
+
+    @MainActor
+    @Test func balanceAndCapacitySharingSourceStillRequestSeparateEndpoints() async throws {
+        let item = Self.sub2APICapacityItem(groupID: 10, groupName: "号池", availableConcurrency: 8)
+        let fetcher = FakeSub2APIFetcher(
+            groupListResults: [.success(items: [item])],
+            balanceResults: [.success(remaining: 9)]
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIBalance, to: 3)
+        _ = state.assign(.sub2API, to: 4)
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        let sourceID = state.configuration(for: 3)?.sub2APIDataSourceConfiguration.instanceID
+        _ = state.setSub2APIDataSourceInstanceID(sourceID, for: 4)
+        _ = state.setSub2APITargetGroupID(10, for: 4)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: state),
+            sub2APIFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.balanceRequests.count == 1 && fetcher.groupListRequests.count == 1
+        }
+        #expect(fetcher.requests.isEmpty)
+    }
+
+    @Test func sub2APIBalanceFailureKeepsServiceAndBalanceLabels() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIBalance, to: 3)
+        _ = state.setSub2APIServiceName("测试服务", for: 3)
+        _ = state.setSub2APIBalanceLastResult(.networkError("离线"), for: 3)
+
+        let display = try #require(state.displays(for: .h200Prototype).first(where: { $0.id == 3 }))
+        #expect(display.sub2APIButtonContent?.serviceName == "测试服务")
+        #expect(display.sub2APIButtonContent?.groupName == "余额")
+        #expect(display.sub2APIButtonContent?.availableConcurrencyText == "失败")
+    }
+
+    @MainActor
+    @Test func sub2APIBalanceAutomaticallyRefreshesAtItsOwnInterval() async throws {
+        let fetcher = FakeSub2APIFetcher(
+            balanceResults: [.success(remaining: 5), .success(remaining: 4)],
+            defaultBalanceResult: .success(remaining: 3)
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIBalance, to: 3)
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        _ = state.setSub2APIRefreshInterval(5, for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: state),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 0.01
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.balanceRequests.count >= 2
+                && model.interactionState.sub2APIBalanceConfiguration(for: 3).lastResult
+                    == .success(remaining: 4)
+        }
+    }
+
     @MainActor
     @Test func sharedSub2APIDataSourceUsesOneRequestForMultipleTargetGroups() async throws {
         let firstItem = Self.sub2APICapacityItem(groupID: 101, groupName: "一号池", availableConcurrency: 11)
@@ -8462,6 +8639,11 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         let bearerKey: String
     }
 
+    struct BalanceRequest: Equatable {
+        let baseURL: String
+        let bearerKey: String
+    }
+
     struct RefreshRequest: Equatable {
         let baseURL: String
         let refreshToken: String
@@ -8472,11 +8654,14 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
     private let defaultResult: Sub2APICapacityResult
     private var groupListResults: [Sub2APIGroupListResult]
     private let defaultGroupListResult: Sub2APIGroupListResult
+    private var balanceResults: [Sub2APIBalanceResult]
+    private let defaultBalanceResult: Sub2APIBalanceResult
     private var refreshResults: [Sub2APIAuthInfo?]
     private let fetchDelayNanoseconds: UInt64?
     private let groupListFetchDelayNanoseconds: UInt64?
     private var storedRequests: [Request] = []
     private var storedGroupListRequests: [GroupListRequest] = []
+    private var storedBalanceRequests: [BalanceRequest] = []
     private var storedRefreshRequests: [RefreshRequest] = []
 
     var requests: [Request] {
@@ -8485,6 +8670,10 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
 
     var groupListRequests: [GroupListRequest] {
         locked { storedGroupListRequests }
+    }
+
+    var balanceRequests: [BalanceRequest] {
+        locked { storedBalanceRequests }
     }
 
     var refreshRequests: [RefreshRequest] {
@@ -8496,6 +8685,8 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         defaultResult: Sub2APICapacityResult = .networkError("未配置响应"),
         groupListResults: [Sub2APIGroupListResult] = [],
         defaultGroupListResult: Sub2APIGroupListResult = .networkError("未配置响应"),
+        balanceResults: [Sub2APIBalanceResult] = [],
+        defaultBalanceResult: Sub2APIBalanceResult = .networkError("未配置响应"),
         refreshResults: [Sub2APIAuthInfo?] = [],
         fetchDelayNanoseconds: UInt64? = nil,
         groupListFetchDelayNanoseconds: UInt64? = nil
@@ -8504,6 +8695,8 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         self.defaultResult = defaultResult
         self.groupListResults = groupListResults
         self.defaultGroupListResult = defaultGroupListResult
+        self.balanceResults = balanceResults
+        self.defaultBalanceResult = defaultBalanceResult
         self.refreshResults = refreshResults
         self.fetchDelayNanoseconds = fetchDelayNanoseconds
         self.groupListFetchDelayNanoseconds = groupListFetchDelayNanoseconds
@@ -8539,6 +8732,14 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
         }
 
         return result
+    }
+
+    func fetchBalance(baseURL: String, bearerKey: String) async -> Sub2APIBalanceResult {
+        locked {
+            storedBalanceRequests.append(BalanceRequest(baseURL: baseURL, bearerKey: bearerKey))
+            guard !balanceResults.isEmpty else { return defaultBalanceResult }
+            return balanceResults.removeFirst()
+        }
     }
 
     func refreshBearerToken(baseURL: String, refreshToken: String) async -> Sub2APIAuthInfo? {

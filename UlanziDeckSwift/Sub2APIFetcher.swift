@@ -183,6 +183,21 @@ nonisolated enum Sub2APIGroupListResult: Equatable {
     case networkError(String)
 }
 
+nonisolated enum Sub2APIBalanceResult: Equatable {
+    case success(remaining: Double)
+    case invalidToken
+    case tokenExpired
+    case networkError(String)
+
+    var displayValue: String? {
+        guard case let .success(remaining) = self else { return nil }
+        if remaining.rounded() == remaining {
+            return String(format: "%.0f", locale: Locale(identifier: "en_US_POSIX"), remaining)
+        }
+        return String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), remaining)
+    }
+}
+
 private nonisolated struct Sub2APIFetchError: Error {
     let message: String
     let isUnauthorized: Bool
@@ -210,6 +225,7 @@ nonisolated struct Sub2APIBaseURL: Equatable {
         "auth",
         "refresh",
     ]
+    private static let usagePathComponents = ["v1", "usage"]
 
     let url: URL
     let host: String
@@ -252,6 +268,15 @@ nonisolated struct Sub2APIBaseURL: Equatable {
 
     var refreshTokenURL: URL {
         Self.refreshPathComponents.reduce(url) { partialURL, pathComponent in
+            partialURL.appendingPathComponent(pathComponent)
+        }
+    }
+
+    var usageURL: URL {
+        if url.pathComponents.last?.lowercased() == "v1" {
+            return url.appendingPathComponent("usage")
+        }
+        return Self.usagePathComponents.reduce(url) { partialURL, pathComponent in
             partialURL.appendingPathComponent(pathComponent)
         }
     }
@@ -299,6 +324,7 @@ nonisolated struct Sub2APIRefreshResponse: Decodable {
 nonisolated protocol Sub2APIFetching: Sendable {
     func fetchCapacitySummary(baseURL: String, targetGroupID: Int, bearerKey: String) async -> Sub2APICapacityResult
     func fetchCapacityGroups(baseURL: String, bearerKey: String) async -> Sub2APIGroupListResult
+    func fetchBalance(baseURL: String, bearerKey: String) async -> Sub2APIBalanceResult
     func refreshBearerToken(baseURL: String, refreshToken: String) async -> Sub2APIAuthInfo?
 }
 
@@ -372,6 +398,74 @@ nonisolated struct Sub2APIFetcher: Sub2APIFetching {
         }
 
         return .success(items: items)
+    }
+
+    func fetchBalance(baseURL: String, bearerKey: String) async -> Sub2APIBalanceResult {
+        let url: URL
+        do {
+            url = try Sub2APIBaseURL(baseURL).usageURL
+        } catch {
+            return .networkError("无效的 Base URL")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(bearerKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = timeoutSeconds
+
+        let data: Data
+        do {
+            data = try await AuthenticatedHTTPResponseLoader.data(
+                for: request,
+                urlSession: urlSession
+            )
+        } catch AuthenticatedHTTPResponseError.unauthorized {
+            return .invalidToken
+        } catch {
+            return .networkError(error.localizedDescription)
+        }
+
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return .networkError("解析响应失败")
+        }
+        if Self.responseIndicatesTokenExpired(object) {
+            return .tokenExpired
+        }
+        if Self.responseIndicatesInvalidToken(object) {
+            return .invalidToken
+        }
+        let quota = object["quota"] as? [String: Any]
+        guard let remaining = Self.doubleValue(object["remaining"])
+            ?? Self.doubleValue(quota?["remaining"])
+            ?? Self.doubleValue(object["balance"]),
+              remaining.isFinite
+        else {
+            return .networkError("响应缺少有效余额")
+        }
+        return .success(remaining: remaining)
+    }
+
+    private static func doubleValue(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber { return number.doubleValue }
+        if let string = value as? String { return Double(string) }
+        return nil
+    }
+
+    private static func responseIndicatesInvalidToken(_ object: [String: Any]) -> Bool {
+        responseText(in: object).localizedCaseInsensitiveContains("invalid_token")
+            || responseText(in: object).localizedCaseInsensitiveContains("invalid token")
+    }
+
+    private static func responseIndicatesTokenExpired(_ object: [String: Any]) -> Bool {
+        responseText(in: object).localizedCaseInsensitiveContains("token_expired")
+            || responseText(in: object).localizedCaseInsensitiveContains("expired")
+    }
+
+    private static func responseText(in object: [String: Any]) -> String {
+        [object["code"], object["message"]]
+            .compactMap { $0.map(String.init(describing:)) }
+            .joined(separator: " ")
     }
 
     private func fetchCapacityResponse(baseURL: String, bearerKey: String) async -> Result<Sub2APICapacityResponse, Sub2APIFetchError> {

@@ -5,7 +5,7 @@
 ## 文档索引
 
 - [research.md](research.md)：Ulanzi Deck 产品线、官方软件、社区逆向项目和 D200/H200 HID 协议调研。
-- [h200-startup-sync.md](h200-startup-sync.md)：启动成功后向 H200 同步 14 格数字包的实现约定。
+- [h200-startup-sync.md](h200-startup-sync.md)：启动成功后向 H200 同步 14 格数字包，以及 Sub2API 号池/余额运行时与共享来源的实现约定。
 - [h200-input-events.md](h200-input-events.md)：H200 物理按键输入包解析和应用内按键状态映射。
 - [shortcuts.md](shortcuts.md)：macOS Shortcuts 暴露的亮度调节器动作。
 - [menu-bar-smoke.md](menu-bar-smoke.md)：菜单栏应用生命周期的发布前手工 smoke 清单。

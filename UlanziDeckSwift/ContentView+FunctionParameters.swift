@@ -360,6 +360,83 @@ extension ContentView {
                 Spacer()
             }
 
+        case .sub2APIBalance:
+            HStack(alignment: .top, spacing: 28) {
+                functionParameterColumn(for: configuration)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .top, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("数据来源")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+
+                            Picker("数据来源", selection: selectedSub2APIDataSourceBinding) {
+                                Text("自定义").tag(String?.none)
+                                ForEach(selectedSub2APIDataSourceReferenceOptions) { option in
+                                    Text(option.title).tag(Optional(option.instanceID))
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(width: 150, alignment: .leading)
+                        }
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Base URL")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            TextField("your-api.example.com", text: selectedSub2APIBaseURLBinding)
+                                .textFieldStyle(.roundedBorder)
+                                .disabled(selectedSub2APIDataSourceInstanceID != nil)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("刷新间隔（秒）")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 10) {
+                            TextField("刷新间隔", value: selectedSub2APIRefreshIntervalBinding, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 96)
+                            Stepper("刷新间隔", value: selectedSub2APIRefreshIntervalBinding, in: 5...3600)
+                                .labelsHidden()
+                        }
+                        .disabled(selectedSub2APIDataSourceInstanceID != nil)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("认证信息")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            SecureField("认证信息", text: selectedSub2APIBearerKeyBinding)
+                                .textFieldStyle(.roundedBorder)
+                                .disabled(selectedSub2APIDataSourceInstanceID != nil)
+                            Button("获取认证信息") { copySub2APIAuthScript() }
+                                .font(.caption)
+                                .disabled(selectedSub2APIDataSourceInstanceID != nil)
+                        }
+                    }
+
+                    Divider()
+                    sub2APINameParameterRow(
+                        label: "服务名",
+                        placeholder: selectedSub2APIAutomaticServiceName,
+                        text: selectedSub2APIServiceNameBinding
+                    )
+                    sub2APINameParameterRow(
+                        label: "单位",
+                        placeholder: "$",
+                        text: selectedSub2APIBalanceUnitBinding
+                    )
+                }
+                .frame(maxWidth: 360, alignment: .leading)
+
+                Spacer()
+            }
+
         case .codexUsage:
             codexUsageParameterContent(for: configuration)
 
@@ -703,7 +780,7 @@ extension ContentView {
             FunctionSection(
                 title: "网站",
                 systemImageName: "globe",
-                functions: [.openWebPage, .sub2API, .codexUsage]
+                functions: [.openWebPage, .sub2API, .sub2APIBalance, .codexUsage]
             ),
             FunctionSection(
                 title: "游戏",
@@ -866,7 +943,7 @@ extension ContentView {
     var selectedSub2APIBaseURLBinding: Binding<String> {
         Binding(
             get: {
-                selectedConfiguration?.sub2API.baseURL ?? ""
+                selectedConfiguration?.sub2APIDataSourceConfiguration.baseURL ?? ""
             },
             set: { baseURL in
                 onSub2APIBaseURLChange(baseURL)
@@ -875,7 +952,7 @@ extension ContentView {
     }
 
     var selectedSub2APIDataSourceInstanceID: String? {
-        selectedConfiguration?.sub2API.dataSourceInstanceID
+        selectedConfiguration?.sub2APIDataSourceConfiguration.dataSourceInstanceID
     }
 
     var selectedSub2APIDataSourceReferenceOptions: [DeckKeySub2APIReferenceOption] {
@@ -980,7 +1057,10 @@ extension ContentView {
     }
 
     var selectedSub2APIAutomaticServiceName: String {
-        selectedConfiguration?.sub2API.automaticServiceDisplayName ?? "Sub2API"
+        guard let configuration = selectedConfiguration else { return "Sub2API" }
+        return configuration.function == .sub2APIBalance
+            ? configuration.sub2APIBalance.serviceDisplayName
+            : configuration.sub2API.automaticServiceDisplayName
     }
 
     var selectedSub2APIAutomaticGroupName: String {
@@ -990,7 +1070,10 @@ extension ContentView {
     var selectedSub2APIServiceNameBinding: Binding<String> {
         Binding(
             get: {
-                selectedConfiguration?.sub2API.customServiceName ?? ""
+                guard let configuration = selectedConfiguration else { return "" }
+                return configuration.function == .sub2APIBalance
+                    ? configuration.sub2APIBalance.customServiceName
+                    : configuration.sub2API.customServiceName
             },
             set: { serviceName in
                 onSub2APIServiceNameChange(serviceName)
@@ -1040,7 +1123,7 @@ extension ContentView {
     var selectedSub2APIRefreshIntervalBinding: Binding<Int> {
         Binding(
             get: {
-                selectedConfiguration?.sub2API.refreshInterval ?? 30
+                selectedConfiguration?.sub2APIDataSourceConfiguration.refreshInterval ?? 30
             },
             set: { interval in
                 onSub2APIRefreshIntervalChange(interval)
@@ -1118,11 +1201,18 @@ extension ContentView {
     var selectedSub2APIBearerKeyBinding: Binding<String> {
         Binding(
             get: {
-                selectedConfiguration?.sub2API.bearerKey ?? ""
+                selectedConfiguration?.sub2APIDataSourceConfiguration.bearerKey ?? ""
             },
             set: { bearerKey in
                 onSub2APIBearerKeyChange(bearerKey)
             }
+        )
+    }
+
+    var selectedSub2APIBalanceUnitBinding: Binding<String> {
+        Binding(
+            get: { selectedConfiguration?.sub2APIBalance.unit ?? "$" },
+            set: { onSub2APIBalanceUnitChange($0) }
         )
     }
 

@@ -9,6 +9,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case connectSMBServer
     case brightness
     case sub2API
+    case sub2APIBalance
     case codexUsage
     case genshinStatus
     case starRailStatus
@@ -25,6 +26,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
         .openWebPage,
         .connectSMBServer,
         .sub2API,
+        .sub2APIBalance,
         .codexUsage,
         .genshinStatus,
         .starRailStatus,
@@ -52,6 +54,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "亮度调节"
         case .sub2API:
             return "Sub2API 号池查询"
+        case .sub2APIBalance:
+            return "Sub2API 余额查询"
         case .codexUsage:
             return "Codex 剩余额度"
         case .genshinStatus:
@@ -87,7 +91,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "network"
         case .brightness:
             return "sun.max"
-        case .sub2API:
+        case .sub2API, .sub2APIBalance:
             return "globe"
         case .codexUsage:
             return "gauge.with.dots.needle.67percent"
@@ -116,7 +120,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return .starRail
         case .zenlessZoneStatus:
             return .zenlessZoneZero
-        case .none, .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .codexUsage, .pageFolder, .pageBack, .previousPage, .nextPage:
+        case .none, .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .codexUsage, .pageFolder, .pageBack, .previousPage, .nextPage:
             return nil
         }
     }
@@ -130,6 +134,7 @@ nonisolated enum DeckKeyPressRuntimeAction: Equatable {
     case openWebPage
     case connectSMBServer
     case refreshSub2API
+    case refreshSub2APIBalance
     case refreshCodexUsage
     case refreshMihoyoGame
     case enterPage
@@ -140,11 +145,16 @@ nonisolated enum DeckKeyPressRuntimeAction: Equatable {
 
 nonisolated enum DeckKeyScheduledRuntime: Equatable {
     case sub2API
+    case sub2APIBalance
     case codexUsage
     case mihoyoGame
 }
 
 extension DeckKeyFunction {
+    nonisolated var isSub2APIQuery: Bool {
+        self == .sub2API || self == .sub2APIBalance
+    }
+
     nonisolated var pressRuntimeAction: DeckKeyPressRuntimeAction {
         switch self {
         case .tally:
@@ -159,6 +169,8 @@ extension DeckKeyFunction {
             return .connectSMBServer
         case .sub2API:
             return .refreshSub2API
+        case .sub2APIBalance:
+            return .refreshSub2APIBalance
         case .codexUsage:
             return .refreshCodexUsage
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
@@ -180,6 +192,8 @@ extension DeckKeyFunction {
         switch self {
         case .sub2API:
             return .sub2API
+        case .sub2APIBalance:
+            return .sub2APIBalance
         case .codexUsage:
             return .codexUsage
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
@@ -1032,10 +1046,21 @@ nonisolated struct Sub2APIButtonContent: Equatable {
         self.groupName = groupName.isEmpty ? "未命名号池" : groupName
         self.availableConcurrency = availableConcurrency
         self.availabilityLevel = Sub2APIAvailabilityLevel(availableConcurrency: availableConcurrency)
+        valueText = nil
     }
 
+    init(serviceName: String, label: String, valueText: String, isFailure: Bool) {
+        self.serviceName = serviceName.isEmpty ? "Sub2API" : serviceName
+        groupName = label
+        availableConcurrency = 0
+        availabilityLevel = isFailure ? .critical : .healthy
+        self.valueText = valueText
+    }
+
+    private var valueText: String?
+
     var availableConcurrencyText: String {
-        "\(availableConcurrency)"
+        valueText ?? "\(availableConcurrency)"
     }
 }
 
@@ -1045,6 +1070,7 @@ nonisolated struct Sub2APIButtonContent: Equatable {
 /// 始终从最终来源根解析。凭据明文仅供运行时使用，持久化仍由 Keychain store 负责。
 nonisolated struct Sub2APIDataSourceConfiguration: Codable, Equatable {
     static let capacityPoolQueryKind = "capacityPool"
+    static let balanceQueryKind = "balance"
 
     var queryKind: String
     var instanceID: String
@@ -1116,6 +1142,91 @@ nonisolated struct Sub2APIDataSourceConfiguration: Codable, Equatable {
         try container.encodeIfPresent(dataSourceInstanceID, forKey: .dataSourceInstanceID)
         try container.encode(refreshInterval, forKey: .refreshInterval)
         try container.encodeIfPresent(credentialID, forKey: .credentialID)
+    }
+}
+
+nonisolated struct DeckKeySub2APIBalanceConfiguration: Codable, Equatable {
+    var instanceID: String
+    var baseURL: String
+    var dataSourceInstanceID: String?
+    var refreshInterval: Int
+    var bearerKey: String
+    var credentialID: String?
+    var customServiceName: String
+    var unit: String
+
+    /// 最近一次查询结果，仅用于运行时显示，不参与持久化。
+    var lastResult: Sub2APIBalanceResult?
+
+    init(
+        instanceID: String = UUID().uuidString,
+        baseURL: String = "",
+        dataSourceInstanceID: String? = nil,
+        refreshInterval: Int = 30,
+        bearerKey: String = "",
+        credentialID: String? = nil,
+        customServiceName: String = "",
+        unit: String = "$",
+        lastResult: Sub2APIBalanceResult? = nil
+    ) {
+        self.instanceID = instanceID
+        self.baseURL = baseURL
+        self.dataSourceInstanceID = dataSourceInstanceID
+        self.refreshInterval = refreshInterval
+        self.bearerKey = bearerKey
+        self.credentialID = credentialID ?? (bearerKey.isEmpty ? nil : UUID().uuidString)
+        self.customServiceName = customServiceName
+        self.unit = unit
+        self.lastResult = lastResult
+    }
+
+    var serviceDisplayName: String {
+        let name = customServiceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { return name }
+        let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBaseURL.isEmpty else { return "Sub2API" }
+        return (try? Sub2APIBaseURL(trimmedBaseURL).host) ?? trimmedBaseURL
+    }
+
+    var displayUnit: String {
+        let trimmed = unit.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "$" : trimmed
+    }
+
+    enum CodingKeys: CodingKey {
+        case instanceID
+        case baseURL
+        case dataSourceInstanceID
+        case refreshInterval
+        case bearerKey
+        case credentialID
+        case customServiceName
+        case unit
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        instanceID = try container.decodeIfPresent(String.self, forKey: .instanceID) ?? UUID().uuidString
+        baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL) ?? ""
+        dataSourceInstanceID = try container.decodeIfPresent(String.self, forKey: .dataSourceInstanceID)
+        refreshInterval = try container.decodeIfPresent(Int.self, forKey: .refreshInterval) ?? 30
+        // 仅兼容旧内存/迁移 payload；新的编码路径不写入明文凭据。
+        bearerKey = try container.decodeIfPresent(String.self, forKey: .bearerKey) ?? ""
+        credentialID = try container.decodeIfPresent(String.self, forKey: .credentialID)
+        customServiceName = try container.decodeIfPresent(String.self, forKey: .customServiceName) ?? ""
+        unit = try container.decodeIfPresent(String.self, forKey: .unit) ?? "$"
+        lastResult = nil
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(instanceID, forKey: .instanceID)
+        try container.encode(baseURL, forKey: .baseURL)
+        try container.encodeIfPresent(dataSourceInstanceID, forKey: .dataSourceInstanceID)
+        try container.encode(refreshInterval, forKey: .refreshInterval)
+        try container.encodeIfPresent(credentialID, forKey: .credentialID)
+        try container.encode(customServiceName, forKey: .customServiceName)
+        try container.encode(unit, forKey: .unit)
     }
 }
 
@@ -1395,6 +1506,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var openWebPage: DeckKeyOpenWebPageConfiguration
     var smbServer: DeckKeySMBServerConfiguration
     var sub2API: DeckKeySub2APIConfiguration
+    var sub2APIBalance: DeckKeySub2APIBalanceConfiguration
     var codexUsage: DeckKeyCodexUsageConfiguration
     var mihoyoGame: DeckKeyMihoyoGameConfiguration
     var pageFolder: DeckKeyPageFolderConfiguration
@@ -1409,6 +1521,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openWebPage: DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
+        sub2APIBalance: DeckKeySub2APIBalanceConfiguration(),
         codexUsage: DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration()
@@ -1423,6 +1536,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openWebPage: DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
+        sub2APIBalance: DeckKeySub2APIBalanceConfiguration(),
         codexUsage: DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration()
@@ -1437,6 +1551,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openWebPage: DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration(),
+        sub2APIBalance: DeckKeySub2APIBalanceConfiguration(),
         codexUsage: DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration(),
@@ -1452,6 +1567,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openWebPage: DeckKeyOpenWebPageConfiguration = DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration = DeckKeySub2APIConfiguration(),
+        sub2APIBalance: DeckKeySub2APIBalanceConfiguration = DeckKeySub2APIBalanceConfiguration(),
         codexUsage: DeckKeyCodexUsageConfiguration = DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration = DeckKeyPageFolderConfiguration(),
@@ -1465,6 +1581,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         self.openWebPage = openWebPage
         self.smbServer = smbServer
         self.sub2API = sub2API
+        self.sub2APIBalance = sub2APIBalance
         self.codexUsage = codexUsage
         self.mihoyoGame = mihoyoGame
         self.pageFolder = pageFolder
@@ -1474,7 +1591,18 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     /// Deck 上所有 Sub2API 查询配置接入公共来源图和凭据存储的唯一入口。
     var sub2APIDataSourceConfiguration: Sub2APIDataSourceConfiguration {
         get {
-            Sub2APIDataSourceConfiguration(
+            if function == .sub2APIBalance {
+                return Sub2APIDataSourceConfiguration(
+                    queryKind: Sub2APIDataSourceConfiguration.balanceQueryKind,
+                    instanceID: sub2APIBalance.instanceID,
+                    baseURL: sub2APIBalance.baseURL,
+                    dataSourceInstanceID: sub2APIBalance.dataSourceInstanceID,
+                    refreshInterval: sub2APIBalance.refreshInterval,
+                    bearerKey: sub2APIBalance.bearerKey,
+                    credentialID: sub2APIBalance.credentialID
+                )
+            }
+            return Sub2APIDataSourceConfiguration(
                 queryKind: Sub2APIDataSourceConfiguration.capacityPoolQueryKind,
                 instanceID: sub2API.instanceID,
                 baseURL: sub2API.baseURL,
@@ -1485,6 +1613,15 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             )
         }
         set {
+            if newValue.queryKind == Sub2APIDataSourceConfiguration.balanceQueryKind {
+                sub2APIBalance.instanceID = newValue.instanceID
+                sub2APIBalance.baseURL = newValue.baseURL
+                sub2APIBalance.dataSourceInstanceID = newValue.dataSourceInstanceID
+                sub2APIBalance.refreshInterval = newValue.refreshInterval
+                sub2APIBalance.bearerKey = newValue.bearerKey
+                sub2APIBalance.credentialID = newValue.credentialID
+                return
+            }
             guard newValue.queryKind == Sub2APIDataSourceConfiguration.capacityPoolQueryKind else {
                 return
             }
@@ -1507,6 +1644,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openWebPage: DeckKeyOpenWebPageConfiguration = DeckKeyOpenWebPageConfiguration(),
         smbServer: DeckKeySMBServerConfiguration = DeckKeySMBServerConfiguration(),
         sub2API: DeckKeySub2APIConfiguration = DeckKeySub2APIConfiguration(),
+        sub2APIBalance: DeckKeySub2APIBalanceConfiguration = DeckKeySub2APIBalanceConfiguration(),
         codexUsage: DeckKeyCodexUsageConfiguration = DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration = DeckKeyPageFolderConfiguration()
@@ -1520,6 +1658,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             openWebPage: openWebPage,
             smbServer: smbServer,
             sub2API: sub2API,
+            sub2APIBalance: sub2APIBalance,
             codexUsage: codexUsage,
             mihoyoGame: mihoyoGame,
             pageFolder: pageFolder,
@@ -1536,6 +1675,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case openWebPage
         case smbServer
         case sub2API
+        case sub2APIBalance
         case codexUsage
         case mihoyoGame
         case pageFolder
@@ -1552,6 +1692,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         openWebPage = try container.decodeIfPresent(DeckKeyOpenWebPageConfiguration.self, forKey: .openWebPage) ?? DeckKeyOpenWebPageConfiguration()
         smbServer = try container.decodeIfPresent(DeckKeySMBServerConfiguration.self, forKey: .smbServer) ?? DeckKeySMBServerConfiguration()
         sub2API = try container.decodeIfPresent(DeckKeySub2APIConfiguration.self, forKey: .sub2API) ?? DeckKeySub2APIConfiguration()
+        sub2APIBalance = try container.decodeIfPresent(DeckKeySub2APIBalanceConfiguration.self, forKey: .sub2APIBalance) ?? DeckKeySub2APIBalanceConfiguration()
         codexUsage = try container.decodeIfPresent(DeckKeyCodexUsageConfiguration.self, forKey: .codexUsage) ?? DeckKeyCodexUsageConfiguration()
         mihoyoGame = try container.decodeIfPresent(DeckKeyMihoyoGameConfiguration.self, forKey: .mihoyoGame) ?? DeckKeyMihoyoGameConfiguration()
         pageFolder = try container.decodeIfPresent(DeckKeyPageFolderConfiguration.self, forKey: .pageFolder) ?? DeckKeyPageFolderConfiguration()
@@ -1576,6 +1717,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         try container.encode(openWebPage, forKey: .openWebPage)
         try container.encode(smbServer, forKey: .smbServer)
         try container.encode(sub2API, forKey: .sub2API)
+        try container.encode(sub2APIBalance, forKey: .sub2APIBalance)
         try container.encode(codexUsage, forKey: .codexUsage)
         try container.encode(mihoyoGame, forKey: .mihoyoGame)
         try container.encode(pageFolder, forKey: .pageFolder)
@@ -1629,7 +1771,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return visual.backgroundPNGData
         case .codexUsage:
             return codexUsage.visual.backgroundPNGData
-        case .none, .tally, .brightness, .sub2API:
+        case .none, .tally, .brightness, .sub2API, .sub2APIBalance:
             return nil
         case .previousPage, .nextPage:
             return visual.backgroundPNGData
@@ -1654,7 +1796,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return visual.blurredBackgroundPNGData
         case .codexUsage:
             return codexUsage.visual.blurredBackgroundPNGData
-        case .none, .tally, .brightness, .sub2API:
+        case .none, .tally, .brightness, .sub2API, .sub2APIBalance:
             return nil
         case .previousPage, .nextPage:
             return visual.blurredBackgroundPNGData
@@ -1679,6 +1821,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return ""
         case .sub2API:
             return sub2API.displayName
+        case .sub2APIBalance:
+            return "余额"
         case .codexUsage:
             return "Codex 额度"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
@@ -1720,7 +1864,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return DeckKeyPageFolderConfiguration.migratingLegacyDefaultName(in: pageFolder.visual)
         case .pageBack:
             return DeckKeyVisualConfiguration(dimsBackground: false)
-        case .none, .tally, .brightness, .sub2API, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage:
+        case .none, .tally, .brightness, .sub2API, .sub2APIBalance, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage:
             return DeckKeyVisualConfiguration()
         }
     }
