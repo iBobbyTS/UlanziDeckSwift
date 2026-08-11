@@ -83,6 +83,10 @@ final class H200ConnectionModel: ObservableObject {
     private var mihoyoGameNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var mihoyoGameFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
     private let sub2APIRefreshSecondDuration: TimeInterval
+
+    var pendingSub2APIDailyCostRequestIDs: Set<UUID> {
+        Set(sub2APIDailyCostRequestIDs.values)
+    }
     private let sub2APIGroupListMinimumIntervalNanoseconds: UInt64
     private let codexUsageRefreshMinuteDuration: TimeInterval
     private let mihoyoGameRefreshMinuteDuration: TimeInterval
@@ -199,6 +203,7 @@ final class H200ConnectionModel: ObservableObject {
         for task in sub2APIBalanceFetchTasks.values { task.cancel() }
         for timer in sub2APIDailyCostTimers.values { timer.invalidate() }
         for task in sub2APIDailyCostFetchTasks.values { task.cancel() }
+        sub2APIDailyCostRequestIDs.removeAll()
         for task in sub2APIAuthRefreshTasks.values { task.cancel() }
         for timer in codexUsageTimers.values {
             timer.invalidate()
@@ -1049,8 +1054,7 @@ final class H200ConnectionModel: ObservableObject {
         persistCurrentConfiguration()
         stopSub2APIDailyCostTimer(for: instanceID, preservesNextFire: false)
         if previousLeader == instanceID {
-            sub2APIDailyCostFetchTasks[previousLeader]?.cancel()
-            sub2APIDailyCostFetchTasks[previousLeader] = nil
+            cancelSub2APIDailyCostFetch(for: previousLeader)
             if let remaining = sub2APIDailyCostConsumerInstanceIDs(
                 for: previous.dataSourceInstanceID,
                 timezoneID: previous.timezoneID
@@ -1595,8 +1599,7 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIDailyCostTimers[instanceID]?.invalidate()
         sub2APIDailyCostTimers[instanceID] = nil
         sub2APIDailyCostNextFireNanoseconds[instanceID] = nil
-        sub2APIDailyCostFetchTasks[instanceID]?.cancel()
-        sub2APIDailyCostFetchTasks[instanceID] = nil
+        cancelSub2APIDailyCostFetch(for: instanceID)
         sub2APIDailyCostTokenPausedInstances.remove(instanceID)
 
         codexUsageTimers[instanceID]?.invalidate()
@@ -1671,8 +1674,7 @@ final class H200ConnectionModel: ObservableObject {
 
         sub2APIDailyCostTimers[instanceID]?.invalidate()
         sub2APIDailyCostTimers[instanceID] = nil
-        sub2APIDailyCostFetchTasks[instanceID]?.cancel()
-        sub2APIDailyCostFetchTasks[instanceID] = nil
+        cancelSub2APIDailyCostFetch(for: instanceID)
 
         codexUsageTimers[instanceID]?.invalidate()
         codexUsageTimers[instanceID] = nil
@@ -2936,8 +2938,7 @@ final class H200ConnectionModel: ObservableObject {
         for consumer in consumers {
             stopSub2APIDailyCostTimer(for: consumer, preservesNextFire: false)
             if consumer != leaderInstanceID {
-                sub2APIDailyCostFetchTasks[consumer]?.cancel()
-                sub2APIDailyCostFetchTasks[consumer] = nil
+                cancelSub2APIDailyCostFetch(for: consumer)
             }
         }
 
@@ -3002,6 +3003,11 @@ final class H200ConnectionModel: ObservableObject {
                 requestID: requestID
             )
         }
+    }
+
+    private func cancelSub2APIDailyCostFetch(for instanceID: RuntimeInstanceID) {
+        sub2APIDailyCostFetchTasks.removeValue(forKey: instanceID)?.cancel()
+        sub2APIDailyCostRequestIDs.removeValue(forKey: instanceID)
     }
 
     private func finishSub2APIDailyCostFetch(
@@ -3248,8 +3254,7 @@ final class H200ConnectionModel: ObservableObject {
                 sub2APIBalanceFetchTasks[instanceID]?.cancel()
                 sub2APIBalanceFetchTasks[instanceID] = nil
                 stopSub2APIDailyCostTimer(for: instanceID, preservesNextFire: false)
-                sub2APIDailyCostFetchTasks[instanceID]?.cancel()
-                sub2APIDailyCostFetchTasks[instanceID] = nil
+                cancelSub2APIDailyCostFetch(for: instanceID)
             }
             syncKeyDisplay(keyID: keyID)
         }

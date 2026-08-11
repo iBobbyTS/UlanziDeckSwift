@@ -3473,6 +3473,68 @@ struct UlanziDeckSwiftTests {
     }
 
     @MainActor
+    @Test func sub2APIDailyCostCancellationLifecycleInvalidatesPendingRequestIDs() async throws {
+        let fetcher = FakeSub2APIFetcher(
+            dailyCostResults: Array(repeating: .success(actualCost: 99), count: 4),
+            dailyCostFetchDelaySequenceNanoseconds: Array(repeating: 200_000_000, count: 4)
+        )
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        _ = state.assign(.sub2APIDailyCost, to: 3)
+        _ = state.setSub2APIBaseURL("api.example.com", for: 3)
+        _ = state.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: state),
+            sub2APIFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 1_000
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.dailyCostRequests.count == 1
+                && model.pendingSub2APIDailyCostRequestIDs.count == 1
+        }
+        let initialRequestID = try #require(model.pendingSub2APIDailyCostRequestIDs.first)
+
+        model.selectKey(keyID: 3)
+        model.setSelectedSub2APIDailyCostTimezone(.standard)
+        try await Self.waitUntil {
+            fetcher.dailyCostRequests.count == 2
+                && model.pendingSub2APIDailyCostRequestIDs.count == 1
+        }
+        let timezoneRequestID = try #require(model.pendingSub2APIDailyCostRequestIDs.first)
+        #expect(timezoneRequestID != initialRequestID)
+        #expect(!model.pendingSub2APIDailyCostRequestIDs.contains(initialRequestID))
+
+        model.setSelectedSub2APIBaseURL("api2.example.com")
+        try await Self.waitUntil {
+            fetcher.dailyCostRequests.count == 3
+                && model.pendingSub2APIDailyCostRequestIDs.count == 1
+        }
+        let configurationRequestID = try #require(model.pendingSub2APIDailyCostRequestIDs.first)
+        #expect(configurationRequestID != timezoneRequestID)
+        #expect(!model.pendingSub2APIDailyCostRequestIDs.contains(timezoneRequestID))
+
+        model.setKeyDisplayMode(.systemStatus, for: 3)
+        #expect(model.pendingSub2APIDailyCostRequestIDs.isEmpty)
+
+        model.setKeyDisplayMode(.function, for: 3)
+        try await Self.waitUntil {
+            fetcher.dailyCostRequests.count == 4
+                && model.pendingSub2APIDailyCostRequestIDs.count == 1
+        }
+        let resumedRequestID = try #require(model.pendingSub2APIDailyCostRequestIDs.first)
+        #expect(resumedRequestID != configurationRequestID)
+
+        model.assignSelectedFunction(.tally)
+        #expect(model.pendingSub2APIDailyCostRequestIDs.isEmpty)
+        try await Task.sleep(nanoseconds: 250_000_000)
+        #expect(model.pendingSub2APIDailyCostRequestIDs.isEmpty)
+        #expect(model.interactionState.configuration(for: 3)?.function == .tally)
+    }
+
+    @MainActor
     @Test func sub2APIQueryKindsShareSourceButRequestAndKeepIntervalsIndependently() async throws {
         let item = Self.sub2APICapacityItem(groupID: 10, groupName: "号池", availableConcurrency: 8)
         let fetcher = FakeSub2APIFetcher(
