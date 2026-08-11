@@ -2363,6 +2363,9 @@ struct UlanziDeckSwiftTests {
         #expect(credentials.savedBearerKeys[credentialID] == "old-token")
         #expect(store.saveInteractionState(refreshedState, for: .h200Prototype) == .success)
         #expect(credentials.savedBearerKeys[credentialID] == "refreshed-token")
+        // 同一个仍含 stale consumer 的快照重复保存，也不能把旧值写回。
+        #expect(store.saveInteractionState(refreshedState, for: .h200Prototype) == .success)
+        #expect(credentials.savedBearerKeys[credentialID] == "refreshed-token")
 
         var reloaded = try #require(store.loadInteractionState(for: .h200Prototype))
         #expect(reloaded.sub2APIConfiguration(for: 3).bearerKey == "refreshed-token")
