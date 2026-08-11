@@ -2401,6 +2401,60 @@ struct UlanziDeckSwiftTests {
         #expect(state.sub2APIConfiguration(for: 4).bearerKey == "new-token")
     }
 
+    @Test func clearingSharedCredentialRemovesAllReferencesAndDoesNotReviveAfterReload() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let credentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: credentials
+        )
+        let credentialID = "shared-clear-credential"
+        var source = DeckKeyConfiguration.tallyDefault
+        source.function = .sub2API
+        source.sub2API.credentialID = credentialID
+        source.sub2API.bearerKey = "old-token"
+        var consumer = DeckKeyConfiguration.tallyDefault
+        consumer.function = .sub2API
+        consumer.sub2API.credentialID = credentialID
+        consumer.sub2API.bearerKey = "old-token"
+        var state = DeckGridInteractionState(
+            layout: .h200Prototype,
+            pages: [
+                DeckGridPage(id: "root", parentID: nil, configurations: [3: source]),
+                DeckGridPage(id: "page-2", parentID: nil, configurations: [4: consumer]),
+            ],
+            rootPageIDs: ["root", "page-2"]
+        )
+
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        #expect(credentials.savedBearerKeys[credentialID] == "old-token")
+        let didClearBearerKey = state.setSub2APIBearerKey("", for: 3)
+        #expect(didClearBearerKey)
+        #expect(state.sub2APIConfiguration(for: 3).bearerKey.isEmpty)
+        #expect(state.sub2APIConfiguration(for: 3).credentialID == nil)
+        let didGoToNextRootPage = state.goToNextRootPage()
+        #expect(didGoToNextRootPage)
+        #expect(state.sub2APIConfiguration(for: 4).bearerKey.isEmpty)
+        #expect(state.sub2APIConfiguration(for: 4).credentialID == nil)
+
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+        #expect(credentials.savedBearerKeys[credentialID] == nil)
+        #expect(credentials.deletedCredentialIDs == [credentialID])
+        #expect(defaults.stringArray(forKey: "\(storageKey).sub2APICredentialIDs") == [])
+
+        var reloaded = try #require(store.loadInteractionState(for: .h200Prototype))
+        #expect(reloaded.sub2APIConfiguration(for: 3).bearerKey.isEmpty)
+        #expect(reloaded.sub2APIConfiguration(for: 3).credentialID == nil)
+        let didReloadNextRootPage = reloaded.goToNextRootPage()
+        #expect(didReloadNextRootPage)
+        #expect(reloaded.sub2APIConfiguration(for: 4).bearerKey.isEmpty)
+        #expect(reloaded.sub2APIConfiguration(for: 4).credentialID == nil)
+    }
+
     @Test func sub2APIBearerKeysUseIndependentCredentialIDsAndRoundTripThroughCredentialStore() throws {
         let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

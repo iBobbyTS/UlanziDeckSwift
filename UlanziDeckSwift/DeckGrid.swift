@@ -1485,6 +1485,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     /// 将同一 credential ID 的所有持久化消费者同步到一个 bearer 值。
     /// 共享凭据只有一个逻辑 owner，避免刷新或手动更新后保留旧引用值。
+    /// 空值表示显式删除：所有消费者也必须移除 credential ID，使持久化层
+    /// 能够识别最后一个引用已消失并删除 Keychain 项。
     private mutating func propagateSub2APIBearerKey(_ bearerKey: String, credentialID: String) {
         for pageID in pages.keys.sorted() {
             guard var page = pages[pageID] else { continue }
@@ -1493,6 +1495,9 @@ nonisolated struct DeckGridInteractionState: Equatable {
                       configuration.sub2APIDataSourceConfiguration.credentialID == credentialID
                 else { continue }
                 configuration.sub2APIDataSourceConfiguration.bearerKey = bearerKey
+                if bearerKey.isEmpty {
+                    configuration.sub2APIDataSourceConfiguration.credentialID = nil
+                }
                 page.configurations[keyID] = configuration
             }
             pages[pageID] = page
