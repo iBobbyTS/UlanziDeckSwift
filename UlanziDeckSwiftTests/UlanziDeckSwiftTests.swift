@@ -15,6 +15,18 @@ struct UlanziDeckSwiftTests {
         #expect(sidebarFunctions.count == Set(sidebarFunctions).count)
     }
 
+    @Test("Sub2API 功能独立显示在 Sub2API 卡片")
+    func sub2APIFunctionsHaveDedicatedSidebarSection() {
+        let section = ContentView.functionSections.first { $0.title == "Sub2API" }
+        let websiteFunctions = ContentView.functionSections
+            .first { $0.title == "网站" }
+            .map(\.functions)
+
+        #expect(section?.functions == [.sub2API, .sub2APIBalance, .sub2APIDailyCost])
+        #expect(websiteFunctions != nil)
+        #expect(websiteFunctions?.contains(where: \.isSub2APIQuery) == false)
+    }
+
     @Test("主页选择器把新增按钮放在所有页码之后")
     func rootPageSelectorPlacesAdditionAfterEveryPage() {
         let pages = [

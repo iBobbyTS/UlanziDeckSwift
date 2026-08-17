@@ -774,7 +774,12 @@ extension ContentView {
             FunctionSection(
                 title: "网站",
                 systemImageName: "globe",
-                functions: [.openWebPage, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .codexUsage]
+                functions: [.openWebPage, .codexUsage]
+            ),
+            FunctionSection(
+                title: "Sub2API",
+                systemImageName: "server.rack",
+                functions: [.sub2API, .sub2APIBalance, .sub2APIDailyCost]
             ),
             FunctionSection(
                 title: "游戏",
