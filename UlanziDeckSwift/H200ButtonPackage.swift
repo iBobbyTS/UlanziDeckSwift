@@ -623,6 +623,11 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
 
         let values = content.series.map(\.successRate).filter(\.isFinite)
         guard !values.isEmpty, chartRect.width > 0, chartRect.height > 0 else { return }
+        // 给描边预留完整的安全边界，避免 0%/100% 端点的线帽被视觉上裁切。
+        // 理论上半个线宽即可，这里向外扩展一个完整线宽以抵抗抗锯齿。
+        let lineWidth = max(2, buttonRect.height * 0.018)
+        // 保持 0%–100% 的数据绘制区域不变，只扩大描边/渐变画布。
+        let canvasRect = chartRect.insetBy(dx: -lineWidth, dy: -lineWidth)
         let points = values.enumerated().map { index, value in
             let x = values.count == 1
                 ? chartRect.midX
@@ -633,7 +638,6 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         }
         guard let first = points.first else { return }
         NSGraphicsContext.current?.cgContext.setShouldAntialias(true)
-        let lineWidth = max(2, buttonRect.height * 0.018)
         if points.count == 1 {
             let path = NSBezierPath()
             path.lineWidth = lineWidth
@@ -676,8 +680,8 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         }
         context.drawLinearGradient(
             gradient,
-            start: CGPoint(x: chartRect.midX, y: chartRect.maxY),
-            end: CGPoint(x: chartRect.midX, y: chartRect.minY),
+            start: CGPoint(x: canvasRect.midX, y: canvasRect.maxY),
+            end: CGPoint(x: canvasRect.midX, y: canvasRect.minY),
             options: []
         )
         context.restoreGState()
