@@ -138,7 +138,7 @@ nonisolated struct Sub2APICapacityData: Decodable, Equatable {
 }
 
 /// 单个分组（或汇总）的容量信息。
-nonisolated struct Sub2APICapacityItem: Decodable, Equatable {
+nonisolated struct Sub2APICapacityItem: Codable, Equatable {
     let groupID: Int
     let groupName: String
     let groupPlatform: String
@@ -168,7 +168,7 @@ nonisolated struct Sub2APICapacityItem: Decodable, Equatable {
 
 // MARK: - 请求结果
 
-nonisolated enum Sub2APICapacityResult: Equatable {
+nonisolated enum Sub2APICapacityResult: Codable, Equatable {
     case success(item: Sub2APICapacityItem)
     case invalidToken
     case tokenExpired
@@ -183,7 +183,7 @@ nonisolated enum Sub2APIGroupListResult: Equatable {
     case networkError(String)
 }
 
-nonisolated enum Sub2APIBalanceResult: Equatable {
+nonisolated enum Sub2APIBalanceResult: Codable, Equatable {
     case success(remaining: Double)
     case invalidToken
     case tokenExpired
@@ -208,7 +208,7 @@ nonisolated enum Sub2APIBalanceResult: Equatable {
     }
 }
 
-nonisolated enum Sub2APIDailyCostResult: Equatable {
+nonisolated enum Sub2APIDailyCostResult: Codable, Equatable {
     case success(actualCost: Double)
     case invalidToken
     case tokenExpired
@@ -231,7 +231,7 @@ nonisolated enum Sub2APIDailyCostResult: Equatable {
     }
 }
 
-nonisolated struct NewAPIModelAvailabilitySeriesPoint: Decodable, Equatable {
+nonisolated struct NewAPIModelAvailabilitySeriesPoint: Codable, Equatable {
     let timestamp: Int
     let successRate: Double
 
@@ -241,7 +241,7 @@ nonisolated struct NewAPIModelAvailabilitySeriesPoint: Decodable, Equatable {
     }
 }
 
-nonisolated struct NewAPIModelAvailabilityGroup: Decodable, Equatable {
+nonisolated struct NewAPIModelAvailabilityGroup: Codable, Equatable {
     let group: String
     let successRate: Double
     let series: [NewAPIModelAvailabilitySeriesPoint]
@@ -253,7 +253,7 @@ nonisolated struct NewAPIModelAvailabilityGroup: Decodable, Equatable {
     }
 }
 
-nonisolated struct NewAPIModelAvailabilityData: Decodable, Equatable {
+nonisolated struct NewAPIModelAvailabilityData: Codable, Equatable {
     let modelName: String
     let groups: [NewAPIModelAvailabilityGroup]
 
@@ -269,7 +269,7 @@ nonisolated struct NewAPIModelAvailabilityResponse: Decodable, Equatable {
     let message: String?
 }
 
-nonisolated enum NewAPIModelAvailabilityResult: Equatable {
+nonisolated enum NewAPIModelAvailabilityResult: Codable, Equatable {
     case success(data: NewAPIModelAvailabilityData)
     case networkError(String)
 

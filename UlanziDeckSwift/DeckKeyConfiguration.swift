@@ -1,5 +1,42 @@
 import Foundation
 
+// 成功快照所需的米游社渲染数据 Codable 适配；不改变 API 客户端协议。
+extension MihoyoGameStatusSource: Codable {}
+extension MihoyoBoundRole: Codable {
+    enum CodingKeys: String, CodingKey { case game, gameBiz, gameUID, region, nickname, level }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        game = try c.decode(MihoyoGame.self, forKey: .game); gameBiz = try c.decode(String.self, forKey: .gameBiz)
+        gameUID = try c.decode(String.self, forKey: .gameUID); region = try c.decode(String.self, forKey: .region)
+        nickname = try c.decode(String.self, forKey: .nickname); level = try c.decodeIfPresent(Int.self, forKey: .level)
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(game, forKey: .game); try c.encode(gameBiz, forKey: .gameBiz); try c.encode(gameUID, forKey: .gameUID)
+        try c.encode(region, forKey: .region); try c.encode(nickname, forKey: .nickname); try c.encodeIfPresent(level, forKey: .level)
+    }
+}
+extension MihoyoDailyStatus: Codable {
+    enum CodingKeys: String, CodingKey { case game, role, staminaName, currentStamina, maxStamina, staminaRecoverSeconds, dailyName, dailyCurrent, dailyMax, dailyDone, source }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        game = try c.decode(MihoyoGame.self, forKey: .game); role = try c.decode(MihoyoBoundRole.self, forKey: .role)
+        staminaName = try c.decode(String.self, forKey: .staminaName); currentStamina = try c.decodeIfPresent(Int.self, forKey: .currentStamina)
+        maxStamina = try c.decodeIfPresent(Int.self, forKey: .maxStamina); staminaRecoverSeconds = try c.decodeIfPresent(Int.self, forKey: .staminaRecoverSeconds)
+        dailyName = try c.decode(String.self, forKey: .dailyName); dailyCurrent = try c.decodeIfPresent(Int.self, forKey: .dailyCurrent)
+        dailyMax = try c.decodeIfPresent(Int.self, forKey: .dailyMax); dailyDone = try c.decodeIfPresent(Bool.self, forKey: .dailyDone)
+        source = try c.decode(MihoyoGameStatusSource.self, forKey: .source)
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(game, forKey: .game); try c.encode(role, forKey: .role); try c.encode(staminaName, forKey: .staminaName)
+        try c.encodeIfPresent(currentStamina, forKey: .currentStamina); try c.encodeIfPresent(maxStamina, forKey: .maxStamina)
+        try c.encodeIfPresent(staminaRecoverSeconds, forKey: .staminaRecoverSeconds); try c.encode(dailyName, forKey: .dailyName)
+        try c.encodeIfPresent(dailyCurrent, forKey: .dailyCurrent); try c.encodeIfPresent(dailyMax, forKey: .dailyMax)
+        try c.encodeIfPresent(dailyDone, forKey: .dailyDone); try c.encode(source, forKey: .source)
+    }
+}
+
 nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case none
     case tally
@@ -1201,8 +1238,10 @@ nonisolated struct DeckKeySub2APIDailyCostConfiguration: Codable, Equatable {
     var unit: String
     var timezone: Sub2APIDailyCostTimezone
 
-    /// 最近一次查询结果，仅用于运行时显示，不参与持久化。
+    /// 当前显示结果；成功快照和时间会额外持久化，网络错误不覆盖成功快照。
     var lastResult: Sub2APIDailyCostResult?
+    var lastSuccessfulSnapshot: Sub2APIDailyCostResult?
+    var lastSuccessfulRefreshAt: Date?
 
     init(
         instanceID: String = UUID().uuidString,
@@ -1214,7 +1253,9 @@ nonisolated struct DeckKeySub2APIDailyCostConfiguration: Codable, Equatable {
         customServiceName: String = "",
         unit: String = "",
         timezone: Sub2APIDailyCostTimezone = .local,
-        lastResult: Sub2APIDailyCostResult? = nil
+        lastResult: Sub2APIDailyCostResult? = nil,
+        lastSuccessfulRefreshAt: Date? = nil
+        , lastSuccessfulSnapshot: Sub2APIDailyCostResult? = nil
     ) {
         self.instanceID = instanceID
         self.baseURL = baseURL
@@ -1226,6 +1267,15 @@ nonisolated struct DeckKeySub2APIDailyCostConfiguration: Codable, Equatable {
         self.unit = unit
         self.timezone = timezone
         self.lastResult = lastResult
+        self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
+        if let lastSuccessfulSnapshot {
+            self.lastSuccessfulSnapshot = lastSuccessfulSnapshot
+        } else {
+            self.lastSuccessfulSnapshot = {
+                guard case .success = lastResult else { return nil }
+                return lastResult
+            }()
+        }
     }
 
     var serviceDisplayName: String {
@@ -1242,7 +1292,7 @@ nonisolated struct DeckKeySub2APIDailyCostConfiguration: Codable, Equatable {
 
     enum CodingKeys: CodingKey {
         case instanceID, baseURL, dataSourceInstanceID, refreshInterval
-        case bearerKey, credentialID, customServiceName, unit, timezone
+        case bearerKey, credentialID, customServiceName, unit, timezone, lastSuccessfulSnapshot, lastSuccessfulRefreshAt
     }
 
     init(from decoder: Decoder) throws {
@@ -1256,7 +1306,10 @@ nonisolated struct DeckKeySub2APIDailyCostConfiguration: Codable, Equatable {
         customServiceName = try container.decodeIfPresent(String.self, forKey: .customServiceName) ?? ""
         unit = try container.decodeIfPresent(String.self, forKey: .unit) ?? ""
         timezone = try container.decodeIfPresent(Sub2APIDailyCostTimezone.self, forKey: .timezone) ?? .local
-        lastResult = nil
+        lastSuccessfulSnapshot = try container.decodeIfPresent(Sub2APIDailyCostResult.self, forKey: .lastSuccessfulSnapshot)
+        if case .success = lastSuccessfulSnapshot {} else { lastSuccessfulSnapshot = nil }
+        lastResult = lastSuccessfulSnapshot
+        lastSuccessfulRefreshAt = try container.decodeIfPresent(Date.self, forKey: .lastSuccessfulRefreshAt)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -1269,6 +1322,8 @@ nonisolated struct DeckKeySub2APIDailyCostConfiguration: Codable, Equatable {
         try container.encode(customServiceName, forKey: .customServiceName)
         try container.encode(unit, forKey: .unit)
         try container.encode(timezone, forKey: .timezone)
+        try container.encodeIfPresent(lastSuccessfulSnapshot, forKey: .lastSuccessfulSnapshot)
+        try container.encodeIfPresent(lastSuccessfulRefreshAt, forKey: .lastSuccessfulRefreshAt)
     }
 }
 
@@ -1282,8 +1337,10 @@ nonisolated struct DeckKeySub2APIBalanceConfiguration: Codable, Equatable {
     var customServiceName: String
     var unit: String
 
-    /// 最近一次查询结果，仅用于运行时显示，不参与持久化。
+    /// 当前显示结果；成功快照和时间会额外持久化，网络错误不覆盖成功快照。
     var lastResult: Sub2APIBalanceResult?
+    var lastSuccessfulSnapshot: Sub2APIBalanceResult?
+    var lastSuccessfulRefreshAt: Date?
 
     init(
         instanceID: String = UUID().uuidString,
@@ -1294,7 +1351,9 @@ nonisolated struct DeckKeySub2APIBalanceConfiguration: Codable, Equatable {
         credentialID: String? = nil,
         customServiceName: String = "",
         unit: String = "",
-        lastResult: Sub2APIBalanceResult? = nil
+        lastResult: Sub2APIBalanceResult? = nil,
+        lastSuccessfulRefreshAt: Date? = nil
+        , lastSuccessfulSnapshot: Sub2APIBalanceResult? = nil
     ) {
         self.instanceID = instanceID
         self.baseURL = baseURL
@@ -1305,6 +1364,15 @@ nonisolated struct DeckKeySub2APIBalanceConfiguration: Codable, Equatable {
         self.customServiceName = customServiceName
         self.unit = unit
         self.lastResult = lastResult
+        self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
+        if let lastSuccessfulSnapshot {
+            self.lastSuccessfulSnapshot = lastSuccessfulSnapshot
+        } else {
+            self.lastSuccessfulSnapshot = {
+                guard case .success = lastResult else { return nil }
+                return lastResult
+            }()
+        }
     }
 
     var serviceDisplayName: String {
@@ -1328,7 +1396,7 @@ nonisolated struct DeckKeySub2APIBalanceConfiguration: Codable, Equatable {
         case bearerKey
         case credentialID
         case customServiceName
-        case unit
+        case unit, lastSuccessfulSnapshot, lastSuccessfulRefreshAt
     }
 
     init(from decoder: Decoder) throws {
@@ -1342,7 +1410,10 @@ nonisolated struct DeckKeySub2APIBalanceConfiguration: Codable, Equatable {
         credentialID = try container.decodeIfPresent(String.self, forKey: .credentialID)
         customServiceName = try container.decodeIfPresent(String.self, forKey: .customServiceName) ?? ""
         unit = try container.decodeIfPresent(String.self, forKey: .unit) ?? ""
-        lastResult = nil
+        lastSuccessfulSnapshot = try container.decodeIfPresent(Sub2APIBalanceResult.self, forKey: .lastSuccessfulSnapshot)
+        if case .success = lastSuccessfulSnapshot {} else { lastSuccessfulSnapshot = nil }
+        lastResult = lastSuccessfulSnapshot
+        lastSuccessfulRefreshAt = try container.decodeIfPresent(Date.self, forKey: .lastSuccessfulRefreshAt)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -1354,6 +1425,8 @@ nonisolated struct DeckKeySub2APIBalanceConfiguration: Codable, Equatable {
         try container.encodeIfPresent(credentialID, forKey: .credentialID)
         try container.encode(customServiceName, forKey: .customServiceName)
         try container.encode(unit, forKey: .unit)
+        try container.encodeIfPresent(lastSuccessfulSnapshot, forKey: .lastSuccessfulSnapshot)
+        try container.encodeIfPresent(lastSuccessfulRefreshAt, forKey: .lastSuccessfulRefreshAt)
     }
 }
 
@@ -1378,8 +1451,10 @@ nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatab
     var customServiceName: String
     var customGroupName: String
 
-    /// 最近一次查询结果，仅用于运行时显示，不参与持久化。
+    /// 当前显示结果；成功快照和时间会额外持久化，网络错误不覆盖成功快照。
     var lastResult: NewAPIModelAvailabilityResult?
+    var lastSuccessfulSnapshot: NewAPIModelAvailabilityResult?
+    var lastSuccessfulRefreshAt: Date?
     /// 从服务端获取的分组列表，仅用于运行时编辑。
     var groupListState: DeckKeyNewAPIModelAvailabilityGroupListState = .idle
 
@@ -1392,6 +1467,8 @@ nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatab
         customServiceName: String = "",
         customGroupName: String = "",
         lastResult: NewAPIModelAvailabilityResult? = nil,
+        lastSuccessfulRefreshAt: Date? = nil,
+        lastSuccessfulSnapshot: NewAPIModelAvailabilityResult? = nil,
         groupListState: DeckKeyNewAPIModelAvailabilityGroupListState = .idle
     ) {
         self.instanceID = instanceID
@@ -1402,6 +1479,15 @@ nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatab
         self.customServiceName = customServiceName
         self.customGroupName = customGroupName
         self.lastResult = lastResult
+        self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
+        if let lastSuccessfulSnapshot {
+            self.lastSuccessfulSnapshot = lastSuccessfulSnapshot
+        } else {
+            self.lastSuccessfulSnapshot = {
+                guard case .success = lastResult else { return nil }
+                return lastResult
+            }()
+        }
         self.groupListState = groupListState
     }
 
@@ -1435,7 +1521,7 @@ nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatab
 
     enum CodingKeys: CodingKey {
         case instanceID, baseURL, refreshInterval
-        case modelName, selectedGroup, customServiceName, customGroupName
+        case modelName, selectedGroup, customServiceName, customGroupName, lastSuccessfulSnapshot, lastSuccessfulRefreshAt
     }
 
     init(from decoder: Decoder) throws {
@@ -1447,7 +1533,10 @@ nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatab
         selectedGroup = try container.decodeIfPresent(String.self, forKey: .selectedGroup)
         customServiceName = try container.decodeIfPresent(String.self, forKey: .customServiceName) ?? ""
         customGroupName = try container.decodeIfPresent(String.self, forKey: .customGroupName) ?? ""
-        lastResult = nil
+        lastSuccessfulSnapshot = try container.decodeIfPresent(NewAPIModelAvailabilityResult.self, forKey: .lastSuccessfulSnapshot)
+        if case .success = lastSuccessfulSnapshot {} else { lastSuccessfulSnapshot = nil }
+        lastResult = lastSuccessfulSnapshot
+        lastSuccessfulRefreshAt = try container.decodeIfPresent(Date.self, forKey: .lastSuccessfulRefreshAt)
         groupListState = .idle
     }
 
@@ -1460,6 +1549,8 @@ nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatab
         try container.encodeIfPresent(selectedGroup, forKey: .selectedGroup)
         try container.encode(customServiceName, forKey: .customServiceName)
         try container.encode(customGroupName, forKey: .customGroupName)
+        try container.encodeIfPresent(lastSuccessfulSnapshot, forKey: .lastSuccessfulSnapshot)
+        try container.encodeIfPresent(lastSuccessfulRefreshAt, forKey: .lastSuccessfulRefreshAt)
     }
 }
 
@@ -1496,8 +1587,10 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         return trimmed.hasPrefix("{") && authInfo == nil
     }
 
-    /// 最近一次成功查询的结果。不参与持久化，反序列化时使用空值。
+    /// 当前显示结果；成功快照和时间会额外持久化，网络错误不覆盖成功快照。
     var lastResult: Sub2APICapacityResult?
+    var lastSuccessfulSnapshot: Sub2APICapacityResult?
+    var lastSuccessfulRefreshAt: Date?
 
     /// 从服务端获取的号池列表。不参与持久化，配置里仍只保存目标分组 ID。
     var groupListState: DeckKeySub2APIGroupListState = .idle
@@ -1513,6 +1606,8 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         customServiceName: String = "",
         customGroupName: String = "",
         lastResult: Sub2APICapacityResult? = nil,
+        lastSuccessfulRefreshAt: Date? = nil,
+        lastSuccessfulSnapshot: Sub2APICapacityResult? = nil,
         groupListState: DeckKeySub2APIGroupListState = .idle
     ) {
         self.instanceID = instanceID
@@ -1525,6 +1620,15 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         self.customServiceName = customServiceName
         self.customGroupName = customGroupName
         self.lastResult = lastResult
+        self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
+        if let lastSuccessfulSnapshot {
+            self.lastSuccessfulSnapshot = lastSuccessfulSnapshot
+        } else {
+            self.lastSuccessfulSnapshot = {
+                guard case .success = lastResult else { return nil }
+                return lastResult
+            }()
+        }
         self.groupListState = groupListState
     }
 
@@ -1588,7 +1692,7 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         case bearerKey
         case credentialID
         case customServiceName
-        case customGroupName
+        case customGroupName, lastSuccessfulSnapshot, lastSuccessfulRefreshAt
     }
 
     init(from decoder: Decoder) throws {
@@ -1611,7 +1715,10 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
             ?? (bearerKey.isEmpty ? nil : UUID().uuidString)
         customServiceName = try container.decodeIfPresent(String.self, forKey: .customServiceName) ?? ""
         customGroupName = try container.decodeIfPresent(String.self, forKey: .customGroupName) ?? ""
-        lastResult = nil
+        lastSuccessfulSnapshot = try container.decodeIfPresent(Sub2APICapacityResult.self, forKey: .lastSuccessfulSnapshot)
+        if case .success = lastSuccessfulSnapshot {} else { lastSuccessfulSnapshot = nil }
+        lastResult = lastSuccessfulSnapshot
+        lastSuccessfulRefreshAt = try container.decodeIfPresent(Date.self, forKey: .lastSuccessfulRefreshAt)
         groupListState = .idle
     }
 
@@ -1625,6 +1732,8 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         try container.encodeIfPresent(credentialID, forKey: .credentialID)
         try container.encode(customServiceName, forKey: .customServiceName)
         try container.encode(customGroupName, forKey: .customGroupName)
+        try container.encodeIfPresent(lastSuccessfulSnapshot, forKey: .lastSuccessfulSnapshot)
+        try container.encodeIfPresent(lastSuccessfulRefreshAt, forKey: .lastSuccessfulRefreshAt)
     }
 }
 
@@ -1650,22 +1759,35 @@ nonisolated struct DeckKeyMihoyoGameConfiguration: Codable, Equatable {
     var refreshIntervalMinutes: Int
     var visual: DeckKeyVisualConfiguration
 
-    /// 最近一次查询的结果。不参与持久化，反序列化时使用空值。
+    /// 当前显示结果；成功快照和时间会额外持久化，网络错误不覆盖成功快照。
     var lastResult: MihoyoGameStatusResult?
+    var lastSuccessfulSnapshot: MihoyoDailyStatus?
+    var lastSuccessfulRefreshAt: Date?
 
     init(
         refreshIntervalMinutes: Int = DeckKeyMihoyoGameRefreshConfiguration.defaultIntervalMinutes,
         lastResult: MihoyoGameStatusResult? = nil,
+        lastSuccessfulSnapshot: MihoyoDailyStatus? = nil,
+        lastSuccessfulRefreshAt: Date? = nil,
         visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration()
     ) {
         self.refreshIntervalMinutes = DeckKeyMihoyoGameRefreshConfiguration.clamped(refreshIntervalMinutes)
         self.visual = visual
         self.lastResult = lastResult
+        if let lastSuccessfulSnapshot {
+            self.lastSuccessfulSnapshot = lastSuccessfulSnapshot
+        } else {
+            self.lastSuccessfulSnapshot = {
+                guard case let .success(status) = lastResult else { return nil }
+                return status
+            }()
+        }
+        self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
     }
 
     enum CodingKeys: CodingKey {
         case refreshIntervalMinutes
-        case visual
+        case visual, lastSuccessfulSnapshot, lastSuccessfulRefreshAt
     }
 
     init(from decoder: Decoder) throws {
@@ -1676,13 +1798,17 @@ nonisolated struct DeckKeyMihoyoGameConfiguration: Codable, Equatable {
         )
         visual = try container.decodeIfPresent(DeckKeyVisualConfiguration.self, forKey: .visual)
             ?? DeckKeyVisualConfiguration()
-        lastResult = nil
+        lastSuccessfulSnapshot = try container.decodeIfPresent(MihoyoDailyStatus.self, forKey: .lastSuccessfulSnapshot)
+        lastResult = lastSuccessfulSnapshot.map { .success($0) }
+        lastSuccessfulRefreshAt = try container.decodeIfPresent(Date.self, forKey: .lastSuccessfulRefreshAt)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
         try container.encode(visual, forKey: .visual)
+        try container.encodeIfPresent(lastSuccessfulSnapshot, forKey: .lastSuccessfulSnapshot)
+        try container.encodeIfPresent(lastSuccessfulRefreshAt, forKey: .lastSuccessfulRefreshAt)
     }
 }
 

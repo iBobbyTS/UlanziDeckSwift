@@ -1922,6 +1922,7 @@ final class H200ConnectionModel: ObservableObject {
                   self.interactionState.configuration(for: keyID)?.function == .newAPIModelAvailability
             else { return }
             _ = self.interactionState.setNewAPILastResult(result, for: keyID)
+            _ = self.persistCurrentConfiguration()
             self.newAPIFetchTasks[instanceID] = nil
             self.syncKeyDisplay(keyID: keyID)
         }
@@ -2129,6 +2130,7 @@ final class H200ConnectionModel: ObservableObject {
 
             self.sub2APIFetchTasks[instanceID] = nil
             self.interactionState.setSub2APILastResult(result, for: latest.slot.keyID)
+            _ = self.persistCurrentConfiguration()
             if result.isTokenUnavailable {
                 self.pauseSub2APIForTokenError(instanceID: instanceID)
             }
@@ -2302,6 +2304,7 @@ final class H200ConnectionModel: ObservableObject {
         }
         interactionState.setSub2APIGroupListState(groupListState, for: keyID)
         interactionState.setSub2APILastResult(capacityResult, for: keyID)
+        _ = persistCurrentConfiguration()
     }
 
     private func fetchSub2APIGroupList(for keyID: Int) {
@@ -2554,6 +2557,7 @@ final class H200ConnectionModel: ObservableObject {
 
             self.codexUsageFetchTasks[instanceID] = nil
             self.interactionState.setCodexUsageLastResult(result, for: latest.slot.keyID)
+            _ = self.persistCurrentConfiguration()
             self.syncKeyDisplay(keyID: latest.slot.keyID)
             self.scheduleNextCodexUsageRefresh(for: instanceID)
         }
@@ -2694,6 +2698,7 @@ final class H200ConnectionModel: ObservableObject {
 
             self.mihoyoGameFetchTasks[instanceID] = nil
             self.interactionState.setMihoyoGameLastResult(result, for: latest.slot.keyID)
+            _ = self.persistCurrentConfiguration()
             switch result {
             case let .loginExpired(message):
                 self.invalidateMihoyoSession(
@@ -2944,6 +2949,7 @@ final class H200ConnectionModel: ObservableObject {
             guard let consumer = resolveCurrentSub2APIBalanceSlot(for: consumerInstanceID) else { continue }
             keyIDs.insert(consumer.slot.keyID)
             interactionState.setSub2APIBalanceLastResult(result, for: consumer.slot.keyID)
+            _ = persistCurrentConfiguration()
             if result.isTokenUnavailable {
                 sub2APIBalanceTokenPausedInstances.insert(consumerInstanceID)
                 stopSub2APIBalanceTimer(for: consumerInstanceID, preservesNextFire: false)
@@ -3260,6 +3266,7 @@ final class H200ConnectionModel: ObservableObject {
             guard let consumer = resolveCurrentSub2APIDailyCostSlot(for: consumerInstanceID) else { continue }
             keyIDs.insert(consumer.slot.keyID)
             interactionState.setSub2APIDailyCostLastResult(result, for: consumer.slot.keyID)
+            _ = persistCurrentConfiguration()
             if result.isTokenUnavailable {
                 sub2APIDailyCostTokenPausedInstances.insert(consumerInstanceID)
                 stopSub2APIDailyCostTimer(for: consumerInstanceID, preservesNextFire: false)

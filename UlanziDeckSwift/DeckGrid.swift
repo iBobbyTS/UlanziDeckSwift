@@ -1434,6 +1434,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations[keyID, default: .tallyDefault].newAPIModelAvailability.baseURL =
             baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastResult = nil
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulRefreshAt = nil
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulSnapshot = nil
         configurations[keyID, default: .tallyDefault].newAPIModelAvailability.groupListState = .idle
         return true
     }
@@ -1457,6 +1459,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
         let normalized = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
         if configurations[keyID, default: .tallyDefault].newAPIModelAvailability.modelName != normalized {
             configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastResult = nil
+            configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulRefreshAt = nil
+            configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulSnapshot = nil
             configurations[keyID, default: .tallyDefault].newAPIModelAvailability.groupListState = .idle
         }
         configurations[keyID, default: .tallyDefault].newAPIModelAvailability.modelName = normalized
@@ -1473,6 +1477,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
         let value = normalized?.isEmpty == false ? normalized : nil
         configurations[keyID, default: .tallyDefault].newAPIModelAvailability.selectedGroup = value
         configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastResult = nil
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulRefreshAt = nil
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulSnapshot = nil
         return true
     }
 
@@ -1519,6 +1525,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
               configurations[keyID, default: .tallyDefault].function == .newAPIModelAvailability
         else { return false }
         configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastResult = result
+        if case .success = result {
+            configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulRefreshAt = Date()
+            configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulSnapshot = result
+        }
         return true
     }
 
@@ -1528,6 +1538,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
               configurations[keyID, default: .tallyDefault].function == .newAPIModelAvailability
         else { return false }
         configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastResult = nil
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulSnapshot = nil
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulRefreshAt = nil
         return true
     }
 
@@ -1542,6 +1554,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
         selectedKeyID = keyID
         if configurations[keyID, default: .tallyDefault].sub2API.targetGroupID != groupID {
             configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
+            configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulSnapshot = nil
+            configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulRefreshAt = nil
         }
         configurations[keyID, default: .tallyDefault].sub2API.targetGroupID = groupID
         return true
@@ -1621,10 +1635,16 @@ nonisolated struct DeckGridInteractionState: Equatable {
                     if configuration.function == .sub2API {
                         configuration.sub2API.groupListState = .idle
                         configuration.sub2API.lastResult = nil
+                        configuration.sub2API.lastSuccessfulRefreshAt = nil
+                        configuration.sub2API.lastSuccessfulSnapshot = nil
                     } else if configuration.function == .sub2APIBalance {
                         configuration.sub2APIBalance.lastResult = nil
+                        configuration.sub2APIBalance.lastSuccessfulRefreshAt = nil
+                        configuration.sub2APIBalance.lastSuccessfulSnapshot = nil
                     } else {
                         configuration.sub2APIDailyCost.lastResult = nil
+                        configuration.sub2APIDailyCost.lastSuccessfulRefreshAt = nil
+                        configuration.sub2APIDailyCost.lastSuccessfulSnapshot = nil
                     }
                 }
                 if !bearerKey.isEmpty, dataSource.credentialID == nil {
@@ -1772,6 +1792,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
               configurations[keyID, default: .tallyDefault].function == .sub2APIBalance
         else { return false }
         configurations[keyID, default: .tallyDefault].sub2APIBalance.lastResult = result
+        if case .success = result {
+            configurations[keyID, default: .tallyDefault].sub2APIBalance.lastSuccessfulRefreshAt = Date()
+            configurations[keyID, default: .tallyDefault].sub2APIBalance.lastSuccessfulSnapshot = result
+        }
         return true
     }
 
@@ -1781,6 +1805,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
               configurations[keyID, default: .tallyDefault].sub2APIBalance.lastResult != nil
         else { return false }
         configurations[keyID, default: .tallyDefault].sub2APIBalance.lastResult = nil
+        configurations[keyID, default: .tallyDefault].sub2APIBalance.lastSuccessfulRefreshAt = nil
+        configurations[keyID, default: .tallyDefault].sub2APIBalance.lastSuccessfulSnapshot = nil
         return true
     }
 
@@ -1806,6 +1832,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].sub2APIDailyCost.timezone = timezone
         configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastResult = nil
+        configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastSuccessfulRefreshAt = nil
+        configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastSuccessfulSnapshot = nil
         return true
     }
 
@@ -1818,6 +1846,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
               configurations[keyID, default: .tallyDefault].function == .sub2APIDailyCost
         else { return false }
         configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastResult = result
+        if case .success = result {
+            configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastSuccessfulRefreshAt = Date()
+            configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastSuccessfulSnapshot = result
+        }
         return true
     }
 
@@ -1827,6 +1859,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
               configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastResult != nil
         else { return false }
         configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastResult = nil
+        configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastSuccessfulSnapshot = nil
+        configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastSuccessfulRefreshAt = nil
         return true
     }
 
@@ -1834,10 +1868,16 @@ nonisolated struct DeckGridInteractionState: Equatable {
         if configurations[keyID, default: .tallyDefault].function == .sub2API {
             configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
             configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
+            configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulRefreshAt = nil
+            configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulSnapshot = nil
         } else if configurations[keyID, default: .tallyDefault].function == .sub2APIBalance {
             configurations[keyID, default: .tallyDefault].sub2APIBalance.lastResult = nil
+            configurations[keyID, default: .tallyDefault].sub2APIBalance.lastSuccessfulRefreshAt = nil
+            configurations[keyID, default: .tallyDefault].sub2APIBalance.lastSuccessfulSnapshot = nil
         } else {
             configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastResult = nil
+            configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastSuccessfulRefreshAt = nil
+            configurations[keyID, default: .tallyDefault].sub2APIDailyCost.lastSuccessfulSnapshot = nil
         }
     }
 
@@ -1864,6 +1904,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         configurations[keyID, default: .tallyDefault].sub2API.lastResult = result
+        if case .success = result {
+            configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulRefreshAt = Date()
+            configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulSnapshot = result
+        }
         return true
     }
 
@@ -1879,6 +1923,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
+        configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulRefreshAt = nil
+        configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulSnapshot = nil
         configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
         return true
     }
@@ -1988,6 +2034,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         configurations[keyID, default: .tallyDefault].codexUsage.lastResult = result
+        if case .success = result {
+            configurations[keyID, default: .tallyDefault].codexUsage.lastSuccessfulRefreshAt = Date()
+            configurations[keyID, default: .tallyDefault].codexUsage.lastSuccessfulSnapshot = result
+        }
         return true
     }
 
@@ -2000,6 +2050,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         configurations[keyID, default: .tallyDefault].codexUsage.lastResult = nil
+        configurations[keyID, default: .tallyDefault].codexUsage.lastSuccessfulRefreshAt = nil
+        configurations[keyID, default: .tallyDefault].codexUsage.lastSuccessfulSnapshot = nil
         return true
     }
 
@@ -2024,6 +2076,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         configurations[keyID, default: .tallyDefault].mihoyoGame.lastResult = result
+        if case let .success(status) = result {
+            configurations[keyID, default: .tallyDefault].mihoyoGame.lastSuccessfulSnapshot = status
+            configurations[keyID, default: .tallyDefault].mihoyoGame.lastSuccessfulRefreshAt = Date()
+        }
         return true
     }
 
@@ -2036,6 +2092,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
 
         configurations[keyID, default: .tallyDefault].mihoyoGame.lastResult = nil
+        configurations[keyID, default: .tallyDefault].mihoyoGame.lastSuccessfulSnapshot = nil
+        configurations[keyID, default: .tallyDefault].mihoyoGame.lastSuccessfulRefreshAt = nil
         return true
     }
 
@@ -2484,11 +2542,17 @@ nonisolated struct DeckGridInteractionState: Equatable {
                 configuration.sub2APIDataSourceConfiguration = dataSource
                 if configuration.function == .sub2API {
                     configuration.sub2API.lastResult = nil
+                    configuration.sub2API.lastSuccessfulRefreshAt = nil
+                    configuration.sub2API.lastSuccessfulSnapshot = nil
                     configuration.sub2API.groupListState = .idle
                 } else if configuration.function == .sub2APIBalance {
                     configuration.sub2APIBalance.lastResult = nil
+                    configuration.sub2APIBalance.lastSuccessfulRefreshAt = nil
+                    configuration.sub2APIBalance.lastSuccessfulSnapshot = nil
                 } else {
                     configuration.sub2APIDailyCost.lastResult = nil
+                    configuration.sub2APIDailyCost.lastSuccessfulRefreshAt = nil
+                    configuration.sub2APIDailyCost.lastSuccessfulSnapshot = nil
                 }
                 page.configurations[keyID] = configuration
             }

@@ -16,7 +16,7 @@ nonisolated enum CodexAuthSource: String, Codable, Equatable, CaseIterable, Iden
     }
 }
 
-nonisolated struct CodexUsageQuota: Equatable, Sendable {
+nonisolated struct CodexUsageQuota: Codable, Equatable, Sendable {
     let remainingPercent: Int
     let resetAfterSeconds: Int
     let resetAt: Int?
@@ -71,7 +71,7 @@ nonisolated struct CodexUsageQuota: Equatable, Sendable {
     }
 }
 
-nonisolated enum CodexUsageResult: Equatable, Sendable {
+nonisolated enum CodexUsageResult: Codable, Equatable, Sendable {
     case success(CodexUsageQuota)
     case authFileNotSelected
     case authFileNeedsReselection
@@ -174,6 +174,8 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
 
     /// 最近一次查询的结果。不参与持久化，反序列化时使用空值。
     var lastResult: CodexUsageResult?
+    var lastSuccessfulSnapshot: CodexUsageResult?
+    var lastSuccessfulRefreshAt: Date?
 
     init(
         authSource: CodexAuthSource = .authFile,
@@ -185,7 +187,9 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         colorMode: CodexUsageColorMode = .highIsRed,
         resetDisplayMode: CodexUsageResetDisplayMode = .remainingTime,
         visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration(),
-        lastResult: CodexUsageResult? = nil
+        lastResult: CodexUsageResult? = nil,
+        lastSuccessfulRefreshAt: Date? = nil
+        , lastSuccessfulSnapshot: CodexUsageResult? = nil
     ) {
         self.authSource = authSource
         self.authFilePath = authFilePath
@@ -197,6 +201,15 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         self.resetDisplayMode = resetDisplayMode
         self.visual = visual
         self.lastResult = lastResult
+        self.lastSuccessfulRefreshAt = lastSuccessfulRefreshAt
+        if let lastSuccessfulSnapshot {
+            self.lastSuccessfulSnapshot = lastSuccessfulSnapshot
+        } else {
+            self.lastSuccessfulSnapshot = {
+                guard case .success = lastResult else { return nil }
+                return lastResult
+            }()
+        }
     }
 
     init(
@@ -242,6 +255,8 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         case colorMode
         case resetDisplayMode
         case visual
+        case lastSuccessfulSnapshot
+        case lastSuccessfulRefreshAt
     }
 
     init(from decoder: Decoder) throws {
@@ -265,7 +280,10 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
             DeckKeyVisualConfiguration.self,
             forKey: .visual
         ) ?? DeckKeyVisualConfiguration()
-        lastResult = nil
+        lastSuccessfulSnapshot = try container.decodeIfPresent(CodexUsageResult.self, forKey: .lastSuccessfulSnapshot)
+        if case .success = lastSuccessfulSnapshot {} else { lastSuccessfulSnapshot = nil }
+        lastResult = lastSuccessfulSnapshot
+        lastSuccessfulRefreshAt = try container.decodeIfPresent(Date.self, forKey: .lastSuccessfulRefreshAt)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -279,6 +297,8 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         try container.encode(colorMode, forKey: .colorMode)
         try container.encode(resetDisplayMode, forKey: .resetDisplayMode)
         try container.encode(visual, forKey: .visual)
+        try container.encodeIfPresent(lastSuccessfulSnapshot, forKey: .lastSuccessfulSnapshot)
+        try container.encodeIfPresent(lastSuccessfulRefreshAt, forKey: .lastSuccessfulRefreshAt)
     }
 
     static func normalizedRefreshIntervalMinutes(_ minutes: Int) -> Int {

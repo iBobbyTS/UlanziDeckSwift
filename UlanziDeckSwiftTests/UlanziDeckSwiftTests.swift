@@ -908,7 +908,7 @@ struct UlanziDeckSwiftTests {
         let restored = try JSONDecoder().decode(DeckKeyConfiguration.self, from: data)
         #expect(restored.sub2API.customServiceName == "主站")
         #expect(restored.sub2API.customGroupName == "PLUS")
-        #expect(restored.sub2API.lastResult == nil)
+        #expect(restored.sub2API.lastResult != nil)
         #expect(restored.sub2API.groupListState == .idle)
 
         state.setSub2APIServiceName("", for: 3)
@@ -1653,6 +1653,94 @@ struct UlanziDeckSwiftTests {
         #expect(store.loadFollowsBuiltInDisplayBrightness())
         #expect(restored.pressedKeyIDs.isEmpty)
         #expect(restored.selectedKeyID == 1)
+    }
+
+    @Test func refreshSnapshotsRoundTripWithSuccessfulTimestamp() throws {
+        let refreshedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let newAPIResult = NewAPIModelAvailabilityResult.success(
+            data: NewAPIModelAvailabilityData(
+                modelName: "gpt-5.6-sol",
+                groups: [
+                    NewAPIModelAvailabilityGroup(
+                        group: "pool-a",
+                        successRate: 78.5,
+                        series: [
+                            NewAPIModelAvailabilitySeriesPoint(timestamp: 1, successRate: 72),
+                            NewAPIModelAvailabilitySeriesPoint(timestamp: 2, successRate: 85),
+                        ]
+                    ),
+                ]
+            )
+        )
+        let configuration = DeckKeyNewAPIModelAvailabilityConfiguration(
+            baseURL: "https://api.example.com",
+            modelName: "gpt-5.6-sol",
+            selectedGroup: "pool-a",
+            lastResult: newAPIResult,
+            lastSuccessfulRefreshAt: refreshedAt
+        )
+
+        let encoded = try JSONEncoder().encode(configuration)
+        let restored = try JSONDecoder().decode(
+            DeckKeyNewAPIModelAvailabilityConfiguration.self,
+            from: encoded
+        )
+
+        #expect(restored.lastResult == newAPIResult)
+        #expect(restored.lastSuccessfulRefreshAt == refreshedAt)
+
+        var failedConfiguration = configuration
+        failedConfiguration.lastResult = .networkError("暂时不可用")
+        let failedEncoded = try JSONEncoder().encode(failedConfiguration)
+        let failedRestored = try JSONDecoder().decode(
+            DeckKeyNewAPIModelAvailabilityConfiguration.self,
+            from: failedEncoded
+        )
+        #expect(failedRestored.lastResult == newAPIResult)
+        #expect(failedRestored.lastSuccessfulSnapshot == newAPIResult)
+        #expect(failedRestored.lastSuccessfulRefreshAt == refreshedAt)
+    }
+
+    @Test func legacyRefreshConfigurationDefaultsSnapshotAndTimestampToNil() throws {
+        let legacyPayload = Data("""
+        {
+          "instanceID": "legacy",
+          "baseURL": "https://api.example.com",
+          "refreshInterval": 30,
+          "modelName": "gpt-5.6-sol",
+          "selectedGroup": "pool-a",
+          "customServiceName": "",
+          "customGroupName": ""
+        }
+        """.utf8)
+
+        let restored = try JSONDecoder().decode(
+            DeckKeyNewAPIModelAvailabilityConfiguration.self,
+            from: legacyPayload
+        )
+
+        #expect(restored.lastResult == nil)
+        #expect(restored.lastSuccessfulRefreshAt == nil)
+        #expect(restored.groupListState == .idle)
+    }
+
+    @Test func sub2APISnapshotSurvivesLaterNetworkError() throws {
+        let successful = Sub2APIBalanceResult.success(remaining: 88.5)
+        var configuration = DeckKeySub2APIBalanceConfiguration(
+            baseURL: "https://api.example.com",
+            lastResult: successful,
+            lastSuccessfulRefreshAt: Date(timeIntervalSince1970: 1_700_000_100)
+        )
+        configuration.lastResult = .networkError("离线")
+
+        let restored = try JSONDecoder().decode(
+            DeckKeySub2APIBalanceConfiguration.self,
+            from: JSONEncoder().encode(configuration)
+        )
+
+        #expect(restored.lastResult == successful)
+        #expect(restored.lastSuccessfulSnapshot == successful)
+        #expect(restored.lastSuccessfulRefreshAt != nil)
     }
 
     @Test func userDefaultsStoreMigratesLegacyFlatConfigurationToRootPage() throws {
@@ -3511,7 +3599,7 @@ struct UlanziDeckSwiftTests {
         #expect(decoded.sub2APIDailyCost.timezone == .beijing)
         #expect(decoded.sub2APIDailyCost.unit == "¥")
         #expect(decoded.sub2APIDailyCost.customServiceName == "消费服务")
-        #expect(decoded.sub2APIDailyCost.lastResult == nil)
+        #expect(decoded.sub2APIDailyCost.lastResult == .success(actualCost: 8.5))
     }
 
     @MainActor
@@ -4271,7 +4359,7 @@ struct UlanziDeckSwiftTests {
         let restored = try JSONDecoder().decode(DeckKeyConfiguration.self, from: data)
         #expect(restored.sub2API.targetGroupID == 1215)
         #expect(restored.sub2API.groupListState == .idle)
-        #expect(restored.sub2API.lastResult == nil)
+        #expect(restored.sub2API.lastResult != nil)
     }
 
     @MainActor
@@ -7884,7 +7972,7 @@ struct UlanziDeckSwiftTests {
         #expect(display.subtitle == "需重登")
     }
 
-    @Test func gameRuntimeStatusIsNotPersistedWithDeckConfiguration() throws {
+    @Test func gameRuntimeSuccessSnapshotPersistsWithDeckConfiguration() throws {
         let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer {
@@ -7903,7 +7991,7 @@ struct UlanziDeckSwiftTests {
         let restored = try #require(store.loadInteractionState(for: layout))
         #expect(restored.configuration(for: 3)?.function == .genshinStatus)
         #expect(restored.configuration(for: 3)?.mihoyoGame.refreshIntervalMinutes == 45)
-        #expect(restored.configuration(for: 3)?.mihoyoGame.lastResult == nil)
+        #expect(restored.configuration(for: 3)?.mihoyoGame.lastResult != nil)
     }
 
     @MainActor
@@ -8536,7 +8624,7 @@ struct UlanziDeckSwiftTests {
         #expect(decoded.refreshIntervalMinutes == 30)
         #expect(decoded.colorMode == .highIsRed)
         #expect(decoded.resetDisplayMode == .resetTime)
-        #expect(decoded.lastResult == nil)
+        #expect(decoded.lastResult != nil)
         #expect(DeckKeyCodexUsageConfiguration.defaultRefreshIntervalMinutes == 10)
         #expect(DeckKeyCodexUsageConfiguration.refreshIntervalOptionsMinutes == [1, 5, 10, 30, 60])
         let defaultConfiguration = DeckKeyCodexUsageConfiguration(refreshIntervalMinutes: 7)
