@@ -3,8 +3,8 @@ import Foundation
 
 /// New API 可用率图表的纵轴合同：始终固定为 0% 到 100%。
 enum NewAPIAvailabilityChartScale {
-    static let minimum: Double = 0
-    static let maximum: Double = 100
+    nonisolated static let minimum: Double = 0
+    nonisolated static let maximum: Double = 100
 
     nonisolated static func normalized(_ value: Double) -> Double {
         guard value.isFinite else { return 0 }
@@ -616,7 +616,7 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             weight: .heavy,
             maxFontSize: buttonRect.height * 0.27,
             minFontSize: buttonRect.height * 0.16,
-            color: NSColor(calibratedRed: 0.25, green: 0.86, blue: 0.42, alpha: 1),
+            color: newAPIAvailabilityStatusColor(for: content.successRate),
             rect: NSRect(x: textRect.minX, y: textRect.minY, width: textRect.width, height: textRect.height * 0.62),
             shadow: shadow
         )
@@ -633,8 +633,17 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         }
         guard let first = points.first else { return }
         NSGraphicsContext.current?.cgContext.setShouldAntialias(true)
+        let lineWidth = max(2, buttonRect.height * 0.018)
+        if points.count == 1 {
+            let path = NSBezierPath()
+            path.lineWidth = lineWidth
+            path.appendArc(withCenter: first, radius: lineWidth / 2, startAngle: 0, endAngle: 360)
+            newAPIAvailabilityGradientColor(for: values[0]).setStroke()
+            path.stroke()
+            return
+        }
         let path = NSBezierPath()
-        path.lineWidth = max(2, buttonRect.height * 0.018)
+        path.lineWidth = lineWidth
         path.lineJoinStyle = .round
         path.lineCapStyle = .round
         path.move(to: first)
@@ -642,14 +651,74 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             let previous = points[index - 1]
             let current = points[index]
             let midpointX = (previous.x + current.x) / 2
-            path.curve(
-                to: current,
-                controlPoint1: NSPoint(x: midpointX, y: previous.y),
-                controlPoint2: NSPoint(x: midpointX, y: current.y)
-            )
+            let control1 = NSPoint(x: midpointX, y: previous.y)
+            let control2 = NSPoint(x: midpointX, y: current.y)
+            path.curve(to: current, controlPoint1: control1, controlPoint2: control2)
         }
-        NSColor(calibratedRed: 0.30, green: 0.78, blue: 1.0, alpha: 1).setStroke()
-        path.stroke()
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let cgPath = path.cgPath
+        context.saveGState()
+        context.addPath(cgPath)
+        context.setLineWidth(lineWidth)
+        context.setLineJoin(.round)
+        context.setLineCap(.round)
+        context.replacePathWithStrokedPath()
+        context.clip()
+        let colors = [
+            NSColor(calibratedRed: 0.25, green: 0.86, blue: 0.42, alpha: 1).cgColor,
+            NSColor(calibratedRed: 1.0, green: 0.76, blue: 0.18, alpha: 1).cgColor,
+            NSColor(calibratedRed: 1.0, green: 0.28, blue: 0.24, alpha: 1).cgColor
+        ] as CFArray
+        let locations: [CGFloat] = [0, 0.5, 1]
+        guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: locations) else {
+            context.restoreGState()
+            return
+        }
+        context.drawLinearGradient(
+            gradient,
+            start: CGPoint(x: chartRect.midX, y: chartRect.maxY),
+            end: CGPoint(x: chartRect.midX, y: chartRect.minY),
+            options: []
+        )
+        context.restoreGState()
+    }
+
+    private func newAPIAvailabilityStatusColor(for value: Double) -> NSColor {
+        let clamped = min(100, max(0, value.isFinite ? value : 0))
+        if clamped > 70 {
+            return NSColor(calibratedRed: 0.25, green: 0.86, blue: 0.42, alpha: 1)
+        }
+        if clamped > 30 {
+            return NSColor(calibratedRed: 1.0, green: 0.76, blue: 0.18, alpha: 1)
+        }
+        return NSColor(calibratedRed: 1.0, green: 0.28, blue: 0.24, alpha: 1)
+    }
+
+    private func newAPIAvailabilityGradientColor(for value: Double) -> NSColor {
+        let clamped = min(100, max(0, value.isFinite ? value : 0))
+        if clamped > 70 {
+            return interpolateNewAPIColor(yellow: true, progress: (clamped - 70) / 30)
+        }
+        if clamped > 30 {
+            return interpolateNewAPIColor(yellow: false, progress: (clamped - 30) / 40)
+        }
+        return NSColor(calibratedRed: 1.0, green: 0.28, blue: 0.24, alpha: 1)
+    }
+
+    private func interpolateNewAPIColor(yellow: Bool, progress: Double) -> NSColor {
+        let t = min(1, max(0, progress))
+        let start = yellow
+            ? NSColor(calibratedRed: 1.0, green: 0.76, blue: 0.18, alpha: 1)
+            : NSColor(calibratedRed: 1.0, green: 0.28, blue: 0.24, alpha: 1)
+        let end = yellow
+            ? NSColor(calibratedRed: 0.25, green: 0.86, blue: 0.42, alpha: 1)
+            : NSColor(calibratedRed: 1.0, green: 0.76, blue: 0.18, alpha: 1)
+        return NSColor(
+            calibratedRed: start.redComponent + (end.redComponent - start.redComponent) * t,
+            green: start.greenComponent + (end.greenComponent - start.greenComponent) * t,
+            blue: start.blueComponent + (end.blueComponent - start.blueComponent) * t,
+            alpha: 1
+        )
     }
 
     private func sub2APIAvailabilityColor(for level: Sub2APIAvailabilityLevel) -> NSColor {
