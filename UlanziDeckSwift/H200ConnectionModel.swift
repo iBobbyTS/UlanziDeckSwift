@@ -31,6 +31,7 @@ final class H200ConnectionModel: ObservableObject {
     private let webPageMetadataFetcher: WebPageMetadataFetching
     private let smbServerConnector: SMBServerConnecting
     private let sub2APIFetcher: Sub2APIFetching
+    private let newAPIFetcher: NewAPIFetching
     private let codexUsageFetcher: CodexUsageFetching
     private let mihoyoGameService: MihoyoGameServicing
     private let mihoyoSessionStore: MihoyoSessionStoring
@@ -72,6 +73,10 @@ final class H200ConnectionModel: ObservableObject {
     private var sub2APIDailyCostFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
     private var sub2APIDailyCostRequestIDs: [RuntimeInstanceID: UUID] = [:]
     private var sub2APIDailyCostTokenPausedInstances: Set<RuntimeInstanceID> = []
+    private var newAPITimers: [RuntimeInstanceID: Timer] = [:]
+    private var newAPIFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
+    private var newAPIGroupListTasks: [String: Task<Void, Never>] = [:]
+    private var newAPIGroupListRequestIDs: [String: UUID] = [:]
     private var sub2APIAuthRefreshTasks: [String: Task<Sub2APIAuthInfo?, Never>] = [:]
     private var codexUsageTimers: [RuntimeInstanceID: Timer] = [:]
     private var codexUsageNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
@@ -113,6 +118,7 @@ final class H200ConnectionModel: ObservableObject {
         webPageMetadataFetcher: WebPageMetadataFetching = WebPageMetadataFetcher(),
         smbServerConnector: SMBServerConnecting? = nil,
         sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher(),
+        newAPIFetcher: NewAPIFetching = NewAPIFetcher(),
         codexUsageFetcher: CodexUsageFetching = CodexUsageFetcher(),
         mihoyoGameService: MihoyoGameServicing = MihoyoGameClient(),
         mihoyoSessionStore: MihoyoSessionStoring = KeychainMihoyoSessionStore(),
@@ -136,6 +142,7 @@ final class H200ConnectionModel: ObservableObject {
         self.webPageMetadataFetcher = webPageMetadataFetcher
         self.smbServerConnector = smbServerConnector ?? SMBServerConnector()
         self.sub2APIFetcher = sub2APIFetcher
+        self.newAPIFetcher = newAPIFetcher
         self.codexUsageFetcher = codexUsageFetcher
         self.mihoyoGameService = mihoyoGameService
         self.mihoyoSessionStore = mihoyoSessionStore
@@ -204,6 +211,9 @@ final class H200ConnectionModel: ObservableObject {
         for timer in sub2APIDailyCostTimers.values { timer.invalidate() }
         for task in sub2APIDailyCostFetchTasks.values { task.cancel() }
         sub2APIDailyCostRequestIDs.removeAll()
+        for timer in newAPITimers.values { timer.invalidate() }
+        for task in newAPIFetchTasks.values { task.cancel() }
+        for task in newAPIGroupListTasks.values { task.cancel() }
         for task in sub2APIAuthRefreshTasks.values { task.cancel() }
         for timer in codexUsageTimers.values {
             timer.invalidate()
@@ -289,6 +299,8 @@ final class H200ConnectionModel: ObservableObject {
         cancelLongPressRuntime(for: targetKeyID)
         cancelWebPageMetadataTask(for: sourceKeyID)
         cancelWebPageMetadataTask(for: targetKeyID)
+        cancelNewAPIGroupListTask(for: sourceKeyID)
+        cancelNewAPIGroupListTask(for: targetKeyID)
         webPageMetadataFetchedURLStrings[sourceKeyID] = nil
         webPageMetadataFetchedURLStrings[targetKeyID] = nil
         guard interactionState.swapSquareConfigurations(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID) else {
@@ -506,6 +518,8 @@ final class H200ConnectionModel: ObservableObject {
             fetchSub2APIBalance(for: keyID)
         case .refreshSub2APIDailyCost:
             fetchSub2APIDailyCost(for: keyID)
+        case .refreshNewAPIModelAvailability:
+            fetchNewAPIModelAvailability(for: keyID)
         case .refreshCodexUsage:
             fetchCodexUsage(for: keyID)
         case .refreshMihoyoGame:
@@ -534,6 +548,7 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         let previousInstanceID = runtimeInstanceID(for: selectedKeyID)
+        cancelNewAPIGroupListTask(for: selectedKeyID)
         cancelWebPageMetadataTask(for: selectedKeyID)
         webPageMetadataFetchedURLStrings[selectedKeyID] = nil
         if interactionState.assign(function, to: selectedKeyID) {
@@ -559,6 +574,11 @@ final class H200ConnectionModel: ObservableObject {
             if function == .sub2APIDailyCost {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
                 fetchSub2APIDailyCost(for: selectedKeyID)
+            }
+            if function == .newAPIModelAvailability {
+                _ = ensureRuntimeInstance(for: selectedKeyID)
+                fetchNewAPIModelAvailability(for: selectedKeyID)
+                startNewAPITimer(for: selectedKeyID)
             }
             if function == .codexUsage {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
@@ -1066,6 +1086,112 @@ final class H200ConnectionModel: ObservableObject {
         fetchSub2APIDailyCost(for: instanceID)
     }
 
+    func setSelectedNewAPIBaseURL(_ baseURL: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.setNewAPIBaseURL(baseURL, for: selectedKeyID)
+        else { return }
+        cancelNewAPIGroupListTask(for: selectedKeyID)
+        persistCurrentConfiguration()
+        restartNewAPIRuntime(for: selectedKeyID)
+        syncKeyDisplay(keyID: selectedKeyID)
+    }
+
+    func setSelectedNewAPIRefreshInterval(_ interval: Int) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.setNewAPIRefreshInterval(interval, for: selectedKeyID)
+        else { return }
+        persistCurrentConfiguration()
+        restartNewAPIRuntime(for: selectedKeyID)
+    }
+
+    func setSelectedNewAPIModelName(_ modelName: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.setNewAPIModelName(modelName, for: selectedKeyID)
+        else { return }
+        cancelNewAPIGroupListTask(for: selectedKeyID)
+        persistCurrentConfiguration()
+        syncKeyDisplay(keyID: selectedKeyID)
+        restartNewAPIRuntime(for: selectedKeyID)
+    }
+
+    func setSelectedNewAPISelectedGroup(_ group: String?) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.setNewAPISelectedGroup(group, for: selectedKeyID)
+        else { return }
+        persistCurrentConfiguration()
+        syncKeyDisplay(keyID: selectedKeyID)
+        restartNewAPIRuntime(for: selectedKeyID)
+    }
+
+    func setSelectedNewAPIServiceName(_ serviceName: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.setNewAPIServiceName(serviceName, for: selectedKeyID)
+        else { return }
+        persistCurrentConfiguration()
+        syncKeyDisplay(keyID: selectedKeyID)
+    }
+
+    func setSelectedNewAPIGroupName(_ groupName: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.setNewAPIGroupName(groupName, for: selectedKeyID)
+        else { return }
+        persistCurrentConfiguration()
+        syncKeyDisplay(keyID: selectedKeyID)
+    }
+
+    func refreshSelectedNewAPIGroupList() {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.configuration(for: selectedKeyID)?.function == .newAPIModelAvailability
+        else { return }
+        let configuration = interactionState.newAPIModelAvailabilityConfiguration(for: selectedKeyID)
+        guard !configuration.baseURL.isEmpty, !configuration.normalizedModelName.isEmpty else { return }
+        _ = interactionState.setNewAPIGroupListState(.loading, for: selectedKeyID)
+        let configurationInstanceID = configuration.instanceID
+        let requestID = UUID()
+        newAPIGroupListTasks[configurationInstanceID]?.cancel()
+        newAPIGroupListRequestIDs[configurationInstanceID] = requestID
+        newAPIGroupListTasks[configurationInstanceID] = Task { [weak self] in
+            guard let self else { return }
+            let result = await self.newAPIFetcher.fetchModelAvailability(
+                baseURL: configuration.baseURL,
+                modelName: configuration.normalizedModelName
+            )
+            guard !Task.isCancelled,
+                  self.newAPIGroupListRequestIDs[configurationInstanceID] == requestID
+            else { return }
+            self.newAPIGroupListTasks[configurationInstanceID] = nil
+            self.newAPIGroupListRequestIDs[configurationInstanceID] = nil
+            guard
+                  self.interactionState.newAPIModelAvailabilityConfiguration(for: selectedKeyID).instanceID == configurationInstanceID,
+                  self.interactionState.newAPIModelAvailabilityConfiguration(for: selectedKeyID).baseURL == configuration.baseURL,
+                  self.interactionState.newAPIModelAvailabilityConfiguration(for: selectedKeyID).normalizedModelName == configuration.normalizedModelName
+            else { return }
+            switch result {
+            case let .success(data):
+                _ = self.interactionState.setNewAPIGroupListState(
+                    .success(items: data.groups.map(\.group)),
+                    for: selectedKeyID
+                )
+            case let .networkError(message):
+                _ = self.interactionState.setNewAPIGroupListState(.networkError(message), for: selectedKeyID)
+            }
+        }
+    }
+
+    private func cancelNewAPIGroupListTask(for keyID: Int) {
+        let instanceID = interactionState.newAPIModelAvailabilityConfiguration(for: keyID).instanceID
+        newAPIGroupListTasks[instanceID]?.cancel()
+        newAPIGroupListTasks[instanceID] = nil
+        newAPIGroupListRequestIDs[instanceID] = nil
+    }
+
+    private func restartNewAPIRuntime(for keyID: Int) {
+        guard interactionState.configuration(for: keyID)?.function == .newAPIModelAvailability else { return }
+        _ = ensureRuntimeInstance(for: keyID)
+        fetchNewAPIModelAvailability(for: keyID)
+        startNewAPITimer(for: keyID)
+    }
+
     func refreshSelectedSub2APIGroupList() {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return
@@ -1560,6 +1686,8 @@ final class H200ConnectionModel: ObservableObject {
             _ = interactionState.clearSub2APIBalanceRuntimeState(for: slot.keyID)
         case .sub2APIDailyCost:
             _ = interactionState.clearSub2APIDailyCostRuntimeState(for: slot.keyID)
+        case .newAPIModelAvailability:
+            _ = interactionState.clearNewAPIRuntimeState(for: slot.keyID)
         case .codexUsage:
             _ = interactionState.clearCodexUsageRuntimeState(for: slot.keyID)
         case .mihoyoGame:
@@ -1575,6 +1703,9 @@ final class H200ConnectionModel: ObservableObject {
     ) {
         let slot = runtimeSlotsByInstance[instanceID]
         let kind = runtimeKindsByInstance[instanceID]
+        if kind == .newAPIModelAvailability, let slot {
+            cancelNewAPIGroupListTask(for: slot.keyID)
+        }
 
         sub2APITimers[instanceID]?.invalidate()
         sub2APITimers[instanceID] = nil
@@ -1601,6 +1732,11 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIDailyCostNextFireNanoseconds[instanceID] = nil
         cancelSub2APIDailyCostFetch(for: instanceID)
         sub2APIDailyCostTokenPausedInstances.remove(instanceID)
+
+        newAPITimers[instanceID]?.invalidate()
+        newAPITimers[instanceID] = nil
+        newAPIFetchTasks[instanceID]?.cancel()
+        newAPIFetchTasks[instanceID] = nil
 
         codexUsageTimers[instanceID]?.invalidate()
         codexUsageTimers[instanceID] = nil
@@ -1658,6 +1794,10 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func pauseRuntimeInstance(_ instanceID: RuntimeInstanceID) {
+        if runtimeKindsByInstance[instanceID] == .newAPIModelAvailability,
+           let slot = runtimeSlotsByInstance[instanceID] {
+            cancelNewAPIGroupListTask(for: slot.keyID)
+        }
         sub2APITimers[instanceID]?.invalidate()
         sub2APITimers[instanceID] = nil
         sub2APIFetchTasks[instanceID]?.cancel()
@@ -1675,6 +1815,11 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIDailyCostTimers[instanceID]?.invalidate()
         sub2APIDailyCostTimers[instanceID] = nil
         cancelSub2APIDailyCostFetch(for: instanceID)
+
+        newAPITimers[instanceID]?.invalidate()
+        newAPITimers[instanceID] = nil
+        newAPIFetchTasks[instanceID]?.cancel()
+        newAPIFetchTasks[instanceID] = nil
 
         codexUsageTimers[instanceID]?.invalidate()
         codexUsageTimers[instanceID] = nil
@@ -1721,12 +1866,64 @@ final class H200ConnectionModel: ObservableObject {
             resumeSub2APIBalanceRuntime(instanceID)
         case .sub2APIDailyCost:
             resumeSub2APIDailyCostRuntime(instanceID)
+        case .newAPIModelAvailability:
+            resumeNewAPIRuntime(instanceID)
         case .codexUsage:
             resumeCodexUsageRuntime(instanceID)
         case .mihoyoGame:
             resumeMihoyoGameRuntime(instanceID)
         case nil:
             return
+        }
+    }
+
+    private func resumeNewAPIRuntime(_ instanceID: RuntimeInstanceID) {
+        guard let slot = runtimeSlotsByInstance[instanceID], canRunInternalRefresh else { return }
+        fetchNewAPIModelAvailability(for: slot.keyID)
+        startNewAPITimer(for: slot.keyID)
+    }
+
+    private func startNewAPITimer(for keyID: Int) {
+        guard let instanceID = runtimeInstanceID(for: keyID),
+              let configuration = interactionState.configuration(for: keyID),
+              configuration.function == .newAPIModelAvailability,
+              configuration.newAPIModelAvailability.refreshInterval >= 5,
+              canRunInternalRefresh
+        else { return }
+        newAPITimers[instanceID]?.invalidate()
+        newAPITimers[instanceID] = Timer.scheduledTimer(
+            withTimeInterval: TimeInterval(configuration.newAPIModelAvailability.refreshInterval),
+            repeats: false
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.fetchNewAPIModelAvailability(for: keyID)
+                self.startNewAPITimer(for: keyID)
+            }
+        }
+    }
+
+    private func fetchNewAPIModelAvailability(for keyID: Int) {
+        guard let instanceID = runtimeInstanceID(for: keyID),
+              let configuration = interactionState.configuration(for: keyID),
+              configuration.function == .newAPIModelAvailability
+        else { return }
+        let newAPI = configuration.newAPIModelAvailability
+        guard newAPI.isConfigurationComplete else { return }
+        newAPIFetchTasks[instanceID]?.cancel()
+        newAPIFetchTasks[instanceID] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await self.newAPIFetcher.fetchModelAvailability(
+                baseURL: newAPI.baseURL,
+                modelName: newAPI.normalizedModelName
+            )
+            guard !Task.isCancelled,
+                  self.runtimeInstanceID(for: keyID) == instanceID,
+                  self.interactionState.configuration(for: keyID)?.function == .newAPIModelAvailability
+            else { return }
+            _ = self.interactionState.setNewAPILastResult(result, for: keyID)
+            self.newAPIFetchTasks[instanceID] = nil
+            self.syncKeyDisplay(keyID: keyID)
         }
     }
 

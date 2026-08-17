@@ -1,6 +1,17 @@
 import AppKit
 import Foundation
 
+/// New API 可用率图表的纵轴合同：始终固定为 0% 到 100%。
+enum NewAPIAvailabilityChartScale {
+    static let minimum: Double = 0
+    static let maximum: Double = 100
+
+    nonisolated static func normalized(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(maximum, max(minimum, value)) / (maximum - minimum)
+    }
+}
+
 nonisolated struct H200ButtonPackage: Equatable {
     let payload: Data
     let manifestData: Data
@@ -381,6 +392,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             drawMihoyoGameContent(content, in: cardRect, buttonRect: rect)
             return
         }
+        if let content = display.newAPIModelAvailabilityButtonContent {
+            drawNewAPIModelAvailabilityContent(content, in: cardRect, buttonRect: rect)
+            return
+        }
         if let content = display.sub2APIButtonContent {
             drawSub2APIContent(content, in: cardRect, buttonRect: rect)
             return
@@ -565,6 +580,76 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             rect: NSRect(x: rect.minX, y: top - totalHeight, width: rect.width, height: valueHeight),
             shadow: shadow
         )
+    }
+
+    private func drawNewAPIModelAvailabilityContent(
+        _ content: NewAPIModelAvailabilityButtonContent,
+        in rect: NSRect,
+        buttonRect: NSRect
+    ) {
+        let chartHeight = buttonRect.height * 0.5
+        let chartRect = NSRect(
+            x: rect.minX,
+            y: rect.minY,
+            width: rect.width,
+            height: min(chartHeight, rect.height * 0.56)
+        ).insetBy(dx: buttonRect.width * 0.035, dy: buttonRect.height * 0.035)
+        let textRect = NSRect(
+            x: rect.minX,
+            y: chartRect.maxY,
+            width: rect.width,
+            height: max(0, rect.maxY - chartRect.maxY)
+        )
+        let shadow = textShadow()
+
+        drawCenteredAutoSizedSingleLineText(
+            "\(content.serviceName) | \(content.groupName)",
+            weight: .semibold,
+            maxFontSize: buttonRect.height * 0.12,
+            minFontSize: buttonRect.height * 0.075,
+            color: NSColor(calibratedWhite: 0.88, alpha: 1),
+            rect: NSRect(x: textRect.minX, y: textRect.midY, width: textRect.width, height: textRect.height * 0.42),
+            shadow: shadow
+        )
+        drawCenteredAutoSizedSingleLineText(
+            content.successRateText,
+            weight: .heavy,
+            maxFontSize: buttonRect.height * 0.27,
+            minFontSize: buttonRect.height * 0.16,
+            color: NSColor(calibratedRed: 0.25, green: 0.86, blue: 0.42, alpha: 1),
+            rect: NSRect(x: textRect.minX, y: textRect.minY, width: textRect.width, height: textRect.height * 0.62),
+            shadow: shadow
+        )
+
+        let values = content.series.map(\.successRate).filter(\.isFinite)
+        guard !values.isEmpty, chartRect.width > 0, chartRect.height > 0 else { return }
+        let points = values.enumerated().map { index, value in
+            let x = values.count == 1
+                ? chartRect.midX
+                : chartRect.minX + CGFloat(index) / CGFloat(values.count - 1) * chartRect.width
+            // 纵轴固定 0%–100%，禁止按当前数据集自动调整范围。
+            let normalized = NewAPIAvailabilityChartScale.normalized(value)
+            return NSPoint(x: x, y: chartRect.minY + CGFloat(normalized) * chartRect.height)
+        }
+        guard let first = points.first else { return }
+        NSGraphicsContext.current?.cgContext.setShouldAntialias(true)
+        let path = NSBezierPath()
+        path.lineWidth = max(2, buttonRect.height * 0.018)
+        path.lineJoinStyle = .round
+        path.lineCapStyle = .round
+        path.move(to: first)
+        for index in 1..<points.count {
+            let previous = points[index - 1]
+            let current = points[index]
+            let midpointX = (previous.x + current.x) / 2
+            path.curve(
+                to: current,
+                controlPoint1: NSPoint(x: midpointX, y: previous.y),
+                controlPoint2: NSPoint(x: midpointX, y: current.y)
+            )
+        }
+        NSColor(calibratedRed: 0.30, green: 0.78, blue: 1.0, alpha: 1).setStroke()
+        path.stroke()
     }
 
     private func sub2APIAvailabilityColor(for level: Sub2APIAvailabilityLevel) -> NSColor {

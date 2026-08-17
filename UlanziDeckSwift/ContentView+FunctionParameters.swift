@@ -53,6 +53,77 @@ private final class ButtonBackgroundSelectionAccessory: NSObject {
 }
 
 extension ContentView {
+    var selectedNewAPIConfiguration: DeckKeyNewAPIModelAvailabilityConfiguration? {
+        guard let selectedKeyID = interactionState.selectedKeyID else { return nil }
+        guard interactionState.configuration(for: selectedKeyID)?.function == .newAPIModelAvailability else { return nil }
+        return interactionState.newAPIModelAvailabilityConfiguration(for: selectedKeyID)
+    }
+
+    var selectedNewAPIBaseURLBinding: Binding<String> {
+        Binding(
+            get: { selectedNewAPIConfiguration?.baseURL ?? "" },
+            set: { onNewAPIBaseURLChange($0) }
+        )
+    }
+
+    var selectedNewAPIRefreshIntervalBinding: Binding<Int> {
+        Binding(
+            get: { selectedNewAPIConfiguration?.refreshInterval ?? 30 },
+            set: { onNewAPIRefreshIntervalChange($0) }
+        )
+    }
+
+    var selectedNewAPIModelNameBinding: Binding<String> {
+        Binding(
+            get: { selectedNewAPIConfiguration?.modelName ?? "" },
+            set: { onNewAPIModelNameChange($0) }
+        )
+    }
+
+    var selectedNewAPISelectedGroupBinding: Binding<String?> {
+        Binding(
+            get: { selectedNewAPIConfiguration?.normalizedSelectedGroup },
+            set: { onNewAPISelectedGroupChange($0) }
+        )
+    }
+
+    var selectedNewAPIGroupOptions: [String] {
+        guard let configuration = selectedNewAPIConfiguration else { return [] }
+        var options = configuration.groupListState.items
+        if let selected = configuration.normalizedSelectedGroup, !options.contains(selected) {
+            options.append(selected)
+        }
+        return options
+    }
+
+    var canRefreshSelectedNewAPIGroupList: Bool {
+        guard let configuration = selectedNewAPIConfiguration else { return false }
+        return !configuration.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !configuration.normalizedModelName.isEmpty
+    }
+
+    var selectedNewAPIAutomaticServiceName: String {
+        selectedNewAPIConfiguration?.serviceDisplayName ?? "New API"
+    }
+
+    var selectedNewAPIGroupName: String {
+        selectedNewAPIConfiguration?.groupDisplayName ?? "未配置"
+    }
+
+    var selectedNewAPIServiceNameBinding: Binding<String> {
+        Binding(
+            get: { selectedNewAPIConfiguration?.customServiceName ?? "" },
+            set: { onNewAPIServiceNameChange($0) }
+        )
+    }
+
+    var selectedNewAPIGroupNameBinding: Binding<String> {
+        Binding(
+            get: { selectedNewAPIConfiguration?.customGroupName ?? "" },
+            set: { onNewAPIGroupNameChange($0) }
+        )
+    }
+
     nonisolated static func shouldAutomaticallySelectDefaultCodexAuthFile(
         currentFunction: DeckKeyFunction?,
         selectedFunction: DeckKeyFunction
@@ -231,6 +302,97 @@ extension ContentView {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
+
+                Spacer()
+            }
+
+        case .newAPIModelAvailability:
+            HStack(alignment: .top, spacing: 28) {
+                functionParameterColumn(for: configuration)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("认证来源")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Picker("认证来源", selection: Binding<String>(
+                            get: { "Base URL" },
+                            set: { _ in }
+                        )) {
+                            Text("Base URL").tag("Base URL")
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Base URL")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("https://api.mooko.ai", text: selectedNewAPIBaseURLBinding)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("刷新间隔（秒）")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 10) {
+                            TextField("刷新间隔", value: selectedNewAPIRefreshIntervalBinding, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 96)
+                            Stepper("刷新间隔", value: selectedNewAPIRefreshIntervalBinding, in: 5...3600)
+                                .labelsHidden()
+                        }
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("模型名")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("gpt-5.6-sol", text: selectedNewAPIModelNameBinding)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("分组")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            Picker("分组", selection: selectedNewAPISelectedGroupBinding) {
+                                Text("未选择").tag(String?.none)
+                                ForEach(selectedNewAPIGroupOptions, id: \.self) { group in
+                                    Text(group).tag(Optional(group))
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Button("获取分组") {
+                                onNewAPIGroupListRefresh()
+                            }
+                            .disabled(!canRefreshSelectedNewAPIGroupList)
+                        }
+                    }
+
+                    HStack(alignment: .top, spacing: 8) {
+                        sub2APINameParameterRow(
+                            label: "服务名",
+                            placeholder: selectedNewAPIAutomaticServiceName,
+                            text: selectedNewAPIServiceNameBinding
+                        )
+                        sub2APINameParameterRow(
+                            label: "号池名",
+                            placeholder: selectedNewAPIGroupName,
+                            text: selectedNewAPIGroupNameBinding
+                        )
+                    }
+                }
+                .frame(maxWidth: 360, alignment: .leading)
 
                 Spacer()
             }
@@ -780,6 +942,11 @@ extension ContentView {
                 title: "Sub2API",
                 systemImageName: "server.rack",
                 functions: [.sub2API, .sub2APIBalance, .sub2APIDailyCost]
+            ),
+            FunctionSection(
+                title: "New API",
+                systemImageName: "chart.xyaxis.line",
+                functions: [.newAPIModelAvailability]
             ),
             FunctionSection(
                 title: "游戏",

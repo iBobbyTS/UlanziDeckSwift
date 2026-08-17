@@ -7,6 +7,15 @@ import Testing
 
 @Suite(.serialized)
 struct UlanziDeckSwiftTests {
+    @Test("New API 图表纵轴固定为 0% 到 100%")
+    func newAPIChartScaleIsFixed() {
+        #expect(NewAPIAvailabilityChartScale.minimum == 0)
+        #expect(NewAPIAvailabilityChartScale.maximum == 100)
+        #expect(NewAPIAvailabilityChartScale.normalized(-10) == 0)
+        #expect(NewAPIAvailabilityChartScale.normalized(50) == 0.5)
+        #expect(NewAPIAvailabilityChartScale.normalized(120) == 1)
+    }
+
     @Test("右侧功能选择列覆盖所有可分配功能")
     func functionSidebarCoversEveryAssignableFunction() {
         let sidebarFunctions = ContentView.functionSections.flatMap(\.functions)
@@ -25,6 +34,88 @@ struct UlanziDeckSwiftTests {
         #expect(section?.functions == [.sub2API, .sub2APIBalance, .sub2APIDailyCost])
         #expect(websiteFunctions != nil)
         #expect(websiteFunctions?.contains(where: \.isSub2APIQuery) == false)
+    }
+
+    @Test("New API 模型可用率响应解析分组和折线数据")
+    func newAPIModelAvailabilityResponseDecodesGroupsAndSeries() throws {
+        let data = #"{"data":{"model_name":"gpt-5.6-sol","groups":[{"group":"GM","success_rate":99.29577464788733,"series":[{"ts":1786924800,"success_rate":100}]}]},"success":true}"#.data(using: .utf8)!
+
+        let response = try JSONDecoder().decode(NewAPIModelAvailabilityResponse.self, from: data)
+
+        #expect(response.success == true)
+        #expect(response.data?.modelName == "gpt-5.6-sol")
+        #expect(response.data?.groups.map(\.group) == ["GM"])
+        #expect(response.data?.groups.first?.successRate == 99.29577464788733)
+        #expect(response.data?.groups.first?.series.first?.timestamp == 1786924800)
+        #expect(response.data?.groups.first?.series.first?.successRate == 100)
+    }
+
+    @Test("New API 卡片仅包含模型可用率")
+    func newAPISidebarSectionContainsOnlyModelAvailability() {
+        let section = ContentView.functionSections.first { $0.title == "New API" }
+        #expect(section?.functions == [.newAPIModelAvailability])
+    }
+
+    @Test("New API 模型可用率 URL 固定请求 24 小时且编码模型名")
+    func newAPIModelAvailabilityURLUsesFixedHours() throws {
+        let url = try NewAPIBaseURL("https://api.mooko.ai").modelAvailabilityURL(modelName: "gpt 5.6/sol")
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+
+        #expect(url.absoluteString == "https://api.mooko.ai/api/perf-metrics?model=gpt%205.6/sol&hours=24")
+        #expect(components?.queryItems?.first(where: { $0.name == "hours" })?.value == "24")
+        #expect(components?.queryItems?.first(where: { $0.name == "model" })?.value == "gpt 5.6/sol")
+    }
+
+    @Test("New API 配置无认证字段且选择分组后完成")
+    func newAPIModelAvailabilityConfigurationCompletesWithBaseModelAndGroup() throws {
+        var configuration = DeckKeyNewAPIModelAvailabilityConfiguration(
+            baseURL: "https://api.mooko.ai",
+            modelName: "gpt-5.6-sol"
+        )
+
+        #expect(!configuration.isConfigurationComplete)
+        configuration.selectedGroup = "GM"
+        #expect(configuration.isConfigurationComplete)
+
+        let encoded = try JSONEncoder().encode(configuration)
+        let payload = try #require(String(data: encoded, encoding: .utf8))
+        #expect(!payload.contains("bearer"))
+        #expect(!payload.contains("credential"))
+        #expect(!payload.contains("dataSource"))
+    }
+
+    @Test("New API 按钮投影服务名号池名成功率和序列")
+    func newAPIModelAvailabilityDisplayProjectsSelectedGroup() {
+        let series = [
+            NewAPIModelAvailabilitySeriesPoint(timestamp: 1, successRate: 75),
+            NewAPIModelAvailabilitySeriesPoint(timestamp: 2, successRate: 100),
+        ]
+        let group = NewAPIModelAvailabilityGroup(group: "GM", successRate: 99.25, series: series)
+        let result = NewAPIModelAvailabilityResult.success(
+            data: NewAPIModelAvailabilityData(modelName: "gpt-5.6-sol", groups: [group])
+        )
+        let configuration = DeckKeyConfiguration(
+            function: .newAPIModelAvailability,
+            newAPIModelAvailability: DeckKeyNewAPIModelAvailabilityConfiguration(
+                baseURL: "https://api.mooko.ai",
+                modelName: "gpt-5.6-sol",
+                selectedGroup: "GM",
+                customServiceName: "Mooko",
+                customGroupName: "优选号池",
+                lastResult: result
+            )
+        )
+        let display = DeckKeyDisplay(
+            key: DeckGridLayout.h200Prototype.keys[0],
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+
+        #expect(display.newAPIModelAvailabilityButtonContent?.serviceName == "Mooko")
+        #expect(display.newAPIModelAvailabilityButtonContent?.groupName == "优选号池")
+        #expect(display.newAPIModelAvailabilityButtonContent?.successRateText == "99.2%")
+        #expect(display.newAPIModelAvailabilityButtonContent?.series == series)
     }
 
     @Test("主页选择器把新增按钮放在所有页码之后")

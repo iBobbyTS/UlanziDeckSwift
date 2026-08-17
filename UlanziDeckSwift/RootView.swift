@@ -133,6 +133,27 @@ struct RootView: View {
             onSub2APIDailyCostTimezoneChange: { timezone in
                 connectionModel.setSelectedSub2APIDailyCostTimezone(timezone)
             },
+            onNewAPIBaseURLChange: { baseURL in
+                connectionModel.setSelectedNewAPIBaseURL(baseURL)
+            },
+            onNewAPIRefreshIntervalChange: { interval in
+                connectionModel.setSelectedNewAPIRefreshInterval(interval)
+            },
+            onNewAPIModelNameChange: { modelName in
+                connectionModel.setSelectedNewAPIModelName(modelName)
+            },
+            onNewAPISelectedGroupChange: { group in
+                connectionModel.setSelectedNewAPISelectedGroup(group)
+            },
+            onNewAPIGroupListRefresh: {
+                connectionModel.refreshSelectedNewAPIGroupList()
+            },
+            onNewAPIServiceNameChange: { serviceName in
+                connectionModel.setSelectedNewAPIServiceName(serviceName)
+            },
+            onNewAPIGroupNameChange: { groupName in
+                connectionModel.setSelectedNewAPIGroupName(groupName)
+            },
             onMihoyoQRCodeLoginRequest: {
                 connectionModel.beginMihoyoQRCodeLogin()
             },

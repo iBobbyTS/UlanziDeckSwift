@@ -64,6 +64,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let mihoyoGameButtonContent: MihoyoGameButtonContent?
     let codexUsageButtonContent: CodexUsageButtonContent?
     let sub2APIButtonContent: Sub2APIButtonContent?
+    let newAPIModelAvailabilityButtonContent: NewAPIModelAvailabilityButtonContent?
     let folderButtonContent: FolderButtonContent?
     let fileButtonContent: FileButtonContent?
     let webPageButtonContent: WebPageButtonContent?
@@ -91,6 +92,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         var mihoyoGameButtonContent: MihoyoGameButtonContent?
         var codexUsageButtonContent: CodexUsageButtonContent?
         var sub2APIButtonContent: Sub2APIButtonContent?
+        var newAPIModelAvailabilityButtonContent: NewAPIModelAvailabilityButtonContent?
         var folderButtonContent: FolderButtonContent?
         var fileButtonContent: FileButtonContent?
         var webPageButtonContent: WebPageButtonContent?
@@ -271,6 +273,23 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 title = configuration.visual.displayName(fallback: valueText)
                 subtitle = "\(content.serviceName) 今日消费"
                 sub2APIButtonContent = content
+            case .newAPIModelAvailability:
+                let availability = configuration.newAPIModelAvailability
+                if case let .success(data) = availability.lastResult,
+                   let group = data.groups.first(where: { $0.group == availability.normalizedSelectedGroup }) {
+                    let content = NewAPIModelAvailabilityButtonContent(
+                        serviceName: availability.serviceDisplayName,
+                        groupName: availability.groupDisplayName,
+                        successRate: group.successRate,
+                        series: group.series
+                    )
+                    title = configuration.visual.displayName(fallback: content.successRateText)
+                    subtitle = "\(content.serviceName) | \(content.groupName)"
+                    newAPIModelAvailabilityButtonContent = content
+                } else {
+                    title = configuration.visual.displayName(fallback: "可用率")
+                    subtitle = availability.groupDisplayName
+                }
             case .codexUsage:
                 switch configuration.codexUsage.lastResult {
                 case let .success(quota):
@@ -348,6 +367,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         self.mihoyoGameButtonContent = mihoyoGameButtonContent
         self.codexUsageButtonContent = codexUsageButtonContent
         self.sub2APIButtonContent = sub2APIButtonContent
+        self.newAPIModelAvailabilityButtonContent = newAPIModelAvailabilityButtonContent
         self.folderButtonContent = folderButtonContent
         self.fileButtonContent = fileButtonContent
         self.webPageButtonContent = webPageButtonContent
@@ -382,6 +402,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             mihoyoGameButtonContent: mihoyoGameButtonContent,
             codexUsageButtonContent: codexUsageButtonContent,
             sub2APIButtonContent: sub2APIButtonContent,
+            newAPIModelAvailabilityButtonContent: newAPIModelAvailabilityButtonContent,
             folderButtonContent: folderButtonContent,
             fileButtonContent: fileButtonContent,
             webPageButtonContent: webPageButtonContent,
@@ -406,6 +427,7 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let mihoyoGameButtonContent: MihoyoGameButtonContent?
     let codexUsageButtonContent: CodexUsageButtonContent?
     let sub2APIButtonContent: Sub2APIButtonContent?
+    let newAPIModelAvailabilityButtonContent: NewAPIModelAvailabilityButtonContent?
     let folderButtonContent: FolderButtonContent?
     let fileButtonContent: FileButtonContent?
     let webPageButtonContent: WebPageButtonContent?
@@ -414,6 +436,17 @@ nonisolated struct DeckKeyRenderIdentity: Equatable {
     let pageBackButtonContent: PageBackButtonContent?
     let buttonVisualContent: ButtonVisualContent
     let devicePixelSize: H200DeviceTarget.PixelSize
+}
+
+nonisolated struct NewAPIModelAvailabilityButtonContent: Equatable {
+    let serviceName: String
+    let groupName: String
+    let successRate: Double
+    let series: [NewAPIModelAvailabilitySeriesPoint]
+
+    var successRateText: String {
+        String(format: "%.1f%%", locale: Locale(identifier: "en_US_POSIX"), successRate)
+    }
 }
 
 nonisolated struct CodexUsageButtonContent: Equatable, Sendable {
@@ -1209,6 +1242,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations[keyID, default: .tallyDefault].sub2APIDailyCost
     }
 
+    func newAPIModelAvailabilityConfiguration(for keyID: Int) -> DeckKeyNewAPIModelAvailabilityConfiguration {
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability
+    }
+
     func codexUsageConfiguration(for keyID: Int) -> DeckKeyCodexUsageConfiguration {
         configurations[keyID, default: .tallyDefault].codexUsage
     }
@@ -1385,6 +1422,112 @@ nonisolated struct DeckGridInteractionState: Equatable {
         }
         dataSource.baseURL = normalizedBaseURL
         configurations[keyID, default: .tallyDefault].sub2APIDataSourceConfiguration = dataSource
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPIBaseURL(_ baseURL: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIModelAvailability
+        else { return false }
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.baseURL =
+            baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastResult = nil
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.groupListState = .idle
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPIRefreshInterval(_ interval: Int, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIModelAvailability
+        else { return false }
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.refreshInterval = max(5, interval)
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPIModelName(_ modelName: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIModelAvailability
+        else { return false }
+        selectedKeyID = keyID
+        let normalized = modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if configurations[keyID, default: .tallyDefault].newAPIModelAvailability.modelName != normalized {
+            configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastResult = nil
+            configurations[keyID, default: .tallyDefault].newAPIModelAvailability.groupListState = .idle
+        }
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.modelName = normalized
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPISelectedGroup(_ group: String?, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIModelAvailability
+        else { return false }
+        selectedKeyID = keyID
+        let normalized = group?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = normalized?.isEmpty == false ? normalized : nil
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.selectedGroup = value
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastResult = nil
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPIServiceName(_ serviceName: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIModelAvailability
+        else { return false }
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.customServiceName =
+            serviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPIGroupName(_ groupName: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIModelAvailability
+        else { return false }
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.customGroupName =
+            groupName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPIGroupListState(
+        _ state: DeckKeyNewAPIModelAvailabilityGroupListState,
+        for keyID: Int
+    ) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIModelAvailability
+        else { return false }
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.groupListState = state
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPILastResult(
+        _ result: NewAPIModelAvailabilityResult,
+        for keyID: Int
+    ) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIModelAvailability
+        else { return false }
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastResult = result
+        return true
+    }
+
+    @discardableResult
+    mutating func clearNewAPIRuntimeState(for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIModelAvailability
+        else { return false }
+        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastResult = nil
         return true
     }
 
@@ -2171,6 +2314,9 @@ nonisolated struct DeckGridInteractionState: Equatable {
             ensureUniqueSub2APIInstanceID(for: keyID)
         }
         configurations[keyID, default: .tallyDefault].refreshDefaultButtonBackgroundSnapshot()
+        if function == .newAPIModelAvailability {
+            ensureUniqueNewAPIInstanceID(for: keyID)
+        }
         normalizeSub2APIDataSources()
         return true
     }
@@ -2373,6 +2519,24 @@ nonisolated struct DeckGridInteractionState: Equatable {
             var dataSource = configurations[keyID, default: .tallyDefault].sub2APIDataSourceConfiguration
             dataSource.instanceID = instanceID
             configurations[keyID, default: .tallyDefault].sub2APIDataSourceConfiguration = dataSource
+        }
+    }
+
+    private mutating func ensureUniqueNewAPIInstanceID(for keyID: Int) {
+        let existingInstanceIDs = Set(
+            pages.flatMap { pageID, page in
+                page.configurations.compactMap { candidateKeyID, configuration -> String? in
+                    guard configuration.function == .newAPIModelAvailability,
+                          pageID != currentPageID || candidateKeyID != keyID else { return nil }
+                    return configuration.newAPIModelAvailability.instanceID
+                }
+            }
+        )
+        var configuration = configurations[keyID, default: .tallyDefault].newAPIModelAvailability
+        let instanceID = configuration.instanceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if instanceID.isEmpty || existingInstanceIDs.contains(instanceID) {
+            configuration.instanceID = UUID().uuidString
+            configurations[keyID, default: .tallyDefault].newAPIModelAvailability = configuration
         }
     }
 

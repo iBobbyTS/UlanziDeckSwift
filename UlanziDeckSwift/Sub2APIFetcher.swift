@@ -231,6 +231,54 @@ nonisolated enum Sub2APIDailyCostResult: Equatable {
     }
 }
 
+nonisolated struct NewAPIModelAvailabilitySeriesPoint: Decodable, Equatable {
+    let timestamp: Int
+    let successRate: Double
+
+    enum CodingKeys: String, CodingKey {
+        case timestamp = "ts"
+        case successRate = "success_rate"
+    }
+}
+
+nonisolated struct NewAPIModelAvailabilityGroup: Decodable, Equatable {
+    let group: String
+    let successRate: Double
+    let series: [NewAPIModelAvailabilitySeriesPoint]
+
+    enum CodingKeys: String, CodingKey {
+        case group
+        case successRate = "success_rate"
+        case series
+    }
+}
+
+nonisolated struct NewAPIModelAvailabilityData: Decodable, Equatable {
+    let modelName: String
+    let groups: [NewAPIModelAvailabilityGroup]
+
+    enum CodingKeys: String, CodingKey {
+        case modelName = "model_name"
+        case groups
+    }
+}
+
+nonisolated struct NewAPIModelAvailabilityResponse: Decodable, Equatable {
+    let data: NewAPIModelAvailabilityData?
+    let success: Bool?
+    let message: String?
+}
+
+nonisolated enum NewAPIModelAvailabilityResult: Equatable {
+    case success(data: NewAPIModelAvailabilityData)
+    case networkError(String)
+
+    var groups: [NewAPIModelAvailabilityGroup] {
+        guard case let .success(data) = self else { return [] }
+        return data.groups
+    }
+}
+
 private nonisolated struct Sub2APIFetchError: Error {
     let message: String
     let isUnauthorized: Bool
@@ -342,6 +390,48 @@ nonisolated struct Sub2APIBaseURL: Equatable {
     }
 }
 
+nonisolated struct NewAPIBaseURL: Equatable {
+    let url: URL
+    let host: String
+
+    init(_ rawValue: String) throws {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw NewAPIBaseURLError.invalid }
+        let urlString = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        guard var components = URLComponents(string: urlString),
+              components.scheme?.lowercased() == "https",
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              let host = components.host,
+              !host.isEmpty
+        else { throw NewAPIBaseURLError.invalid }
+        components.scheme = "https"
+        while components.path.hasSuffix("/") { components.path.removeLast() }
+        guard let url = components.url else { throw NewAPIBaseURLError.invalid }
+        self.url = url
+        self.host = host
+    }
+
+    func modelAvailabilityURL(modelName: String) throws -> URL {
+        let endpoint = url.appendingPathComponent("api").appendingPathComponent("perf-metrics")
+        guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
+            throw NewAPIBaseURLError.invalid
+        }
+        components.queryItems = [
+            URLQueryItem(name: "model", value: modelName),
+            URLQueryItem(name: "hours", value: "24"),
+        ]
+        guard let result = components.url else { throw NewAPIBaseURLError.invalid }
+        return result
+    }
+}
+
+nonisolated enum NewAPIBaseURLError: Error {
+    case invalid
+}
+
 // MARK: - Token 刷新模型
 
 nonisolated struct Sub2APIRefreshResponse: Decodable {
@@ -367,6 +457,43 @@ nonisolated struct Sub2APIRefreshResponse: Decodable {
 }
 
 // MARK: - 网络服务协议与实现
+
+nonisolated protocol NewAPIFetching: Sendable {
+    func fetchModelAvailability(baseURL: String, modelName: String) async -> NewAPIModelAvailabilityResult
+}
+
+nonisolated struct NewAPIFetcher: NewAPIFetching {
+    private let urlSession: URLSession
+    private let timeoutSeconds: TimeInterval
+
+    nonisolated init(urlSession: URLSession = .shared, timeoutSeconds: TimeInterval = 10) {
+        self.urlSession = urlSession
+        self.timeoutSeconds = timeoutSeconds
+    }
+
+    func fetchModelAvailability(baseURL: String, modelName: String) async -> NewAPIModelAvailabilityResult {
+        let url: URL
+        do {
+            url = try NewAPIBaseURL(baseURL).modelAvailabilityURL(modelName: modelName)
+        } catch {
+            return .networkError("无效的 Base URL")
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = timeoutSeconds
+        do {
+            let data = try await AuthenticatedHTTPResponseLoader.data(for: request, urlSession: urlSession)
+            let response = try JSONDecoder().decode(NewAPIModelAvailabilityResponse.self, from: data)
+            guard let responseData = response.data, response.success != false else {
+                return .networkError(response.message ?? "响应缺少有效模型可用率数据")
+            }
+            return .success(data: responseData)
+        } catch {
+            return .networkError("解析或请求响应失败：\(error.localizedDescription)")
+        }
+    }
+}
 
 nonisolated protocol Sub2APIFetching: Sendable {
     func fetchCapacitySummary(baseURL: String, targetGroupID: Int, bearerKey: String) async -> Sub2APICapacityResult

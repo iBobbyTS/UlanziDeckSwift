@@ -11,6 +11,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case sub2API
     case sub2APIBalance
     case sub2APIDailyCost
+    case newAPIModelAvailability
     case codexUsage
     case genshinStatus
     case starRailStatus
@@ -29,6 +30,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
         .sub2API,
         .sub2APIBalance,
         .sub2APIDailyCost,
+        .newAPIModelAvailability,
         .codexUsage,
         .genshinStatus,
         .starRailStatus,
@@ -60,6 +62,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "Sub2API 余额查询"
         case .sub2APIDailyCost:
             return "Sub2API 今日消费"
+        case .newAPIModelAvailability:
+            return "模型可用率"
         case .codexUsage:
             return "Codex 剩余额度"
         case .genshinStatus:
@@ -95,7 +99,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "network"
         case .brightness:
             return "sun.max"
-        case .sub2API, .sub2APIBalance, .sub2APIDailyCost:
+        case .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability:
             return "globe"
         case .codexUsage:
             return "gauge.with.dots.needle.67percent"
@@ -124,7 +128,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return .starRail
         case .zenlessZoneStatus:
             return .zenlessZoneZero
-        case .none, .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .codexUsage, .pageFolder, .pageBack, .previousPage, .nextPage:
+        case .none, .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .pageFolder, .pageBack, .previousPage, .nextPage:
             return nil
         }
     }
@@ -140,6 +144,7 @@ nonisolated enum DeckKeyPressRuntimeAction: Equatable {
     case refreshSub2API
     case refreshSub2APIBalance
     case refreshSub2APIDailyCost
+    case refreshNewAPIModelAvailability
     case refreshCodexUsage
     case refreshMihoyoGame
     case enterPage
@@ -152,6 +157,7 @@ nonisolated enum DeckKeyScheduledRuntime: Equatable {
     case sub2API
     case sub2APIBalance
     case sub2APIDailyCost
+    case newAPIModelAvailability
     case codexUsage
     case mihoyoGame
 }
@@ -179,6 +185,8 @@ extension DeckKeyFunction {
             return .refreshSub2APIBalance
         case .sub2APIDailyCost:
             return .refreshSub2APIDailyCost
+        case .newAPIModelAvailability:
+            return .refreshNewAPIModelAvailability
         case .codexUsage:
             return .refreshCodexUsage
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
@@ -204,6 +212,8 @@ extension DeckKeyFunction {
             return .sub2APIBalance
         case .sub2APIDailyCost:
             return .sub2APIDailyCost
+        case .newAPIModelAvailability:
+            return .newAPIModelAvailability
         case .codexUsage:
             return .codexUsage
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
@@ -1347,6 +1357,112 @@ nonisolated struct DeckKeySub2APIBalanceConfiguration: Codable, Equatable {
     }
 }
 
+nonisolated enum DeckKeyNewAPIModelAvailabilityGroupListState: Equatable {
+    case idle
+    case loading
+    case success(items: [String])
+    case networkError(String)
+
+    var items: [String] {
+        guard case let .success(items) = self else { return [] }
+        return items
+    }
+}
+
+nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatable {
+    var instanceID: String
+    var baseURL: String
+    var refreshInterval: Int
+    var modelName: String
+    var selectedGroup: String?
+    var customServiceName: String
+    var customGroupName: String
+
+    /// 最近一次查询结果，仅用于运行时显示，不参与持久化。
+    var lastResult: NewAPIModelAvailabilityResult?
+    /// 从服务端获取的分组列表，仅用于运行时编辑。
+    var groupListState: DeckKeyNewAPIModelAvailabilityGroupListState = .idle
+
+    init(
+        instanceID: String = UUID().uuidString,
+        baseURL: String = "",
+        refreshInterval: Int = 30,
+        modelName: String = "",
+        selectedGroup: String? = nil,
+        customServiceName: String = "",
+        customGroupName: String = "",
+        lastResult: NewAPIModelAvailabilityResult? = nil,
+        groupListState: DeckKeyNewAPIModelAvailabilityGroupListState = .idle
+    ) {
+        self.instanceID = instanceID
+        self.baseURL = baseURL
+        self.refreshInterval = refreshInterval
+        self.modelName = modelName
+        self.selectedGroup = selectedGroup
+        self.customServiceName = customServiceName
+        self.customGroupName = customGroupName
+        self.lastResult = lastResult
+        self.groupListState = groupListState
+    }
+
+    var normalizedModelName: String {
+        modelName.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var normalizedSelectedGroup: String? {
+        let value = selectedGroup?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.isEmpty ? nil : value
+    }
+
+    var serviceDisplayName: String {
+        let name = customServiceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { return name }
+        let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBaseURL.isEmpty else { return "New API" }
+        return (try? NewAPIBaseURL(trimmedBaseURL).host) ?? trimmedBaseURL
+    }
+
+    var groupDisplayName: String {
+        let name = customGroupName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? (normalizedSelectedGroup ?? "未配置") : name
+    }
+
+    var isConfigurationComplete: Bool {
+        !baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !normalizedModelName.isEmpty
+            && normalizedSelectedGroup != nil
+    }
+
+    enum CodingKeys: CodingKey {
+        case instanceID, baseURL, refreshInterval
+        case modelName, selectedGroup, customServiceName, customGroupName
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        instanceID = try container.decodeIfPresent(String.self, forKey: .instanceID) ?? UUID().uuidString
+        baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL) ?? ""
+        refreshInterval = try container.decodeIfPresent(Int.self, forKey: .refreshInterval) ?? 30
+        modelName = try container.decodeIfPresent(String.self, forKey: .modelName) ?? ""
+        selectedGroup = try container.decodeIfPresent(String.self, forKey: .selectedGroup)
+        customServiceName = try container.decodeIfPresent(String.self, forKey: .customServiceName) ?? ""
+        customGroupName = try container.decodeIfPresent(String.self, forKey: .customGroupName) ?? ""
+        lastResult = nil
+        groupListState = .idle
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(instanceID, forKey: .instanceID)
+        try container.encode(baseURL, forKey: .baseURL)
+        try container.encode(refreshInterval, forKey: .refreshInterval)
+        try container.encode(modelName, forKey: .modelName)
+        try container.encodeIfPresent(selectedGroup, forKey: .selectedGroup)
+        try container.encode(customServiceName, forKey: .customServiceName)
+        try container.encode(customGroupName, forKey: .customGroupName)
+    }
+}
+
 nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     var instanceID: String
     var baseURL: String
@@ -1625,6 +1741,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var sub2API: DeckKeySub2APIConfiguration
     var sub2APIBalance: DeckKeySub2APIBalanceConfiguration
     var sub2APIDailyCost: DeckKeySub2APIDailyCostConfiguration
+    var newAPIModelAvailability: DeckKeyNewAPIModelAvailabilityConfiguration
     var codexUsage: DeckKeyCodexUsageConfiguration
     var mihoyoGame: DeckKeyMihoyoGameConfiguration
     var pageFolder: DeckKeyPageFolderConfiguration
@@ -1641,6 +1758,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         sub2API: DeckKeySub2APIConfiguration(),
         sub2APIBalance: DeckKeySub2APIBalanceConfiguration(),
         sub2APIDailyCost: DeckKeySub2APIDailyCostConfiguration(),
+        newAPIModelAvailability: DeckKeyNewAPIModelAvailabilityConfiguration(),
         codexUsage: DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration()
@@ -1657,6 +1775,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         sub2API: DeckKeySub2APIConfiguration(),
         sub2APIBalance: DeckKeySub2APIBalanceConfiguration(),
         sub2APIDailyCost: DeckKeySub2APIDailyCostConfiguration(),
+        newAPIModelAvailability: DeckKeyNewAPIModelAvailabilityConfiguration(),
         codexUsage: DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration()
@@ -1673,6 +1792,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         sub2API: DeckKeySub2APIConfiguration(),
         sub2APIBalance: DeckKeySub2APIBalanceConfiguration(),
         sub2APIDailyCost: DeckKeySub2APIDailyCostConfiguration(),
+        newAPIModelAvailability: DeckKeyNewAPIModelAvailabilityConfiguration(),
         codexUsage: DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration(),
@@ -1690,6 +1810,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         sub2API: DeckKeySub2APIConfiguration = DeckKeySub2APIConfiguration(),
         sub2APIBalance: DeckKeySub2APIBalanceConfiguration = DeckKeySub2APIBalanceConfiguration(),
         sub2APIDailyCost: DeckKeySub2APIDailyCostConfiguration = DeckKeySub2APIDailyCostConfiguration(),
+        newAPIModelAvailability: DeckKeyNewAPIModelAvailabilityConfiguration = DeckKeyNewAPIModelAvailabilityConfiguration(),
         codexUsage: DeckKeyCodexUsageConfiguration = DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration = DeckKeyPageFolderConfiguration(),
@@ -1705,6 +1826,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         self.sub2API = sub2API
         self.sub2APIBalance = sub2APIBalance
         self.sub2APIDailyCost = sub2APIDailyCost
+        self.newAPIModelAvailability = newAPIModelAvailability
         self.codexUsage = codexUsage
         self.mihoyoGame = mihoyoGame
         self.pageFolder = pageFolder
@@ -1837,6 +1959,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             sub2API: sub2API,
             sub2APIBalance: sub2APIBalance,
             sub2APIDailyCost: sub2APIDailyCost,
+            newAPIModelAvailability: DeckKeyNewAPIModelAvailabilityConfiguration(),
             codexUsage: codexUsage,
             mihoyoGame: mihoyoGame,
             pageFolder: pageFolder,
@@ -1855,6 +1978,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case sub2API
         case sub2APIBalance
         case sub2APIDailyCost
+        case newAPIModelAvailability
         case codexUsage
         case mihoyoGame
         case pageFolder
@@ -1873,6 +1997,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         sub2API = try container.decodeIfPresent(DeckKeySub2APIConfiguration.self, forKey: .sub2API) ?? DeckKeySub2APIConfiguration()
         sub2APIBalance = try container.decodeIfPresent(DeckKeySub2APIBalanceConfiguration.self, forKey: .sub2APIBalance) ?? DeckKeySub2APIBalanceConfiguration()
         sub2APIDailyCost = try container.decodeIfPresent(DeckKeySub2APIDailyCostConfiguration.self, forKey: .sub2APIDailyCost) ?? DeckKeySub2APIDailyCostConfiguration()
+        newAPIModelAvailability = try container.decodeIfPresent(DeckKeyNewAPIModelAvailabilityConfiguration.self, forKey: .newAPIModelAvailability) ?? DeckKeyNewAPIModelAvailabilityConfiguration()
         codexUsage = try container.decodeIfPresent(DeckKeyCodexUsageConfiguration.self, forKey: .codexUsage) ?? DeckKeyCodexUsageConfiguration()
         mihoyoGame = try container.decodeIfPresent(DeckKeyMihoyoGameConfiguration.self, forKey: .mihoyoGame) ?? DeckKeyMihoyoGameConfiguration()
         pageFolder = try container.decodeIfPresent(DeckKeyPageFolderConfiguration.self, forKey: .pageFolder) ?? DeckKeyPageFolderConfiguration()
@@ -1899,6 +2024,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         try container.encode(sub2API, forKey: .sub2API)
         try container.encode(sub2APIBalance, forKey: .sub2APIBalance)
         try container.encode(sub2APIDailyCost, forKey: .sub2APIDailyCost)
+        try container.encode(newAPIModelAvailability, forKey: .newAPIModelAvailability)
         try container.encode(codexUsage, forKey: .codexUsage)
         try container.encode(mihoyoGame, forKey: .mihoyoGame)
         try container.encode(pageFolder, forKey: .pageFolder)
@@ -1952,7 +2078,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return visual.backgroundPNGData
         case .codexUsage:
             return codexUsage.visual.backgroundPNGData
-        case .none, .tally, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost:
+        case .none, .tally, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability:
             return nil
         case .previousPage, .nextPage:
             return visual.backgroundPNGData
@@ -1977,7 +2103,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return visual.blurredBackgroundPNGData
         case .codexUsage:
             return codexUsage.visual.blurredBackgroundPNGData
-        case .none, .tally, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost:
+        case .none, .tally, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability:
             return nil
         case .previousPage, .nextPage:
             return visual.blurredBackgroundPNGData
@@ -2006,6 +2132,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return "余额"
         case .sub2APIDailyCost:
             return "今日消费"
+        case .newAPIModelAvailability:
+            return newAPIModelAvailability.groupDisplayName
         case .codexUsage:
             return "Codex 额度"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
@@ -2047,7 +2175,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return DeckKeyPageFolderConfiguration.migratingLegacyDefaultName(in: pageFolder.visual)
         case .pageBack:
             return DeckKeyVisualConfiguration(dimsBackground: false)
-        case .none, .tally, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage:
+        case .none, .tally, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage:
             return DeckKeyVisualConfiguration()
         }
     }
