@@ -11,6 +11,26 @@ private nonisolated struct RuntimeInstanceID: Hashable {
     let rawValue: Int
 }
 
+/// 统一决定 runtime 恢复时是保留快照并等待原定时间，还是立即刷新。
+nonisolated enum DeckRefreshResumeDecision: Equatable {
+    case refreshNow
+    case wait(TimeInterval)
+
+    static func resolve(
+        lastSuccessfulRefreshAt: Date?,
+        hasSnapshot: Bool,
+        interval: TimeInterval,
+        now: Date
+    ) -> Self {
+        guard hasSnapshot, let lastSuccessfulRefreshAt else {
+            return .refreshNow
+        }
+
+        let remaining = interval - now.timeIntervalSince(lastSuccessfulRefreshAt)
+        return remaining > 0 ? .wait(remaining) : .refreshNow
+    }
+}
+
 @MainActor
 final class H200ConnectionModel: ObservableObject {
     @Published private(set) var status: H200ConnectionStatus = .checking
@@ -74,6 +94,7 @@ final class H200ConnectionModel: ObservableObject {
     private var sub2APIDailyCostRequestIDs: [RuntimeInstanceID: UUID] = [:]
     private var sub2APIDailyCostTokenPausedInstances: Set<RuntimeInstanceID> = []
     private var newAPITimers: [RuntimeInstanceID: Timer] = [:]
+    private var newAPINextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var newAPIFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
     private var newAPIGroupListTasks: [String: Task<Void, Never>] = [:]
     private var newAPIGroupListRequestIDs: [String: UUID] = [:]
@@ -1368,7 +1389,7 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private var canRunInternalRefresh: Bool {
-        !isInternalRefreshPaused
+        !isInternalRefreshPaused && connectedDevice != nil && syncSummary != nil
     }
 
     private func handleInternalRefreshPauseChange(wasPaused: Bool) {
@@ -1396,8 +1417,6 @@ final class H200ConnectionModel: ObservableObject {
 
     private func refresh() {
         pauseAllRuntimeInstances()
-        _ = interactionState.goToRootPage()
-        pageFolderAutoReturnTimer.cancel()
         reconcileRuntimeInstancesWithInteractionState()
         deviceCommandGeneration += 1
         let generation = deviceCommandGeneration
@@ -1465,8 +1484,8 @@ final class H200ConnectionModel: ObservableObject {
                 syncCurrentDisplays()
             }
             if canRunInternalRefresh {
-                refreshAssignedSub2APIStatuses()
-                refreshAssignedCodexUsageStatuses()
+                // 所有 runtime 统一经 freshness gate 恢复，包含 New API。
+                resumeCurrentPageRuntime()
             }
         case let .failure(error, _):
             alert = H200ConnectionAlert(syncFailure: error)
@@ -1734,6 +1753,7 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIDailyCostTokenPausedInstances.remove(instanceID)
 
         newAPITimers[instanceID]?.invalidate()
+        newAPINextFireNanoseconds[instanceID] = nil
         newAPITimers[instanceID] = nil
         newAPIFetchTasks[instanceID]?.cancel()
         newAPIFetchTasks[instanceID] = nil
@@ -1818,6 +1838,7 @@ final class H200ConnectionModel: ObservableObject {
 
         newAPITimers[instanceID]?.invalidate()
         newAPITimers[instanceID] = nil
+        newAPINextFireNanoseconds[instanceID] = nil
         newAPIFetchTasks[instanceID]?.cancel()
         newAPIFetchTasks[instanceID] = nil
 
@@ -1878,25 +1899,59 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func resumeNewAPIRuntime(_ instanceID: RuntimeInstanceID) {
-        guard let slot = runtimeSlotsByInstance[instanceID], canRunInternalRefresh else { return }
-        fetchNewAPIModelAvailability(for: slot.keyID)
-        startNewAPITimer(for: slot.keyID)
+        guard let slot = runtimeSlotsByInstance[instanceID],
+              let configuration = interactionState.configuration(for: slot.keyID),
+              configuration.function == .newAPIModelAvailability,
+              canRunInternalRefresh
+        else { return }
+
+        let newAPI = configuration.newAPIModelAvailability
+        let interval = TimeInterval(newAPI.refreshInterval)
+        let decision = DeckRefreshResumeDecision.resolve(
+            lastSuccessfulRefreshAt: newAPI.lastSuccessfulRefreshAt,
+            hasSnapshot: newAPI.lastSuccessfulSnapshot != nil,
+            interval: interval,
+            now: Date()
+        )
+        switch decision {
+        case .refreshNow:
+            fetchNewAPIModelAvailability(for: slot.keyID)
+            startNewAPITimer(for: slot.keyID)
+        case let .wait(remaining):
+            scheduleNewAPITimer(for: slot.keyID, after: remaining)
+        }
     }
 
     private func startNewAPITimer(for keyID: Int) {
+        guard runtimeInstanceID(for: keyID) != nil,
+              let configuration = interactionState.configuration(for: keyID),
+              configuration.function == .newAPIModelAvailability,
+              configuration.newAPIModelAvailability.isConfigurationComplete,
+              configuration.newAPIModelAvailability.refreshInterval >= 5,
+              canRunInternalRefresh
+        else { return }
+        scheduleNewAPITimer(for: keyID, after: TimeInterval(configuration.newAPIModelAvailability.refreshInterval))
+    }
+
+    private func scheduleNewAPITimer(for keyID: Int, after delay: TimeInterval) {
         guard let instanceID = runtimeInstanceID(for: keyID),
               let configuration = interactionState.configuration(for: keyID),
               configuration.function == .newAPIModelAvailability,
+              configuration.newAPIModelAvailability.isConfigurationComplete,
               configuration.newAPIModelAvailability.refreshInterval >= 5,
               canRunInternalRefresh
         else { return }
         newAPITimers[instanceID]?.invalidate()
+        let fireAt = nowNanoseconds + UInt64(max(0, delay) * 1_000_000_000)
+        newAPINextFireNanoseconds[instanceID] = fireAt
         newAPITimers[instanceID] = Timer.scheduledTimer(
-            withTimeInterval: TimeInterval(configuration.newAPIModelAvailability.refreshInterval),
+            withTimeInterval: max(0, delay),
             repeats: false
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                self.newAPITimers[instanceID] = nil
+                self.newAPINextFireNanoseconds[instanceID] = nil
                 self.fetchNewAPIModelAvailability(for: keyID)
                 self.startNewAPITimer(for: keyID)
             }
@@ -1906,7 +1961,8 @@ final class H200ConnectionModel: ObservableObject {
     private func fetchNewAPIModelAvailability(for keyID: Int) {
         guard let instanceID = runtimeInstanceID(for: keyID),
               let configuration = interactionState.configuration(for: keyID),
-              configuration.function == .newAPIModelAvailability
+              configuration.function == .newAPIModelAvailability,
+              canRunInternalRefresh
         else { return }
         let newAPI = configuration.newAPIModelAvailability
         guard newAPI.isConfigurationComplete else { return }
@@ -1925,6 +1981,8 @@ final class H200ConnectionModel: ObservableObject {
             _ = self.persistCurrentConfiguration()
             self.newAPIFetchTasks[instanceID] = nil
             self.syncKeyDisplay(keyID: keyID)
+            // 以本次请求完成时刻为下一周期起点，避免网络耗时使计划提前漂移。
+            self.startNewAPITimer(for: keyID)
         }
     }
 
@@ -2490,17 +2548,23 @@ final class H200ConnectionModel: ObservableObject {
         else {
             return
         }
-
         if let groupListFireNanoseconds = sub2APIGroupListRefreshFireNanoseconds[instanceID] {
             scheduleSub2APIGroupListRefresh(for: instanceID, fireAt: groupListFireNanoseconds)
         }
 
-        if let nextFireNanoseconds = sub2APINextFireNanoseconds[instanceID] {
-            scheduleSub2APIRefresh(for: instanceID, fireAt: nextFireNanoseconds)
-        } else if resolved.config.lastResult != nil {
-            scheduleNextSub2APIRefresh(for: instanceID)
-        } else {
+        let interval = TimeInterval(resolved.refreshInterval) * sub2APIRefreshSecondDuration
+        switch DeckRefreshResumeDecision.resolve(
+            lastSuccessfulRefreshAt: resolved.config.lastSuccessfulRefreshAt,
+            hasSnapshot: resolved.config.lastSuccessfulSnapshot != nil,
+            interval: interval,
+            now: Date()
+        ) {
+        case .refreshNow:
             fetchSub2API(for: instanceID)
+        case let .wait(remaining):
+            let fireAt = sub2APINextFireNanoseconds[instanceID]
+                ?? nowNanoseconds + UInt64(remaining * 1_000_000_000)
+            scheduleSub2APIRefresh(for: instanceID, fireAt: fireAt)
         }
     }
 
@@ -2634,12 +2698,19 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        if let nextFireNanoseconds = codexUsageNextFireNanoseconds[instanceID] {
-            scheduleCodexUsageRefresh(for: instanceID, fireAt: nextFireNanoseconds)
-        } else if resolved.config.lastResult != nil {
-            scheduleNextCodexUsageRefresh(for: instanceID)
-        } else {
+        let interval = TimeInterval(resolved.config.refreshIntervalMinutes) * codexUsageRefreshMinuteDuration
+        switch DeckRefreshResumeDecision.resolve(
+            lastSuccessfulRefreshAt: resolved.config.lastSuccessfulRefreshAt,
+            hasSnapshot: resolved.config.lastSuccessfulSnapshot != nil,
+            interval: interval,
+            now: Date()
+        ) {
+        case .refreshNow:
             fetchCodexUsage(for: instanceID)
+        case let .wait(remaining):
+            let fireAt = codexUsageNextFireNanoseconds[instanceID]
+                ?? nowNanoseconds + UInt64(remaining * 1_000_000_000)
+            scheduleCodexUsageRefresh(for: instanceID, fireAt: fireAt)
         }
     }
 
@@ -2716,6 +2787,8 @@ final class H200ConnectionModel: ObservableObject {
                 break
             }
             self.syncKeyDisplay(keyID: latest.slot.keyID)
+            // 以请求完成时刻作为下一周期起点，保持成功时间与 Timer 对齐。
+            self.scheduleNextMihoyoGameRefresh(for: instanceID)
         }
     }
 
@@ -2962,17 +3035,22 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func resumeSub2APIBalanceRuntime(_ instanceID: RuntimeInstanceID) {
-        guard resolveCurrentSub2APIBalanceSlot(for: instanceID) != nil,
+        guard let resolved = resolveCurrentSub2APIBalanceSlot(for: instanceID),
               !sub2APIBalanceTokenPausedInstances.contains(instanceID)
         else { return }
-        if let nextFire = sub2APIBalanceNextFireNanoseconds[instanceID] {
-            scheduleSub2APIBalanceRefresh(for: instanceID, fireAt: nextFire)
-        } else if interactionState.sub2APIBalanceConfiguration(
-            for: runtimeSlotsByInstance[instanceID]?.keyID ?? -1
-        ).lastResult != nil {
-            scheduleNextSub2APIBalanceRefresh(for: instanceID)
-        } else {
+        let interval = TimeInterval(resolved.refreshInterval) * sub2APIRefreshSecondDuration
+        switch DeckRefreshResumeDecision.resolve(
+            lastSuccessfulRefreshAt: resolved.config.lastSuccessfulRefreshAt,
+            hasSnapshot: resolved.config.lastSuccessfulSnapshot != nil,
+            interval: interval,
+            now: Date()
+        ) {
+        case .refreshNow:
             fetchSub2APIBalance(for: instanceID)
+        case let .wait(remaining):
+            let fireAt = sub2APIBalanceNextFireNanoseconds[instanceID]
+                ?? nowNanoseconds + UInt64(remaining * 1_000_000_000)
+            scheduleSub2APIBalanceRefresh(for: instanceID, fireAt: fireAt)
         }
     }
 
@@ -3279,17 +3357,22 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func resumeSub2APIDailyCostRuntime(_ instanceID: RuntimeInstanceID) {
-        guard resolveCurrentSub2APIDailyCostSlot(for: instanceID) != nil,
+        guard let resolved = resolveCurrentSub2APIDailyCostSlot(for: instanceID),
               !sub2APIDailyCostTokenPausedInstances.contains(instanceID)
         else { return }
-        if let nextFire = sub2APIDailyCostNextFireNanoseconds[instanceID] {
-            scheduleSub2APIDailyCostRefresh(for: instanceID, fireAt: nextFire)
-        } else if interactionState.sub2APIDailyCostConfiguration(
-            for: runtimeSlotsByInstance[instanceID]?.keyID ?? -1
-        ).lastResult != nil {
-            scheduleNextSub2APIDailyCostRefresh(for: instanceID)
-        } else {
+        let interval = TimeInterval(resolved.refreshInterval) * sub2APIRefreshSecondDuration
+        switch DeckRefreshResumeDecision.resolve(
+            lastSuccessfulRefreshAt: resolved.config.lastSuccessfulRefreshAt,
+            hasSnapshot: resolved.config.lastSuccessfulSnapshot != nil,
+            interval: interval,
+            now: Date()
+        ) {
+        case .refreshNow:
             fetchSub2APIDailyCost(for: instanceID)
+        case let .wait(remaining):
+            let fireAt = sub2APIDailyCostNextFireNanoseconds[instanceID]
+                ?? nowNanoseconds + UInt64(remaining * 1_000_000_000)
+            scheduleSub2APIDailyCostRefresh(for: instanceID, fireAt: fireAt)
         }
     }
 
@@ -3676,14 +3759,20 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        if let nextFireNanoseconds = mihoyoGameNextFireNanoseconds[instanceID] {
-            scheduleMihoyoGameRefresh(for: instanceID, fireAt: nextFireNanoseconds)
-        } else {
-            scheduleNextMihoyoGameRefresh(for: instanceID)
-        }
-
-        if resolved.config.lastResult == nil {
+        let interval = TimeInterval(resolved.config.refreshIntervalMinutes) * mihoyoGameRefreshMinuteDuration
+        switch DeckRefreshResumeDecision.resolve(
+            lastSuccessfulRefreshAt: resolved.config.lastSuccessfulRefreshAt,
+            hasSnapshot: resolved.config.lastSuccessfulSnapshot != nil,
+            interval: interval,
+            now: Date()
+        ) {
+        case .refreshNow:
             fetchMihoyoGameStatus(for: instanceID)
+            scheduleNextMihoyoGameRefresh(for: instanceID)
+        case let .wait(remaining):
+            let fireAt = mihoyoGameNextFireNanoseconds[instanceID]
+                ?? nowNanoseconds + UInt64(remaining * 1_000_000_000)
+            scheduleMihoyoGameRefresh(for: instanceID, fireAt: fireAt)
         }
     }
 

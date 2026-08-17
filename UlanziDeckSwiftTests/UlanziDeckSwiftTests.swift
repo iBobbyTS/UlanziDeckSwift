@@ -1701,6 +1701,44 @@ struct UlanziDeckSwiftTests {
         #expect(failedRestored.lastSuccessfulRefreshAt == refreshedAt)
     }
 
+    @Test func refreshResumeDecisionPreservesOriginalTimeline() {
+        let refreshedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let interval: TimeInterval = 2 * 60 * 60
+
+        #expect(
+            DeckRefreshResumeDecision.resolve(
+                lastSuccessfulRefreshAt: refreshedAt,
+                hasSnapshot: true,
+                interval: interval,
+                now: refreshedAt.addingTimeInterval(60 * 60 + 60)
+            ) == .wait(60 * 60 - 60)
+        )
+        #expect(
+            DeckRefreshResumeDecision.resolve(
+                lastSuccessfulRefreshAt: refreshedAt,
+                hasSnapshot: true,
+                interval: interval,
+                now: refreshedAt.addingTimeInterval(interval)
+            ) == .refreshNow
+        )
+        #expect(
+            DeckRefreshResumeDecision.resolve(
+                lastSuccessfulRefreshAt: nil,
+                hasSnapshot: false,
+                interval: interval,
+                now: refreshedAt
+            ) == .refreshNow
+        )
+        #expect(
+            DeckRefreshResumeDecision.resolve(
+                lastSuccessfulRefreshAt: refreshedAt,
+                hasSnapshot: false,
+                interval: interval,
+                now: refreshedAt.addingTimeInterval(60)
+            ) == .refreshNow
+        )
+    }
+
     @Test func legacyRefreshConfigurationDefaultsSnapshotAndTimestampToNil() throws {
         let legacyPayload = Data("""
         {
