@@ -96,6 +96,7 @@ final class H200ConnectionModel: ObservableObject {
     private var newAPITimers: [RuntimeInstanceID: Timer] = [:]
     private var newAPINextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var newAPIFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
+    private var newAPIRequestIDs: [RuntimeInstanceID: UUID] = [:]
     private var newAPIGroupListTasks: [String: Task<Void, Never>] = [:]
     private var newAPIGroupListRequestIDs: [String: UUID] = [:]
     private var sub2APIAuthRefreshTasks: [String: Task<Sub2APIAuthInfo?, Never>] = [:]
@@ -331,7 +332,6 @@ final class H200ConnectionModel: ObservableObject {
         reconcileRuntimeInstancesWithInteractionState()
 
         persistCurrentConfiguration()
-        resumeCurrentPageRuntime()
         syncKeyDisplays(keyIDs: [sourceKeyID, targetKeyID])
     }
 
@@ -1208,7 +1208,11 @@ final class H200ConnectionModel: ObservableObject {
 
     private func restartNewAPIRuntime(for keyID: Int) {
         guard interactionState.configuration(for: keyID)?.function == .newAPIModelAvailability else { return }
-        _ = ensureRuntimeInstance(for: keyID)
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else { return }
+        stopNewAPITimer(for: instanceID, preservesNextFire: false)
+        newAPIFetchTasks[instanceID]?.cancel()
+        newAPIFetchTasks[instanceID] = nil
+        newAPIRequestIDs[instanceID] = nil
         fetchNewAPIModelAvailability(for: keyID)
         startNewAPITimer(for: keyID)
     }
@@ -1757,6 +1761,7 @@ final class H200ConnectionModel: ObservableObject {
         newAPITimers[instanceID] = nil
         newAPIFetchTasks[instanceID]?.cancel()
         newAPIFetchTasks[instanceID] = nil
+        newAPIRequestIDs[instanceID] = nil
 
         codexUsageTimers[instanceID]?.invalidate()
         codexUsageTimers[instanceID] = nil
@@ -1841,6 +1846,7 @@ final class H200ConnectionModel: ObservableObject {
         newAPINextFireNanoseconds[instanceID] = nil
         newAPIFetchTasks[instanceID]?.cancel()
         newAPIFetchTasks[instanceID] = nil
+        newAPIRequestIDs[instanceID] = nil
 
         codexUsageTimers[instanceID]?.invalidate()
         codexUsageTimers[instanceID] = nil
@@ -1952,37 +1958,80 @@ final class H200ConnectionModel: ObservableObject {
                 guard let self else { return }
                 self.newAPITimers[instanceID] = nil
                 self.newAPINextFireNanoseconds[instanceID] = nil
-                self.fetchNewAPIModelAvailability(for: keyID)
-                self.startNewAPITimer(for: keyID)
+                self.fetchNewAPIModelAvailability(for: instanceID)
             }
         }
     }
 
+    private func stopNewAPITimer(
+        for instanceID: RuntimeInstanceID,
+        preservesNextFire: Bool
+    ) {
+        newAPITimers[instanceID]?.invalidate()
+        newAPITimers[instanceID] = nil
+        if !preservesNextFire {
+            newAPINextFireNanoseconds[instanceID] = nil
+        }
+    }
+
     private func fetchNewAPIModelAvailability(for keyID: Int) {
-        guard let instanceID = runtimeInstanceID(for: keyID),
-              let configuration = interactionState.configuration(for: keyID),
+        guard let instanceID = runtimeInstanceID(for: keyID) else { return }
+        fetchNewAPIModelAvailability(for: instanceID)
+    }
+
+    private func fetchNewAPIModelAvailability(for instanceID: RuntimeInstanceID) {
+        guard let slot = runtimeSlotsByInstance[instanceID],
+              slot.pageID == interactionState.currentPageID,
+              let configuration = interactionState.configuration(for: slot.keyID),
               configuration.function == .newAPIModelAvailability,
               canRunInternalRefresh
         else { return }
         let newAPI = configuration.newAPIModelAvailability
         guard newAPI.isConfigurationComplete else { return }
         newAPIFetchTasks[instanceID]?.cancel()
+        let requestID = UUID()
+        newAPIRequestIDs[instanceID] = requestID
+        let baseURL = newAPI.baseURL
+        let modelName = newAPI.normalizedModelName
+        let selectedGroup = newAPI.selectedGroup
         newAPIFetchTasks[instanceID] = Task { @MainActor [weak self] in
             guard let self else { return }
             let result = await self.newAPIFetcher.fetchModelAvailability(
-                baseURL: newAPI.baseURL,
-                modelName: newAPI.normalizedModelName
+                baseURL: baseURL,
+                modelName: modelName
             )
             guard !Task.isCancelled,
-                  self.runtimeInstanceID(for: keyID) == instanceID,
-                  self.interactionState.configuration(for: keyID)?.function == .newAPIModelAvailability
+                  self.newAPIRequestIDs[instanceID] == requestID,
+                  let latestSlot = self.runtimeSlotsByInstance[instanceID],
+                  let latest = self.interactionState.configuration(for: latestSlot.keyID),
+                  latest.function == .newAPIModelAvailability,
+                  latest.newAPIModelAvailability.baseURL == baseURL,
+                  latest.newAPIModelAvailability.normalizedModelName == modelName,
+                  latest.newAPIModelAvailability.selectedGroup == selectedGroup
             else { return }
-            _ = self.interactionState.setNewAPILastResult(result, for: keyID)
+            let latestKeyID = latestSlot.keyID
+            _ = self.interactionState.setNewAPILastResult(result, for: latestKeyID)
             _ = self.persistCurrentConfiguration()
             self.newAPIFetchTasks[instanceID] = nil
-            self.syncKeyDisplay(keyID: keyID)
-            // 以本次请求完成时刻为下一周期起点，避免网络耗时使计划提前漂移。
-            self.startNewAPITimer(for: keyID)
+            self.newAPIRequestIDs[instanceID] = nil
+            self.syncKeyDisplay(keyID: latestKeyID)
+            switch result {
+            case .success:
+                // 成功请求完成时重新起算周期，避免网络耗时使计划提前漂移。
+                self.startNewAPITimer(for: latestKeyID)
+            case .networkError:
+                // 网络错误不改变已有计划；首次请求没有计划时才从现在开始一个周期。
+                if let nextFire = self.newAPINextFireNanoseconds[instanceID] {
+                    self.scheduleNewAPITimer(
+                        for: latestKeyID,
+                        after: TimeInterval(nextFire > self.nowNanoseconds
+                            ? nextFire - self.nowNanoseconds
+                            : 0) / 1_000_000_000
+                    )
+                } else {
+                    self.startNewAPITimer(for: latestKeyID)
+                }
+            }
         }
     }
 

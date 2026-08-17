@@ -84,6 +84,141 @@ struct UlanziDeckSwiftTests {
         #expect(!payload.contains("dataSource"))
     }
 
+    @MainActor
+    @Test func newAPIStaleResultDoesNotReviveClearedCard() async throws {
+        let result = NewAPIModelAvailabilityResult.success(data: NewAPIModelAvailabilityData(
+            modelName: "gpt-5.6-sol",
+            groups: [NewAPIModelAvailabilityGroup(group: "A", successRate: 88, series: [])]
+        ))
+        let fetcher = FakeNewAPIFetcher(results: [result], fetchDelayNanoseconds: 80_000_000)
+        var loadedState = DeckGridInteractionState(layout: .h200Prototype)
+        loadedState.assign(.newAPIModelAvailability, to: 3)
+        loadedState.setNewAPIBaseURL("https://api.example.com", for: 3)
+        loadedState.setNewAPIModelName("gpt-5.6-sol", for: 3)
+        loadedState.setNewAPISelectedGroup("A", for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            newAPIFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil { fetcher.requests.count == 1 }
+        model.clearKeyFunction(keyID: 3)
+        try await Task.sleep(nanoseconds: 160_000_000)
+
+        #expect(model.interactionState.configuration(for: 3)?.function == .none)
+        #expect(fetcher.requests.count == 1)
+    }
+
+    @MainActor
+    @Test func swappingNewAPICardsMigratesPendingResultsWithoutImmediateRetry() async throws {
+        let first = NewAPIModelAvailabilityResult.success(data: NewAPIModelAvailabilityData(
+            modelName: "gpt-5.6-sol",
+            groups: [NewAPIModelAvailabilityGroup(group: "A", successRate: 81, series: [])]
+        ))
+        let second = NewAPIModelAvailabilityResult.success(data: NewAPIModelAvailabilityData(
+            modelName: "gpt-5.6-sol",
+            groups: [NewAPIModelAvailabilityGroup(group: "B", successRate: 62, series: [])]
+        ))
+        let fetcher = FakeNewAPIFetcher(results: [first, second], fetchDelayNanoseconds: 80_000_000)
+        var loadedState = DeckGridInteractionState(layout: .h200Prototype)
+        loadedState.assign(.newAPIModelAvailability, to: 3)
+        loadedState.setNewAPIBaseURL("https://api.example.com", for: 3)
+        loadedState.setNewAPIModelName("gpt-5.6-sol", for: 3)
+        loadedState.setNewAPISelectedGroup("A", for: 3)
+        loadedState.assign(.newAPIModelAvailability, to: 4)
+        loadedState.setNewAPIBaseURL("https://api.example.com", for: 4)
+        loadedState.setNewAPIModelName("gpt-5.6-sol", for: 4)
+        loadedState.setNewAPISelectedGroup("B", for: 4)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            newAPIFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil { fetcher.requests.count == 2 }
+        model.swapSquareKeyConfigurations(sourceKeyID: 3, targetKeyID: 4)
+        #expect(fetcher.requests.count == 2)
+        try await Self.waitUntil {
+            model.interactionState.newAPIModelAvailabilityConfiguration(for: 3).lastResult == second
+                && model.interactionState.newAPIModelAvailabilityConfiguration(for: 4).lastResult == first
+        }
+        #expect(fetcher.requests.count == 2)
+    }
+
+    @Test func clearingNewAPIRuntimeStateClearsSnapshotAndFreshness() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.newAPIModelAvailability, to: 3)
+        let result = NewAPIModelAvailabilityResult.success(data: NewAPIModelAvailabilityData(
+            modelName: "gpt-5.6-sol",
+            groups: [NewAPIModelAvailabilityGroup(group: "A", successRate: 88, series: [])]
+        ))
+        state.setNewAPILastResult(result, for: 3)
+        #expect(state.newAPIModelAvailabilityConfiguration(for: 3).lastSuccessfulSnapshot != nil)
+        #expect(state.newAPIModelAvailabilityConfiguration(for: 3).lastSuccessfulRefreshAt != nil)
+
+        let didClear = state.clearNewAPIRuntimeState(for: 3)
+        #expect(didClear)
+        let cleared = state.newAPIModelAvailabilityConfiguration(for: 3)
+        #expect(cleared.lastResult == nil)
+        #expect(cleared.lastSuccessfulSnapshot == nil)
+        #expect(cleared.lastSuccessfulRefreshAt == nil)
+    }
+
+    @Test func swappingNewAPICardsMovesSuccessfulSnapshotAndFreshness() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.newAPIModelAvailability, to: 3)
+        state.assign(.newAPIModelAvailability, to: 4)
+        let first = NewAPIModelAvailabilityResult.success(data: NewAPIModelAvailabilityData(
+            modelName: "model-a",
+            groups: [NewAPIModelAvailabilityGroup(group: "A", successRate: 81, series: [])]
+        ))
+        let second = NewAPIModelAvailabilityResult.success(data: NewAPIModelAvailabilityData(
+            modelName: "model-b",
+            groups: [NewAPIModelAvailabilityGroup(group: "B", successRate: 62, series: [])]
+        ))
+        state.setNewAPILastResult(first, for: 3)
+        state.setNewAPILastResult(second, for: 4)
+        let firstTimestamp = try #require(state.newAPIModelAvailabilityConfiguration(for: 3).lastSuccessfulRefreshAt)
+        let secondTimestamp = try #require(state.newAPIModelAvailabilityConfiguration(for: 4).lastSuccessfulRefreshAt)
+
+        let didSwap = state.swapSquareConfigurations(sourceKeyID: 3, targetKeyID: 4)
+        #expect(didSwap)
+        let swappedFirst = state.newAPIModelAvailabilityConfiguration(for: 3)
+        let swappedSecond = state.newAPIModelAvailabilityConfiguration(for: 4)
+        #expect(swappedFirst.lastResult == second)
+        #expect(swappedSecond.lastResult == first)
+        #expect(swappedFirst.lastSuccessfulRefreshAt == secondTimestamp)
+        #expect(swappedSecond.lastSuccessfulRefreshAt == firstTimestamp)
+    }
+
+    @Test func newAPINetworkErrorKeepsSuccessfulSnapshotAndConfigurationInvalidationClearsIt() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.newAPIModelAvailability, to: 3)
+        let success = NewAPIModelAvailabilityResult.success(data: NewAPIModelAvailabilityData(
+            modelName: "gpt-5.6-sol",
+            groups: [NewAPIModelAvailabilityGroup(group: "A", successRate: 91, series: [])]
+        ))
+        state.setNewAPILastResult(success, for: 3)
+        let timestamp = try #require(state.newAPIModelAvailabilityConfiguration(for: 3).lastSuccessfulRefreshAt)
+
+        state.setNewAPILastResult(.networkError("离线"), for: 3)
+        let failed = state.newAPIModelAvailabilityConfiguration(for: 3)
+        #expect(failed.lastResult == .networkError("离线"))
+        #expect(failed.lastSuccessfulSnapshot == success)
+        #expect(failed.lastSuccessfulRefreshAt == timestamp)
+
+        state.setNewAPIBaseURL("https://changed.example.com", for: 3)
+        let invalidated = state.newAPIModelAvailabilityConfiguration(for: 3)
+        #expect(invalidated.lastResult == nil)
+        #expect(invalidated.lastSuccessfulSnapshot == nil)
+        #expect(invalidated.lastSuccessfulRefreshAt == nil)
+    }
+
     @Test("New API 按钮投影服务名号池名成功率和序列")
     func newAPIModelAvailabilityDisplayProjectsSelectedGroup() {
         let series = [
@@ -9558,6 +9693,48 @@ private final class FakeSub2APIFetcher: Sub2APIFetching, @unchecked Sendable {
             }
             return refreshResults.removeFirst()
         }
+    }
+
+    private func locked<Value>(_ body: () -> Value) -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
+private final class FakeNewAPIFetcher: NewAPIFetching, @unchecked Sendable {
+    struct Request: Equatable {
+        let baseURL: String
+        let modelName: String
+    }
+
+    private let lock = NSLock()
+    private var results: [NewAPIModelAvailabilityResult]
+    private let defaultResult: NewAPIModelAvailabilityResult
+    private let fetchDelayNanoseconds: UInt64?
+    private var storedRequests: [Request] = []
+
+    var requests: [Request] { locked { storedRequests } }
+
+    init(
+        results: [NewAPIModelAvailabilityResult] = [],
+        defaultResult: NewAPIModelAvailabilityResult = .networkError("未配置响应"),
+        fetchDelayNanoseconds: UInt64? = nil
+    ) {
+        self.results = results
+        self.defaultResult = defaultResult
+        self.fetchDelayNanoseconds = fetchDelayNanoseconds
+    }
+
+    func fetchModelAvailability(baseURL: String, modelName: String) async -> NewAPIModelAvailabilityResult {
+        let result = locked {
+            storedRequests.append(Request(baseURL: baseURL, modelName: modelName))
+            return results.isEmpty ? defaultResult : results.removeFirst()
+        }
+        if let fetchDelayNanoseconds {
+            try? await Task.sleep(nanoseconds: fetchDelayNanoseconds)
+        }
+        return result
     }
 
     private func locked<Value>(_ body: () -> Value) -> Value {
