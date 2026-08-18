@@ -1442,10 +1442,40 @@ nonisolated enum DeckKeyNewAPIModelAvailabilityGroupListState: Equatable {
     }
 }
 
+nonisolated enum NewAPIAggregationBin: String, Codable, Equatable, CaseIterable, Identifiable {
+    case minute
+    case fiveMinutes = "5min"
+    case hour
+
+    var id: String { rawValue }
+
+    var seconds: Int {
+        switch self {
+        case .minute:
+            return 60
+        case .fiveMinutes:
+            return 300
+        case .hour:
+            return 3_600
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .minute:
+            return "1 分钟"
+        case .fiveMinutes:
+            return "5 分钟"
+        case .hour:
+            return "1 小时"
+        }
+    }
+}
+
 nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatable {
     var instanceID: String
     var baseURL: String
-    var refreshInterval: Int
+    var aggregationBin: NewAPIAggregationBin
     var modelName: String
     var selectedGroup: String?
     var customServiceName: String
@@ -1461,7 +1491,7 @@ nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatab
     init(
         instanceID: String = UUID().uuidString,
         baseURL: String = "",
-        refreshInterval: Int = 30,
+        aggregationBin: NewAPIAggregationBin = .hour,
         modelName: String = "",
         selectedGroup: String? = nil,
         customServiceName: String = "",
@@ -1473,7 +1503,7 @@ nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatab
     ) {
         self.instanceID = instanceID
         self.baseURL = baseURL
-        self.refreshInterval = refreshInterval
+        self.aggregationBin = aggregationBin
         self.modelName = modelName
         self.selectedGroup = selectedGroup
         self.customServiceName = customServiceName
@@ -1519,8 +1549,18 @@ nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatab
             && normalizedSelectedGroup != nil
     }
 
+    var latestSelectedGroupSeriesTimestamp: Int? {
+        guard let selectedGroup = normalizedSelectedGroup,
+              case let .success(data) = lastSuccessfulSnapshot,
+              let group = data.groups.first(where: { $0.group == selectedGroup })
+        else {
+            return nil
+        }
+        return group.series.last?.timestamp
+    }
+
     enum CodingKeys: CodingKey {
-        case instanceID, baseURL, refreshInterval
+        case instanceID, baseURL, aggregationBin
         case modelName, selectedGroup, customServiceName, customGroupName, lastSuccessfulSnapshot, lastSuccessfulRefreshAt
     }
 
@@ -1528,7 +1568,7 @@ nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatab
         let container = try decoder.container(keyedBy: CodingKeys.self)
         instanceID = try container.decodeIfPresent(String.self, forKey: .instanceID) ?? UUID().uuidString
         baseURL = try container.decodeIfPresent(String.self, forKey: .baseURL) ?? ""
-        refreshInterval = try container.decodeIfPresent(Int.self, forKey: .refreshInterval) ?? 30
+        aggregationBin = try container.decodeIfPresent(NewAPIAggregationBin.self, forKey: .aggregationBin) ?? .hour
         modelName = try container.decodeIfPresent(String.self, forKey: .modelName) ?? ""
         selectedGroup = try container.decodeIfPresent(String.self, forKey: .selectedGroup)
         customServiceName = try container.decodeIfPresent(String.self, forKey: .customServiceName) ?? ""
@@ -1544,7 +1584,7 @@ nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatab
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(instanceID, forKey: .instanceID)
         try container.encode(baseURL, forKey: .baseURL)
-        try container.encode(refreshInterval, forKey: .refreshInterval)
+        try container.encode(aggregationBin, forKey: .aggregationBin)
         try container.encode(modelName, forKey: .modelName)
         try container.encodeIfPresent(selectedGroup, forKey: .selectedGroup)
         try container.encode(customServiceName, forKey: .customServiceName)

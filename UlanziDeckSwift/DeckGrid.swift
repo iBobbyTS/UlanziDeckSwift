@@ -280,7 +280,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                     let content = NewAPIModelAvailabilityButtonContent(
                         serviceName: availability.serviceDisplayName,
                         groupName: availability.groupDisplayName,
-                        successRate: group.successRate,
+                        successRate: group.series.last?.successRate ?? group.successRate,
                         series: group.series
                     )
                     title = configuration.visual.displayName(fallback: content.successRateText)
@@ -1441,12 +1441,17 @@ nonisolated struct DeckGridInteractionState: Equatable {
     }
 
     @discardableResult
-    mutating func setNewAPIRefreshInterval(_ interval: Int, for keyID: Int) -> Bool {
+    mutating func setNewAPIAggregationBin(_ aggregationBin: NewAPIAggregationBin, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].function == .newAPIModelAvailability
         else { return false }
         selectedKeyID = keyID
-        configurations[keyID, default: .tallyDefault].newAPIModelAvailability.refreshInterval = max(5, interval)
+        if configurations[keyID, default: .tallyDefault].newAPIModelAvailability.aggregationBin != aggregationBin {
+            configurations[keyID, default: .tallyDefault].newAPIModelAvailability.aggregationBin = aggregationBin
+            configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastResult = nil
+            configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulRefreshAt = nil
+            configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulSnapshot = nil
+        }
         return true
     }
 

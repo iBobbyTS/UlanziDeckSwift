@@ -66,10 +66,10 @@ extension ContentView {
         )
     }
 
-    var selectedNewAPIRefreshIntervalBinding: Binding<Int> {
+    var selectedNewAPIAggregationBinBinding: Binding<NewAPIAggregationBin> {
         Binding(
-            get: { selectedNewAPIConfiguration?.refreshInterval ?? 30 },
-            set: { onNewAPIRefreshIntervalChange($0) }
+            get: { selectedNewAPIConfiguration?.aggregationBin ?? .hour },
+            set: { onNewAPIAggregationBinChange($0) }
         )
     }
 
@@ -335,17 +335,19 @@ extension ContentView {
 
                     Divider()
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("刷新间隔（秒）")
+                    HStack(spacing: 12) {
+                        Text("聚合 Bin")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
-                        HStack(spacing: 10) {
-                            TextField("刷新间隔", value: selectedNewAPIRefreshIntervalBinding, format: .number)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 96)
-                            Stepper("刷新间隔", value: selectedNewAPIRefreshIntervalBinding, in: 5...3600)
-                                .labelsHidden()
+
+                        Picker("聚合 Bin", selection: selectedNewAPIAggregationBinBinding) {
+                            ForEach(NewAPIAggregationBin.allCases) { aggregationBin in
+                                Text(aggregationBin.title).tag(aggregationBin)
+                            }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 110, alignment: .leading)
                     }
 
                     Divider()

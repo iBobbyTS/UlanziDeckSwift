@@ -84,6 +84,153 @@ struct UlanziDeckSwiftTests {
         #expect(!payload.contains("dataSource"))
     }
 
+    @Test("New API 聚合 Bin 只包含三种服务端粒度")
+    func newAPIAggregationBinsHaveFixedDurationsAndTitles() {
+        #expect(NewAPIAggregationBin.allCases == [.minute, .fiveMinutes, .hour])
+        #expect(NewAPIAggregationBin.allCases.map(\.seconds) == [60, 300, 3_600])
+        #expect(NewAPIAggregationBin.allCases.map(\.title) == ["1 分钟", "5 分钟", "1 小时"])
+    }
+
+    @Test("New API 聚合 Bin 默认一小时并以新字段往返")
+    func newAPIAggregationBinDefaultsAndRoundTripsWithoutLegacyInterval() throws {
+        #expect(DeckKeyNewAPIModelAvailabilityConfiguration().aggregationBin == .hour)
+
+        let configuration = DeckKeyNewAPIModelAvailabilityConfiguration(
+            baseURL: "https://api.example.com",
+            aggregationBin: .fiveMinutes,
+            modelName: "gpt-5.6-sol",
+            selectedGroup: "pool-a"
+        )
+        let encoded = try JSONEncoder().encode(configuration)
+        let payload = try #require(String(data: encoded, encoding: .utf8))
+        let restored = try JSONDecoder().decode(
+            DeckKeyNewAPIModelAvailabilityConfiguration.self,
+            from: encoded
+        )
+
+        #expect(restored.aggregationBin == .fiveMinutes)
+        #expect(payload.contains(#""aggregationBin":"5min""#))
+        #expect(!payload.contains("refreshInterval"))
+    }
+
+    @Test("New API 切换聚合 Bin 清除旧粒度快照")
+    func changingNewAPIAggregationBinClearsRuntimeSnapshot() {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.newAPIModelAvailability, to: 3)
+        let result = NewAPIModelAvailabilityResult.success(data: NewAPIModelAvailabilityData(
+            modelName: "gpt-5.6-sol",
+            groups: [NewAPIModelAvailabilityGroup(
+                group: "A",
+                successRate: 88,
+                series: [NewAPIModelAvailabilitySeriesPoint(timestamp: 3_600, successRate: 88)]
+            )]
+        ))
+        state.setNewAPILastResult(result, for: 3)
+
+        let didChange = state.setNewAPIAggregationBin(.minute, for: 3)
+        #expect(didChange)
+        let changed = state.newAPIModelAvailabilityConfiguration(for: 3)
+        #expect(changed.aggregationBin == .minute)
+        #expect(changed.lastResult == nil)
+        #expect(changed.lastSuccessfulSnapshot == nil)
+        #expect(changed.lastSuccessfulRefreshAt == nil)
+    }
+
+    @Test("New API 三种聚合 Bin 都按 Unix 桶起点后五秒恢复")
+    func newAPIAggregationBinResumeUsesUnixBoundaries() {
+        let cases: [(NewAPIAggregationBin, TimeInterval)] = [
+            (.minute, 3_664),
+            (.fiveMinutes, 3_304),
+            (.hour, 7_204),
+        ]
+
+        for (aggregationBin, timestamp) in cases {
+            #expect(
+                NewAPIAggregationRefreshDecision.resume(
+                    aggregationBin: aggregationBin,
+                    latestSeriesTimestamp: nil,
+                    now: Date(timeIntervalSince1970: timestamp)
+                ) == .wait(1)
+            )
+            #expect(
+                NewAPIAggregationRefreshDecision.resume(
+                    aggregationBin: aggregationBin,
+                    latestSeriesTimestamp: nil,
+                    now: Date(timeIntervalSince1970: timestamp + 1)
+                ) == .refreshNow
+            )
+        }
+    }
+
+    @Test("New API 当前桶精确命中后等待下一桶")
+    func newAPICurrentBucketHitStopsPollingUntilNextRelease() {
+        let twelveOhOneTen = Date(timeIntervalSince1970: 43_270)
+
+        #expect(
+            NewAPIAggregationRefreshDecision.afterRequest(
+                aggregationBin: .minute,
+                latestSeriesTimestamp: 43_260,
+                now: twelveOhOneTen
+            ) == .wait(55)
+        )
+        #expect(
+            NewAPIAggregationRefreshDecision.afterRequest(
+                aggregationBin: .minute,
+                latestSeriesTimestamp: 43_261,
+                now: twelveOhOneTen
+            ) == .wait(5)
+        )
+    }
+
+    @Test("New API 到桶判定只读取所选分组的最后一个序列时间戳")
+    func newAPILatestTimestampUsesSelectedGroupSeriesTail() {
+        let result = NewAPIModelAvailabilityResult.success(data: NewAPIModelAvailabilityData(
+            modelName: "gpt-5.6-sol",
+            groups: [
+                NewAPIModelAvailabilityGroup(
+                    group: "A",
+                    successRate: 99,
+                    series: [
+                        NewAPIModelAvailabilitySeriesPoint(timestamp: 43_200, successRate: 90),
+                        NewAPIModelAvailabilitySeriesPoint(timestamp: 43_260, successRate: 100),
+                    ]
+                ),
+                NewAPIModelAvailabilityGroup(
+                    group: "B",
+                    successRate: 100,
+                    series: [NewAPIModelAvailabilitySeriesPoint(timestamp: 43_320, successRate: 100)]
+                ),
+            ]
+        ))
+        let configuration = DeckKeyNewAPIModelAvailabilityConfiguration(
+            selectedGroup: "A",
+            lastResult: result
+        )
+
+        #expect(configuration.latestSelectedGroupSeriesTimestamp == 43_260)
+    }
+
+    @Test("New API 跨桶时放弃旧桶并等待新桶发布点")
+    func newAPIMissingBucketDoesNotQueueAcrossMinuteBoundary() {
+        let twelveOhOneFiftyEight = Date(timeIntervalSince1970: 43_318)
+        #expect(
+            NewAPIAggregationRefreshDecision.afterRequest(
+                aggregationBin: .minute,
+                latestSeriesTimestamp: 43_260,
+                now: twelveOhOneFiftyEight
+            ) == .wait(7)
+        )
+
+        let twelveOhTwoOhFive = Date(timeIntervalSince1970: 43_325)
+        #expect(
+            NewAPIAggregationRefreshDecision.resume(
+                aggregationBin: .minute,
+                latestSeriesTimestamp: 43_260,
+                now: twelveOhTwoOhFive
+            ) == .refreshNow
+        )
+    }
+
     @MainActor
     @Test func newAPIStaleResultDoesNotReviveClearedCard() async throws {
         let result = NewAPIModelAvailabilityResult.success(data: NewAPIModelAvailabilityData(
@@ -110,6 +257,74 @@ struct UlanziDeckSwiftTests {
 
         #expect(model.interactionState.configuration(for: 3)?.function == .none)
         #expect(fetcher.requests.count == 1)
+    }
+
+    @MainActor
+    @Test func changingNewAPIAggregationBinCancelsOldRequestAndRestartsRuntime() async throws {
+        let oldResult = NewAPIModelAvailabilityResult.success(data: NewAPIModelAvailabilityData(
+            modelName: "gpt-5.6-sol",
+            groups: [NewAPIModelAvailabilityGroup(group: "A", successRate: 10, series: [])]
+        ))
+        let newResult = NewAPIModelAvailabilityResult.success(data: NewAPIModelAvailabilityData(
+            modelName: "gpt-5.6-sol",
+            groups: [NewAPIModelAvailabilityGroup(group: "A", successRate: 90, series: [])]
+        ))
+        let fetcher = FakeNewAPIFetcher(
+            results: [oldResult, newResult],
+            fetchDelayNanoseconds: 300_000_000
+        )
+        var loadedState = DeckGridInteractionState(layout: .h200Prototype)
+        loadedState.assign(.newAPIModelAvailability, to: 3)
+        loadedState.setNewAPIBaseURL("https://api.example.com", for: 3)
+        loadedState.setNewAPIModelName("gpt-5.6-sol", for: 3)
+        loadedState.setNewAPISelectedGroup("A", for: 3)
+        let currentHour = Int(Date().timeIntervalSince1970 / 3_600) * 3_600
+        loadedState.setNewAPILastResult(
+            .success(data: NewAPIModelAvailabilityData(
+                modelName: "gpt-5.6-sol",
+                groups: [NewAPIModelAvailabilityGroup(
+                    group: "A",
+                    successRate: 100,
+                    series: [NewAPIModelAvailabilitySeriesPoint(timestamp: currentHour, successRate: 100)]
+                )]
+            )),
+            for: 3
+        )
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            newAPIFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil { model.syncSummary != nil }
+        #expect(fetcher.requests.isEmpty)
+        let initialDisplay = syncer.sentDisplays.last?
+            .first(where: { $0.id == 3 })
+        #expect(initialDisplay?.newAPIModelAvailabilityButtonContent != nil)
+        syncer.emitInput(H200InputEvent(state: 1, index: 2, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 2, type: .button, action: .release))
+        try await Self.waitUntil { fetcher.requests.count == 1 }
+        let partialDisplayCountBeforeChange = syncer.partialDisplays.count
+        model.setSelectedNewAPIAggregationBin(.minute)
+        try await Self.waitUntil {
+            syncer.partialDisplays.count > partialDisplayCountBeforeChange
+                && model.interactionState
+                    .newAPIModelAvailabilityConfiguration(for: 3).lastResult == nil
+        }
+        let clearedDisplay = syncer.partialDisplays.last?
+            .first(where: { $0.id == 3 })
+        #expect(clearedDisplay?.newAPIModelAvailabilityButtonContent == nil)
+        #expect(fetcher.requests.count == 2)
+
+        try await Self.waitUntil {
+            model.interactionState.newAPIModelAvailabilityConfiguration(for: 3).lastResult == newResult
+        }
+
+        #expect(fetcher.requests.count == 2)
+        #expect(model.interactionState.newAPIModelAvailabilityConfiguration(for: 3).aggregationBin == .minute)
     }
 
     @MainActor
@@ -249,7 +464,7 @@ struct UlanziDeckSwiftTests {
 
         #expect(display.newAPIModelAvailabilityButtonContent?.serviceName == "Mooko")
         #expect(display.newAPIModelAvailabilityButtonContent?.groupName == "优选号池")
-        #expect(display.newAPIModelAvailabilityButtonContent?.successRateText == "99.2%")
+        #expect(display.newAPIModelAvailabilityButtonContent?.successRateText == "100.0%")
         #expect(display.newAPIModelAvailabilityButtonContent?.series == series)
     }
 
@@ -1892,6 +2107,7 @@ struct UlanziDeckSwiftTests {
             from: legacyPayload
         )
 
+        #expect(restored.aggregationBin == .hour)
         #expect(restored.lastResult == nil)
         #expect(restored.lastSuccessfulRefreshAt == nil)
         #expect(restored.groupListState == .idle)

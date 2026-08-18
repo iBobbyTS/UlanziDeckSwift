@@ -31,6 +31,61 @@ nonisolated enum DeckRefreshResumeDecision: Equatable {
     }
 }
 
+/// New API 只追当前 Unix 时间桶；请求完成后的缺失重试至少等待 5 秒。
+nonisolated enum NewAPIAggregationRefreshDecision: Equatable {
+    case refreshNow
+    case wait(TimeInterval)
+
+    static func resume(
+        aggregationBin: NewAPIAggregationBin,
+        latestSeriesTimestamp: Int?,
+        now: Date
+    ) -> Self {
+        let timeline = Timeline(aggregationBin: aggregationBin, now: now)
+        if latestSeriesTimestamp == timeline.currentBucketStart {
+            return .wait(timeline.nextBucketRelease.timeIntervalSince(now))
+        }
+        let remaining = timeline.currentBucketRelease.timeIntervalSince(now)
+        return remaining > 0 ? .wait(remaining) : .refreshNow
+    }
+
+    static func afterRequest(
+        aggregationBin: NewAPIAggregationBin,
+        latestSeriesTimestamp: Int?,
+        now: Date
+    ) -> Self {
+        let timeline = Timeline(aggregationBin: aggregationBin, now: now)
+        if latestSeriesTimestamp == timeline.currentBucketStart {
+            return .wait(timeline.nextBucketRelease.timeIntervalSince(now))
+        }
+
+        let retryDate = now.addingTimeInterval(5)
+        let retryTimeline = Timeline(aggregationBin: aggregationBin, now: retryDate)
+        let fireDate = max(retryDate, retryTimeline.currentBucketRelease)
+        return .wait(fireDate.timeIntervalSince(now))
+    }
+
+    private struct Timeline {
+        let aggregationBin: NewAPIAggregationBin
+        let currentBucketStart: Int
+
+        init(aggregationBin: NewAPIAggregationBin, now: Date) {
+            self.aggregationBin = aggregationBin
+            currentBucketStart = Int(
+                floor(now.timeIntervalSince1970 / TimeInterval(aggregationBin.seconds))
+            ) * aggregationBin.seconds
+        }
+
+        var currentBucketRelease: Date {
+            Date(timeIntervalSince1970: TimeInterval(currentBucketStart + 5))
+        }
+
+        var nextBucketRelease: Date {
+            Date(timeIntervalSince1970: TimeInterval(currentBucketStart + aggregationBin.seconds + 5))
+        }
+    }
+}
+
 @MainActor
 final class H200ConnectionModel: ObservableObject {
     @Published private(set) var status: H200ConnectionStatus = .checking
@@ -599,7 +654,6 @@ final class H200ConnectionModel: ObservableObject {
             if function == .newAPIModelAvailability {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
                 fetchNewAPIModelAvailability(for: selectedKeyID)
-                startNewAPITimer(for: selectedKeyID)
             }
             if function == .codexUsage {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
@@ -1117,11 +1171,12 @@ final class H200ConnectionModel: ObservableObject {
         syncKeyDisplay(keyID: selectedKeyID)
     }
 
-    func setSelectedNewAPIRefreshInterval(_ interval: Int) {
+    func setSelectedNewAPIAggregationBin(_ aggregationBin: NewAPIAggregationBin) {
         guard let selectedKeyID = interactionState.selectedKeyID,
-              interactionState.setNewAPIRefreshInterval(interval, for: selectedKeyID)
+              interactionState.setNewAPIAggregationBin(aggregationBin, for: selectedKeyID)
         else { return }
         persistCurrentConfiguration()
+        syncKeyDisplay(keyID: selectedKeyID)
         restartNewAPIRuntime(for: selectedKeyID)
     }
 
@@ -1214,7 +1269,6 @@ final class H200ConnectionModel: ObservableObject {
         newAPIFetchTasks[instanceID] = nil
         newAPIRequestIDs[instanceID] = nil
         fetchNewAPIModelAvailability(for: keyID)
-        startNewAPITimer(for: keyID)
     }
 
     func refreshSelectedSub2APIGroupList() {
@@ -1912,31 +1966,25 @@ final class H200ConnectionModel: ObservableObject {
         else { return }
 
         let newAPI = configuration.newAPIModelAvailability
-        let interval = TimeInterval(newAPI.refreshInterval)
-        let decision = DeckRefreshResumeDecision.resolve(
-            lastSuccessfulRefreshAt: newAPI.lastSuccessfulRefreshAt,
-            hasSnapshot: newAPI.lastSuccessfulSnapshot != nil,
-            interval: interval,
+        guard newAPI.isConfigurationComplete else { return }
+        let decision = NewAPIAggregationRefreshDecision.resume(
+            aggregationBin: newAPI.aggregationBin,
+            latestSeriesTimestamp: newAPI.latestSelectedGroupSeriesTimestamp,
             now: Date()
         )
-        switch decision {
-        case .refreshNow:
-            fetchNewAPIModelAvailability(for: slot.keyID)
-            startNewAPITimer(for: slot.keyID)
-        case let .wait(remaining):
-            scheduleNewAPITimer(for: slot.keyID, after: remaining)
-        }
+        applyNewAPIRefreshDecision(decision, for: slot.keyID)
     }
 
-    private func startNewAPITimer(for keyID: Int) {
-        guard runtimeInstanceID(for: keyID) != nil,
-              let configuration = interactionState.configuration(for: keyID),
-              configuration.function == .newAPIModelAvailability,
-              configuration.newAPIModelAvailability.isConfigurationComplete,
-              configuration.newAPIModelAvailability.refreshInterval >= 5,
-              canRunInternalRefresh
-        else { return }
-        scheduleNewAPITimer(for: keyID, after: TimeInterval(configuration.newAPIModelAvailability.refreshInterval))
+    private func applyNewAPIRefreshDecision(
+        _ decision: NewAPIAggregationRefreshDecision,
+        for keyID: Int
+    ) {
+        switch decision {
+        case .refreshNow:
+            fetchNewAPIModelAvailability(for: keyID)
+        case let .wait(delay):
+            scheduleNewAPITimer(for: keyID, after: delay)
+        }
     }
 
     private func scheduleNewAPITimer(for keyID: Int, after delay: TimeInterval) {
@@ -1944,7 +1992,6 @@ final class H200ConnectionModel: ObservableObject {
               let configuration = interactionState.configuration(for: keyID),
               configuration.function == .newAPIModelAvailability,
               configuration.newAPIModelAvailability.isConfigurationComplete,
-              configuration.newAPIModelAvailability.refreshInterval >= 5,
               canRunInternalRefresh
         else { return }
         newAPITimers[instanceID]?.invalidate()
@@ -1988,12 +2035,14 @@ final class H200ConnectionModel: ObservableObject {
         else { return }
         let newAPI = configuration.newAPIModelAvailability
         guard newAPI.isConfigurationComplete else { return }
+        stopNewAPITimer(for: instanceID, preservesNextFire: false)
         newAPIFetchTasks[instanceID]?.cancel()
         let requestID = UUID()
         newAPIRequestIDs[instanceID] = requestID
         let baseURL = newAPI.baseURL
         let modelName = newAPI.normalizedModelName
         let selectedGroup = newAPI.selectedGroup
+        let aggregationBin = newAPI.aggregationBin
         newAPIFetchTasks[instanceID] = Task { @MainActor [weak self] in
             guard let self else { return }
             let result = await self.newAPIFetcher.fetchModelAvailability(
@@ -2007,7 +2056,8 @@ final class H200ConnectionModel: ObservableObject {
                   latest.function == .newAPIModelAvailability,
                   latest.newAPIModelAvailability.baseURL == baseURL,
                   latest.newAPIModelAvailability.normalizedModelName == modelName,
-                  latest.newAPIModelAvailability.selectedGroup == selectedGroup
+                  latest.newAPIModelAvailability.selectedGroup == selectedGroup,
+                  latest.newAPIModelAvailability.aggregationBin == aggregationBin
             else { return }
             let latestKeyID = latestSlot.keyID
             _ = self.interactionState.setNewAPILastResult(result, for: latestKeyID)
@@ -2015,23 +2065,14 @@ final class H200ConnectionModel: ObservableObject {
             self.newAPIFetchTasks[instanceID] = nil
             self.newAPIRequestIDs[instanceID] = nil
             self.syncKeyDisplay(keyID: latestKeyID)
-            switch result {
-            case .success:
-                // 成功请求完成时重新起算周期，避免网络耗时使计划提前漂移。
-                self.startNewAPITimer(for: latestKeyID)
-            case .networkError:
-                // 网络错误不改变已有计划；首次请求没有计划时才从现在开始一个周期。
-                if let nextFire = self.newAPINextFireNanoseconds[instanceID] {
-                    self.scheduleNewAPITimer(
-                        for: latestKeyID,
-                        after: TimeInterval(nextFire > self.nowNanoseconds
-                            ? nextFire - self.nowNanoseconds
-                            : 0) / 1_000_000_000
-                    )
-                } else {
-                    self.startNewAPITimer(for: latestKeyID)
-                }
-            }
+            let currentNewAPI = self.interactionState
+                .newAPIModelAvailabilityConfiguration(for: latestKeyID)
+            let decision = NewAPIAggregationRefreshDecision.afterRequest(
+                aggregationBin: currentNewAPI.aggregationBin,
+                latestSeriesTimestamp: currentNewAPI.latestSelectedGroupSeriesTimestamp,
+                now: Date()
+            )
+            self.applyNewAPIRefreshDecision(decision, for: latestKeyID)
         }
     }
 

@@ -136,8 +136,8 @@ struct RootView: View {
             onNewAPIBaseURLChange: { baseURL in
                 connectionModel.setSelectedNewAPIBaseURL(baseURL)
             },
-            onNewAPIRefreshIntervalChange: { interval in
-                connectionModel.setSelectedNewAPIRefreshInterval(interval)
+            onNewAPIAggregationBinChange: { aggregationBin in
+                connectionModel.setSelectedNewAPIAggregationBin(aggregationBin)
             },
             onNewAPIModelNameChange: { modelName in
                 connectionModel.setSelectedNewAPIModelName(modelName)

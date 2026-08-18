@@ -79,7 +79,7 @@ struct ContentView: View {
     let onSub2APIDailyCostUnitChange: (String) -> Void
     let onSub2APIDailyCostTimezoneChange: (Sub2APIDailyCostTimezone) -> Void
     let onNewAPIBaseURLChange: (String) -> Void
-    let onNewAPIRefreshIntervalChange: (Int) -> Void
+    let onNewAPIAggregationBinChange: (NewAPIAggregationBin) -> Void
     let onNewAPIModelNameChange: (String) -> Void
     let onNewAPISelectedGroupChange: (String?) -> Void
     let onNewAPIGroupListRefresh: () -> Void
@@ -926,7 +926,7 @@ struct MihoyoQRCodeView: View {
         onSub2APIDailyCostUnitChange: { _ in },
         onSub2APIDailyCostTimezoneChange: { _ in },
         onNewAPIBaseURLChange: { _ in },
-        onNewAPIRefreshIntervalChange: { _ in },
+        onNewAPIAggregationBinChange: { _ in },
         onNewAPIModelNameChange: { _ in },
         onNewAPISelectedGroupChange: { _ in },
         onNewAPIGroupListRefresh: {},
