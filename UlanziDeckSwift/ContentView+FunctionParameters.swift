@@ -53,6 +53,14 @@ private final class ButtonBackgroundSelectionAccessory: NSObject {
 }
 
 extension ContentView {
+    var selectedShellBinding: Binding<String> {
+        Binding(get: { selectedConfiguration?.shellCommand.shell ?? "" }, set: { if let id = interactionState.selectedKeyID { onShellConfigurationChange(id, $0, nil) } })
+    }
+
+    var selectedShellCommandBinding: Binding<String> {
+        Binding(get: { selectedConfiguration?.shellCommand.command ?? "" }, set: { if let id = interactionState.selectedKeyID { onShellConfigurationChange(id, nil, $0) } })
+    }
+
     var selectedNewAPIConfiguration: DeckKeyNewAPIModelAvailabilityConfiguration? {
         guard let selectedKeyID = interactionState.selectedKeyID else { return nil }
         guard interactionState.configuration(for: selectedKeyID)?.function == .newAPIModelAvailability else { return nil }
@@ -148,6 +156,19 @@ extension ContentView {
                         .foregroundStyle(.secondary)
                 }
 
+                Spacer()
+            }
+
+        case .shellCommand:
+            HStack(alignment: .top, spacing: 28) {
+                functionParameterColumn(for: configuration)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Shell").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    TextField("zsh", text: selectedShellBinding).textFieldStyle(.roundedBorder)
+                    Text("命令").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    TextField("输入要执行的命令", text: selectedShellCommandBinding, axis: .vertical)
+                        .textFieldStyle(.roundedBorder).lineLimit(3...8)
+                }.frame(maxWidth: 420, alignment: .leading)
                 Spacer()
             }
 
@@ -930,6 +951,7 @@ extension ContentView {
                 systemImageName: "folder",
                 functions: [.openFolder, .openFile, .connectSMBServer]
             ),
+            FunctionSection(title: "终端", systemImageName: "terminal", functions: [.shellCommand]),
             FunctionSection(
                 title: "页面",
                 systemImageName: "square.grid.2x2",

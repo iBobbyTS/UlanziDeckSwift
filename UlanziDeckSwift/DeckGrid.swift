@@ -200,6 +200,9 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             case .previousPage, .nextPage:
                 title = configuration.visual.displayName(fallback: configuration.automaticButtonDisplayName)
                 subtitle = ""
+            case .shellCommand:
+                title = configuration.visual.displayName(fallback: "Shell")
+                subtitle = configuration.shellCommand.normalizedCommand
             case .brightness:
                 title = configuration.visual.displayName(fallback: "")
                 subtitle = ""
@@ -2141,6 +2144,14 @@ nonisolated struct DeckGridInteractionState: Equatable {
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].tally.defaultValue = value
         configurations[keyID, default: .tallyDefault].tally.value = value
+        return true
+    }
+
+    @discardableResult
+    mutating func setShellCommandConfiguration(_ value: DeckKeyShellCommandConfiguration, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID), configurations[keyID, default: .empty].function == .shellCommand else { return false }
+        configurations[keyID, default: .empty].shellCommand = value
+        selectedKeyID = keyID
         return true
     }
 

@@ -57,6 +57,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case pageBack
     case previousPage
     case nextPage
+    case shellCommand
 
     static let assignableCases: [DeckKeyFunction] = [
         .tally,
@@ -75,6 +76,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
         .pageFolder,
         .previousPage,
         .nextPage,
+        .shellCommand,
     ]
 
     var title: String {
@@ -117,6 +119,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "上一页"
         case .nextPage:
             return "下一页"
+        case .shellCommand:
+            return "Shell 命令"
         }
     }
 
@@ -154,6 +158,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "chevron.left"
         case .nextPage:
             return "chevron.right"
+        case .shellCommand:
+            return "terminal"
         }
     }
 
@@ -165,7 +171,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return .starRail
         case .zenlessZoneStatus:
             return .zenlessZoneZero
-        case .none, .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .pageFolder, .pageBack, .previousPage, .nextPage:
+        case .none, .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
             return nil
         }
     }
@@ -188,6 +194,7 @@ nonisolated enum DeckKeyPressRuntimeAction: Equatable {
     case goBackPage
     case previousRootPage
     case nextRootPage
+    case shellCommand
 }
 
 nonisolated enum DeckKeyScheduledRuntime: Equatable {
@@ -236,6 +243,8 @@ extension DeckKeyFunction {
             return .previousRootPage
         case .nextPage:
             return .nextRootPage
+        case .shellCommand:
+            return .shellCommand
         case .brightness, .none:
             return .none
         }
@@ -255,9 +264,28 @@ extension DeckKeyFunction {
             return .codexUsage
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .mihoyoGame
-        case .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .none, .pageFolder, .pageBack, .previousPage, .nextPage:
+        case .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .none, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
             return nil
         }
+    }
+}
+
+nonisolated struct DeckKeyShellCommandConfiguration: Codable, Equatable {
+    var shell: String
+    var command: String
+
+    init(shell: String = "", command: String = "") {
+        self.shell = shell
+        self.command = command
+    }
+
+    var normalizedShell: String {
+        let value = shell.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "zsh" : value
+    }
+
+    var normalizedCommand: String {
+        command.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -1911,6 +1939,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var codexUsage: DeckKeyCodexUsageConfiguration
     var mihoyoGame: DeckKeyMihoyoGameConfiguration
     var pageFolder: DeckKeyPageFolderConfiguration
+    var shellCommand: DeckKeyShellCommandConfiguration
     var visual: DeckKeyVisualConfiguration
 
     static let empty = DeckKeyConfiguration(
@@ -1927,7 +1956,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         newAPIModelAvailability: DeckKeyNewAPIModelAvailabilityConfiguration(),
         codexUsage: DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration(),
-        pageFolder: DeckKeyPageFolderConfiguration()
+        pageFolder: DeckKeyPageFolderConfiguration(),
+        shellCommand: DeckKeyShellCommandConfiguration()
     )
 
     static let tallyDefault = DeckKeyConfiguration(
@@ -1980,6 +2010,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         codexUsage: DeckKeyCodexUsageConfiguration = DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration(),
         pageFolder: DeckKeyPageFolderConfiguration = DeckKeyPageFolderConfiguration(),
+        shellCommand: DeckKeyShellCommandConfiguration = DeckKeyShellCommandConfiguration(),
         visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration()
     ) {
         self.function = function
@@ -1996,6 +2027,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         self.codexUsage = codexUsage
         self.mihoyoGame = mihoyoGame
         self.pageFolder = pageFolder
+        self.shellCommand = shellCommand
         self.visual = visual
     }
 
@@ -2112,7 +2144,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         sub2APIDailyCost: DeckKeySub2APIDailyCostConfiguration = DeckKeySub2APIDailyCostConfiguration(),
         codexUsage: DeckKeyCodexUsageConfiguration = DeckKeyCodexUsageConfiguration(),
         mihoyoGame: DeckKeyMihoyoGameConfiguration = DeckKeyMihoyoGameConfiguration(),
-        pageFolder: DeckKeyPageFolderConfiguration = DeckKeyPageFolderConfiguration()
+        pageFolder: DeckKeyPageFolderConfiguration = DeckKeyPageFolderConfiguration(),
+        shellCommand: DeckKeyShellCommandConfiguration = DeckKeyShellCommandConfiguration()
     ) {
         self.init(
             function: function,
@@ -2129,6 +2162,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             codexUsage: codexUsage,
             mihoyoGame: mihoyoGame,
             pageFolder: pageFolder,
+            shellCommand: shellCommand,
             visual: DeckKeyVisualConfiguration()
         )
     }
@@ -2148,6 +2182,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case codexUsage
         case mihoyoGame
         case pageFolder
+        case shellCommand
         case visual
     }
 
@@ -2167,6 +2202,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         codexUsage = try container.decodeIfPresent(DeckKeyCodexUsageConfiguration.self, forKey: .codexUsage) ?? DeckKeyCodexUsageConfiguration()
         mihoyoGame = try container.decodeIfPresent(DeckKeyMihoyoGameConfiguration.self, forKey: .mihoyoGame) ?? DeckKeyMihoyoGameConfiguration()
         pageFolder = try container.decodeIfPresent(DeckKeyPageFolderConfiguration.self, forKey: .pageFolder) ?? DeckKeyPageFolderConfiguration()
+        shellCommand = try container.decodeIfPresent(DeckKeyShellCommandConfiguration.self, forKey: .shellCommand) ?? DeckKeyShellCommandConfiguration()
         visual = try container.decodeIfPresent(DeckKeyVisualConfiguration.self, forKey: .visual)
             ?? Self.migratedButtonVisual(
                 function: function,
@@ -2194,6 +2230,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         try container.encode(codexUsage, forKey: .codexUsage)
         try container.encode(mihoyoGame, forKey: .mihoyoGame)
         try container.encode(pageFolder, forKey: .pageFolder)
+        try container.encode(shellCommand, forKey: .shellCommand)
         try container.encode(visual, forKey: .visual)
     }
 
@@ -2248,6 +2285,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return nil
         case .previousPage, .nextPage:
             return visual.backgroundPNGData
+        case .shellCommand:
+            return nil
         }
     }
 
@@ -2273,6 +2312,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return nil
         case .previousPage, .nextPage:
             return visual.blurredBackgroundPNGData
+        case .shellCommand:
+            return nil
         }
     }
 
@@ -2310,6 +2351,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return ""
         case .previousPage, .nextPage:
             return function.title
+        case .shellCommand:
+            return shellCommand.command.isEmpty ? "Shell 命令" : shellCommand.command
         }
     }
 
@@ -2341,7 +2384,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return DeckKeyPageFolderConfiguration.migratingLegacyDefaultName(in: pageFolder.visual)
         case .pageBack:
             return DeckKeyVisualConfiguration(dimsBackground: false)
-        case .none, .tally, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage:
+        case .none, .tally, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage, .shellCommand:
             return DeckKeyVisualConfiguration()
         }
     }

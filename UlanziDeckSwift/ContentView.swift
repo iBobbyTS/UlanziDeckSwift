@@ -63,6 +63,7 @@ struct ContentView: View {
     let onButtonVisualNamePreview: (Int, String) -> Void
     let onButtonVisualNameChange: (Int, String) -> Void
     let onButtonVisualChange: (Int, DeckKeyVisualConfiguration) -> Void
+    let onShellConfigurationChange: (Int, String?, String?) -> Void
     let onSMBServerAddressChange: (String) -> Void
     let onBrightnessPercentPreview: (Int) -> Void
     let onBrightnessPercentCommit: (Int) -> Void
@@ -910,6 +911,7 @@ struct MihoyoQRCodeView: View {
         onButtonVisualNamePreview: { _, _ in },
         onButtonVisualNameChange: { _, _ in },
         onButtonVisualChange: { _, _ in },
+        onShellConfigurationChange: { _, _, _ in },
         onSMBServerAddressChange: { _ in },
         onBrightnessPercentPreview: { _ in },
         onBrightnessPercentCommit: { _ in },

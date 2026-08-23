@@ -7,6 +7,25 @@ import Testing
 
 @Suite(.serialized)
 struct UlanziDeckSwiftTests {
+    @Test("Shell 命令配置分别保存 shell 和命令，并为空 shell 使用 zsh")
+    func shellCommandConfigurationNormalizesShell() throws {
+        let configuration = DeckKeyShellCommandConfiguration(shell: "  ", command: "  echo hello  ")
+        #expect(configuration.normalizedShell == "zsh")
+        #expect(configuration.normalizedCommand == "echo hello")
+
+        let restored = try JSONDecoder().decode(
+            DeckKeyShellCommandConfiguration.self,
+            from: JSONEncoder().encode(configuration)
+        )
+        #expect(restored == configuration)
+    }
+
+    @Test("Shell 命令功能可分配到 H200 按键")
+    func shellCommandFunctionIsAssignable() {
+        #expect(DeckKeyFunction.assignableCases.contains(.shellCommand))
+        #expect(DeckKeyFunction.shellCommand.pressRuntimeAction == .shellCommand)
+    }
+
     @Test("New API 图表纵轴固定为 0% 到 100%")
     func newAPIChartScaleIsFixed() {
         #expect(NewAPIAvailabilityChartScale.minimum == 0)

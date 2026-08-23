@@ -88,6 +88,9 @@ struct RootView: View {
             onButtonVisualChange: { keyID, visual in
                 connectionModel.setButtonVisualConfiguration(visual, for: keyID)
             },
+            onShellConfigurationChange: { _, shell, command in
+                connectionModel.setSelectedShellConfiguration(shell: shell, command: command)
+            },
             onSMBServerAddressChange: { address in
                 connectionModel.setSelectedSMBServerAddress(address)
             },

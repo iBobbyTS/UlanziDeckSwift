@@ -608,6 +608,10 @@ final class H200ConnectionModel: ObservableObject {
             goToPreviousRootPage()
         case .nextRootPage:
             goToNextRootPage()
+        case .shellCommand:
+            if let configuration = interactionState.configuration(for: keyID)?.shellCommand {
+                ShellCommandExecutor.shared.execute(shell: configuration.normalizedShell, command: configuration.normalizedCommand)
+            }
         case .none:
             return
         }
@@ -940,6 +944,17 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         if interactionState.setSMBServerAddress(address, for: selectedKeyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: selectedKeyID)
+        }
+    }
+
+    func setSelectedShellConfiguration(shell: String?, command: String?) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              var configuration = interactionState.configuration(for: selectedKeyID)?.shellCommand else { return }
+        if let shell { configuration.shell = shell }
+        if let command { configuration.command = command }
+        if interactionState.setShellCommandConfiguration(configuration, for: selectedKeyID) {
             persistCurrentConfiguration()
             syncKeyDisplay(keyID: selectedKeyID)
         }
