@@ -49,6 +49,7 @@ struct ContentView: View {
     let onRootPageDeletion: () -> Void
     let onFunctionSelection: (DeckKeyFunction) -> Void
     let onTallyDefaultValueChange: (Int) -> Void
+    let onDailyReminderChange: (String?, Bool?, Int?, Int?) -> Void
     let onFolderPathSelection: (DeckKeyOpenFolderConfiguration) -> Void
     let onFilePathSelection: (DeckKeyOpenFileConfiguration) -> Void
     let onCodexAuthFileSelection: (DeckKeyCodexUsageConfiguration) -> Void
@@ -897,6 +898,7 @@ struct MihoyoQRCodeView: View {
         onRootPageDeletion: {},
         onFunctionSelection: { _ in },
         onTallyDefaultValueChange: { _ in },
+        onDailyReminderChange: { _, _, _, _ in },
         onFolderPathSelection: { _ in },
         onFilePathSelection: { _ in },
         onCodexAuthFileSelection: { _ in },

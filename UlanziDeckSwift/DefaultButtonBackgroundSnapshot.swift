@@ -30,7 +30,7 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "CodexUsageBackground"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return function.game?.buttonBackgroundAssetName
-        case .none, .tally, .openFile, .openWebPage, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
+        case .none, .tally, .dailyReminder, .openFile, .openWebPage, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
             return nil
         }
     }
@@ -47,7 +47,7 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "chevron.left"
         case .nextPage:
             return "chevron.right"
-        case .none, .tally, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .shellCommand:
+        case .none, .tally, .dailyReminder, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .shellCommand:
             return nil
         }
     }
@@ -159,7 +159,7 @@ extension DeckKeyConfiguration {
             visual.replaceBackground(with: defaultVisual)
         case .previousPage, .nextPage:
             visual.replaceBackground(with: defaultVisual)
-        case .none, .tally, .openFile, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .shellCommand:
+        case .none, .tally, .dailyReminder, .openFile, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .shellCommand:
             break
         }
 
@@ -184,7 +184,7 @@ extension DeckKeyConfiguration {
             visual.clearBackground()
         case .previousPage, .nextPage:
             visual.clearBackground()
-        case .none, .tally, .openFile, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .shellCommand:
+        case .none, .tally, .dailyReminder, .openFile, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .shellCommand:
             break
         }
 

@@ -115,6 +115,9 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             case .tally:
                 title = configuration.visual.displayName(fallback: "\(configuration.tally.value)")
                 subtitle = "默认 \(configuration.tally.defaultValue)"
+            case .dailyReminder:
+                title = configuration.dailyReminder.displayText
+                subtitle = "\(configuration.dailyReminder.value)"
             case .openFolder:
                 let content = FolderButtonContent(
                     visual: ButtonVisualContent(
@@ -1109,13 +1112,50 @@ nonisolated struct DeckGridInteractionState: Equatable {
     mutating func triggerShortPress(keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].displayMode == .function,
-              configurations[keyID, default: .tallyDefault].function == .tally
+              (configurations[keyID, default: .tallyDefault].function == .tally || configurations[keyID, default: .tallyDefault].function == .dailyReminder)
         else {
             return false
         }
 
-        configurations[keyID, default: .tallyDefault].tally.value += 1
+        if configurations[keyID, default: .tallyDefault].function == .tally {
+            configurations[keyID, default: .tallyDefault].tally.value += 1
+        } else {
+            var reminder = configurations[keyID, default: .tallyDefault].dailyReminder
+            reminder.value = reminder.isCountUp ? reminder.value + 1 : max(0, reminder.value - 1)
+            configurations[keyID, default: .tallyDefault].dailyReminder = reminder
+        }
         return true
+    }
+
+    mutating func resetDailyReminders(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        var changed = false
+        for pageID in pages.keys {
+            guard var page = pages[pageID] else { continue }
+            for keyID in page.configurations.keys where page.configurations[keyID]?.function == .dailyReminder {
+                guard var config = page.configurations[keyID] else { continue }
+                let cal = calendar
+                let components = cal.dateComponents([.year, .month, .day, .hour, .minute], from: now)
+                let dayStart = cal.startOfDay(for: now)
+                let resetDate = cal.date(byAdding: .minute, value: config.dailyReminder.resetMinutes, to: dayStart) ?? dayStart
+                let last = config.dailyReminder.lastResetDate
+                if last == nil {
+                    if now >= resetDate {
+                        config.dailyReminder.value = config.dailyReminder.resetValue
+                    }
+                    config.dailyReminder.lastResetDate = now >= resetDate ? resetDate : dayStart
+                    page.configurations[keyID] = config
+                    changed = true
+                } else if now >= resetDate && last! < resetDate {
+                    config.dailyReminder.value = config.dailyReminder.resetValue
+                    config.dailyReminder.lastResetDate = now
+                    page.configurations[keyID] = config
+                    changed = true
+                }
+                _ = components
+            }
+            pages[pageID] = page
+        }
+        return changed
     }
 
     @discardableResult
@@ -2130,6 +2170,41 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
         let defaultValue = configurations[keyID, default: .tallyDefault].tally.defaultValue
         configurations[keyID, default: .tallyDefault].tally.value = defaultValue
+        return true
+    }
+
+    @discardableResult
+    mutating func resetDailyReminder(keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID), configurations[keyID, default: .tallyDefault].function == .dailyReminder else { return false }
+        configurations[keyID, default: .tallyDefault].dailyReminder.value = configurations[keyID, default: .tallyDefault].dailyReminder.resetValue
+        configurations[keyID, default: .tallyDefault].dailyReminder.lastResetDate = Date()
+        return true
+    }
+
+    @discardableResult
+    mutating func setDailyReminder(_ reminder: DeckKeyDailyReminderConfiguration, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID), configurations[keyID, default: .tallyDefault].function == .dailyReminder else { return false }
+        var normalized = reminder
+        normalized.count = max(0, normalized.count)
+        normalized.value = normalized.resetValue
+        normalized.lastResetDate = Date()
+        configurations[keyID, default: .tallyDefault].dailyReminder = normalized
+        selectedKeyID = keyID
+        return true
+    }
+
+    @discardableResult
+    mutating func updateDailyReminder(for keyID: Int, text: String? = nil, isCountUp: Bool? = nil, count: Int? = nil, resetMinutes: Int? = nil) -> Bool {
+        guard validKeyIDs.contains(keyID), configurations[keyID, default: .tallyDefault].function == .dailyReminder else { return false }
+        var reminder = configurations[keyID, default: .tallyDefault].dailyReminder
+        if let text { reminder.text = text }
+        if let isCountUp { reminder.isCountUp = isCountUp }
+        if let count { reminder.count = max(0, count) }
+        if let resetMinutes { reminder.resetMinutes = min(max(0, resetMinutes), 1439) }
+        reminder.value = reminder.resetValue
+        reminder.lastResetDate = Date()
+        configurations[keyID, default: .tallyDefault].dailyReminder = reminder
+        selectedKeyID = keyID
         return true
     }
 

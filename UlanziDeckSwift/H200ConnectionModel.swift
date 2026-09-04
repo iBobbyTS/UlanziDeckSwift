@@ -164,6 +164,7 @@ final class H200ConnectionModel: ObservableObject {
     private var mihoyoGameTimers: [RuntimeInstanceID: Timer] = [:]
     private var mihoyoGameNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var mihoyoGameFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
+    private var dailyReminderTimer: Timer?
     private let sub2APIRefreshSecondDuration: TimeInterval
 
     var pendingSub2APIDailyCostRequestIDs: Set<UUID> {
@@ -248,6 +249,9 @@ final class H200ConnectionModel: ObservableObject {
         if let mihoyoSession {
             mihoyoLoginState = .loggedIn(accountID: mihoyoSession.accountID)
         }
+        if interactionState.resetDailyReminders() {
+            _ = configurationStore.saveInteractionState(interactionState, for: layout)
+        }
         pageFolderAutoReturnTimer.onTimeout = { [weak self] in
             self?.goBackPage()
         }
@@ -266,9 +270,17 @@ final class H200ConnectionModel: ObservableObject {
                 self?.handleInputEvent(event)
             }
         }
+        dailyReminderTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            if self.interactionState.resetDailyReminders() {
+                self.persistCurrentConfiguration()
+                self.syncCurrentDisplays()
+            }
+        }
     }
 
     deinit {
+        dailyReminderTimer?.invalidate()
         let syncer = syncer
         mihoyoLoginTask?.cancel()
         for timer in sub2APITimers.values {
@@ -580,6 +592,11 @@ final class H200ConnectionModel: ObservableObject {
                 persistCurrentConfiguration()
                 syncKeyDisplay(keyID: keyID)
             }
+        case .incrementDailyReminder:
+            if interactionState.triggerShortPress(keyID: keyID) {
+                persistCurrentConfiguration()
+                syncKeyDisplay(keyID: keyID)
+            }
         case .openFolder:
             openFolder(for: keyID)
         case .openFile:
@@ -680,6 +697,14 @@ final class H200ConnectionModel: ObservableObject {
             persistCurrentConfiguration()
             syncKeyDisplay(keyID: selectedKeyID)
         }
+    }
+
+    func updateSelectedDailyReminder(text: String? = nil, isCountUp: Bool? = nil, count: Int? = nil, resetMinutes: Int? = nil) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.updateDailyReminder(for: selectedKeyID, text: text, isCountUp: isCountUp, count: count, resetMinutes: resetMinutes)
+        else { return }
+        persistCurrentConfiguration()
+        syncKeyDisplay(keyID: selectedKeyID)
     }
 
     func setSelectedFolderConfiguration(_ configuration: DeckKeyOpenFolderConfiguration) {
@@ -1594,7 +1619,7 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        if interactionState.resetTally(keyID: keyID) {
+        if interactionState.resetTally(keyID: keyID) || interactionState.resetDailyReminder(keyID: keyID) {
             longPressResetKeyIDs.insert(keyID)
             persistCurrentConfiguration()
             syncKeyDisplay(keyID: keyID)
@@ -4013,6 +4038,10 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private func startCurrentPageRuntime() {
+        if interactionState.resetDailyReminders() {
+            persistCurrentConfiguration()
+            syncCurrentDisplays()
+        }
         resumeCurrentPageRuntime()
     }
 

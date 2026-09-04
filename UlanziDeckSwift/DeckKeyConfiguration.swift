@@ -40,6 +40,7 @@ extension MihoyoDailyStatus: Codable {
 nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case none
     case tally
+    case dailyReminder
     case openFolder
     case openFile
     case openWebPage
@@ -61,6 +62,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
 
     static let assignableCases: [DeckKeyFunction] = [
         .tally,
+        .dailyReminder,
         .openFolder,
         .openFile,
         .openWebPage,
@@ -85,6 +87,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "无功能"
         case .tally:
             return "计数器"
+        case .dailyReminder:
+            return "每日提醒"
         case .openFolder:
             return "打开文件夹"
         case .openFile:
@@ -130,6 +134,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "minus.circle"
         case .tally:
             return "number.square"
+        case .dailyReminder:
+            return "bell"
         case .openFolder:
             return "folder"
         case .openFile:
@@ -171,7 +177,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return .starRail
         case .zenlessZoneStatus:
             return .zenlessZoneZero
-        case .none, .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
+        case .none, .tally, .dailyReminder, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
             return nil
         }
     }
@@ -180,6 +186,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
 nonisolated enum DeckKeyPressRuntimeAction: Equatable {
     case none
     case incrementTally
+    case incrementDailyReminder
     case openFolder
     case openFile
     case openWebPage
@@ -215,6 +222,8 @@ extension DeckKeyFunction {
         switch self {
         case .tally:
             return .incrementTally
+        case .dailyReminder:
+            return .incrementDailyReminder
         case .openFolder:
             return .openFolder
         case .openFile:
@@ -264,7 +273,7 @@ extension DeckKeyFunction {
             return .codexUsage
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .mihoyoGame
-        case .tally, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .none, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
+        case .tally, .dailyReminder, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .none, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
             return nil
         }
     }
@@ -350,6 +359,38 @@ nonisolated struct DeckKeyTallyConfiguration: Codable, Equatable {
     init(defaultValue: Int = 0, value: Int? = nil) {
         self.defaultValue = defaultValue
         self.value = value ?? defaultValue
+    }
+}
+
+nonisolated struct DeckKeyDailyReminderConfiguration: Codable, Equatable {
+    var text: String
+    var isCountUp: Bool
+    var count: Int
+    var value: Int
+    var resetMinutes: Int
+    var lastResetDate: Date?
+
+    init(text: String = "", isCountUp: Bool = true, count: Int = 1, value: Int? = nil, resetMinutes: Int = 0, lastResetDate: Date? = nil) {
+        self.text = text
+        self.isCountUp = isCountUp
+        self.count = max(0, count)
+        self.value = max(0, value ?? (isCountUp ? 0 : max(0, count)))
+        self.resetMinutes = min(max(0, resetMinutes), 1439)
+        self.lastResetDate = lastResetDate
+    }
+
+    var resetValue: Int { isCountUp ? 0 : max(0, count) }
+    var displayText: String { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "每日提醒" : text }
+
+    enum CodingKeys: String, CodingKey { case text, isCountUp, count, value, resetMinutes, lastResetDate }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(text: try c.decodeIfPresent(String.self, forKey: .text) ?? "",
+                  isCountUp: try c.decodeIfPresent(Bool.self, forKey: .isCountUp) ?? true,
+                  count: try c.decodeIfPresent(Int.self, forKey: .count) ?? 1,
+                  value: try c.decodeIfPresent(Int.self, forKey: .value),
+                  resetMinutes: try c.decodeIfPresent(Int.self, forKey: .resetMinutes) ?? 0,
+                  lastResetDate: try c.decodeIfPresent(Date.self, forKey: .lastResetDate))
     }
 }
 
@@ -1928,6 +1969,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     var function: DeckKeyFunction
     var displayMode: DeckKeyDisplayMode
     var tally: DeckKeyTallyConfiguration
+    var dailyReminder: DeckKeyDailyReminderConfiguration
     var openFolder: DeckKeyOpenFolderConfiguration
     var openFile: DeckKeyOpenFileConfiguration
     var openWebPage: DeckKeyOpenWebPageConfiguration
@@ -1946,6 +1988,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         function: .none,
         displayMode: .function,
         tally: DeckKeyTallyConfiguration(),
+        dailyReminder: DeckKeyDailyReminderConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration(),
         openFile: DeckKeyOpenFileConfiguration(),
         openWebPage: DeckKeyOpenWebPageConfiguration(),
@@ -1964,6 +2007,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         function: .tally,
         displayMode: .function,
         tally: DeckKeyTallyConfiguration(),
+        dailyReminder: DeckKeyDailyReminderConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration(),
         openFile: DeckKeyOpenFileConfiguration(),
         openWebPage: DeckKeyOpenWebPageConfiguration(),
@@ -1999,6 +2043,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         function: DeckKeyFunction,
         displayMode: DeckKeyDisplayMode = .function,
         tally: DeckKeyTallyConfiguration = DeckKeyTallyConfiguration(),
+        dailyReminder: DeckKeyDailyReminderConfiguration = DeckKeyDailyReminderConfiguration(),
         openFolder: DeckKeyOpenFolderConfiguration = DeckKeyOpenFolderConfiguration(),
         openFile: DeckKeyOpenFileConfiguration = DeckKeyOpenFileConfiguration(),
         openWebPage: DeckKeyOpenWebPageConfiguration = DeckKeyOpenWebPageConfiguration(),
@@ -2016,6 +2061,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         self.function = function
         self.displayMode = displayMode
         self.tally = tally
+        self.dailyReminder = dailyReminder
         self.openFolder = openFolder
         self.openFile = openFile
         self.openWebPage = openWebPage
@@ -2171,6 +2217,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         case function
         case displayMode
         case tally
+        case dailyReminder
         case openFolder
         case openFile
         case openWebPage
@@ -2191,6 +2238,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         function = try container.decode(DeckKeyFunction.self, forKey: .function)
         displayMode = try container.decodeIfPresent(DeckKeyDisplayMode.self, forKey: .displayMode) ?? .function
         tally = try container.decodeIfPresent(DeckKeyTallyConfiguration.self, forKey: .tally) ?? DeckKeyTallyConfiguration()
+        dailyReminder = try container.decodeIfPresent(DeckKeyDailyReminderConfiguration.self, forKey: .dailyReminder) ?? DeckKeyDailyReminderConfiguration()
         openFolder = try container.decodeIfPresent(DeckKeyOpenFolderConfiguration.self, forKey: .openFolder) ?? DeckKeyOpenFolderConfiguration()
         openFile = try container.decodeIfPresent(DeckKeyOpenFileConfiguration.self, forKey: .openFile) ?? DeckKeyOpenFileConfiguration()
         openWebPage = try container.decodeIfPresent(DeckKeyOpenWebPageConfiguration.self, forKey: .openWebPage) ?? DeckKeyOpenWebPageConfiguration()
@@ -2219,6 +2267,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         try container.encode(function, forKey: .function)
         try container.encode(displayMode, forKey: .displayMode)
         try container.encode(tally, forKey: .tally)
+        try container.encode(dailyReminder, forKey: .dailyReminder)
         try container.encode(openFolder, forKey: .openFolder)
         try container.encode(openFile, forKey: .openFile)
         try container.encode(openWebPage, forKey: .openWebPage)
@@ -2281,7 +2330,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return visual.backgroundPNGData
         case .codexUsage:
             return codexUsage.visual.backgroundPNGData
-        case .none, .tally, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability:
+        case .none, .tally, .dailyReminder, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability:
             return nil
         case .previousPage, .nextPage:
             return visual.backgroundPNGData
@@ -2308,7 +2357,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return visual.blurredBackgroundPNGData
         case .codexUsage:
             return codexUsage.visual.blurredBackgroundPNGData
-        case .none, .tally, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability:
+        case .none, .tally, .dailyReminder, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability:
             return nil
         case .previousPage, .nextPage:
             return visual.blurredBackgroundPNGData
@@ -2323,6 +2372,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return ""
         case .tally:
             return "\(tally.value)"
+        case .dailyReminder:
+            return "\(dailyReminder.displayText)\n\(dailyReminder.value)"
         case .openFolder:
             return openFolder.automaticDisplayName
         case .openFile:
@@ -2384,7 +2435,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return DeckKeyPageFolderConfiguration.migratingLegacyDefaultName(in: pageFolder.visual)
         case .pageBack:
             return DeckKeyVisualConfiguration(dimsBackground: false)
-        case .none, .tally, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage, .shellCommand:
+        case .none, .tally, .dailyReminder, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage, .shellCommand:
             return DeckKeyVisualConfiguration()
         }
     }

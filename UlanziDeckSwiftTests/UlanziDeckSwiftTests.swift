@@ -10466,3 +10466,48 @@ private final class FakeSMBURLOpener: SMBURLOpening {
         return true
     }
 }
+
+@Test func dailyReminderCountsUpAndDownWithZeroFloor() {
+    var state = DeckGridInteractionState(layout: .h200Prototype)
+    state.assign(.dailyReminder, to: 1)
+    let firstPress = state.triggerShortPress(keyID: 1)
+    #expect(firstPress)
+    #expect(state.configuration(for: 1)?.dailyReminder.value == 1)
+    state.updateDailyReminder(for: 1, isCountUp: false, count: 2)
+    #expect(state.configuration(for: 1)?.dailyReminder.value == 2)
+    state.triggerShortPress(keyID: 1); state.triggerShortPress(keyID: 1); state.triggerShortPress(keyID: 1)
+    #expect(state.configuration(for: 1)?.dailyReminder.value == 0)
+}
+
+@Test func dailyReminderCodableAndResetAcrossPages() throws {
+    let reminder = DeckKeyDailyReminderConfiguration(text: "喝水", isCountUp: false, count: 3, value: 1, resetMinutes: 0)
+    let data = try JSONEncoder().encode(reminder)
+    let decoded = try JSONDecoder().decode(DeckKeyDailyReminderConfiguration.self, from: data)
+    #expect(decoded.text == "喝水")
+    #expect(decoded.count == 3)
+
+    var state = DeckGridInteractionState(layout: .h200Prototype)
+    state.assign(.dailyReminder, to: 1)
+    state.updateDailyReminder(for: 1, isCountUp: false, count: 3)
+    let yesterday = Date(timeIntervalSinceNow: -86_400)
+    _ = state.resetDailyReminders(now: yesterday)
+    state.triggerShortPress(keyID: 1)
+    let tomorrow = Date(timeIntervalSinceNow: 86_400)
+    let didReset = state.resetDailyReminders(now: tomorrow)
+    #expect(didReset)
+    #expect(state.configuration(for: 1)?.dailyReminder.value == 3)
+}
+
+@Test func dailyReminderDoesNotResetBeforeConfiguredTime() {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+    let day = Date(timeIntervalSince1970: 1_700_000_000)
+    let before = calendar.date(byAdding: .hour, value: 1, to: calendar.startOfDay(for: day))!
+    var state = DeckGridInteractionState(layout: .h200Prototype)
+    state.assign(.dailyReminder, to: 1)
+    state.updateDailyReminder(for: 1, isCountUp: true, resetMinutes: 120)
+    state.triggerShortPress(keyID: 1)
+    let valueBefore = state.configuration(for: 1)?.dailyReminder.value
+    _ = state.resetDailyReminders(now: before, calendar: calendar)
+    #expect(state.configuration(for: 1)?.dailyReminder.value == valueBefore)
+}

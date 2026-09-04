@@ -46,6 +46,9 @@ struct RootView: View {
             onTallyDefaultValueChange: { value in
                 connectionModel.setSelectedTallyDefaultValue(value)
             },
+            onDailyReminderChange: { text, isCountUp, count, resetMinutes in
+                connectionModel.updateSelectedDailyReminder(text: text, isCountUp: isCountUp, count: count, resetMinutes: resetMinutes)
+            },
             onFolderPathSelection: { configuration in
                 connectionModel.setSelectedFolderConfiguration(configuration)
             },

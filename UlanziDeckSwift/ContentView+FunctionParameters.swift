@@ -53,6 +53,22 @@ private final class ButtonBackgroundSelectionAccessory: NSObject {
 }
 
 extension ContentView {
+    var selectedDailyReminder: DeckKeyDailyReminderConfiguration? {
+        guard let id = interactionState.selectedKeyID else { return nil }
+        return interactionState.configuration(for: id)?.dailyReminder
+    }
+    var dailyReminderTextBinding: Binding<String> {
+        Binding(get: { selectedDailyReminder?.text ?? "" }, set: { onDailyReminderChange($0, nil, nil, nil) })
+    }
+    var dailyReminderCountUpBinding: Binding<Bool> {
+        Binding(get: { selectedDailyReminder?.isCountUp ?? true }, set: { onDailyReminderChange(nil, $0, nil, nil) })
+    }
+    var dailyReminderCountBinding: Binding<Int> {
+        Binding(get: { selectedDailyReminder?.count ?? 1 }, set: { onDailyReminderChange(nil, nil, max(0, $0), nil) })
+    }
+    var dailyReminderResetMinutesBinding: Binding<Int> {
+        Binding(get: { selectedDailyReminder?.resetMinutes ?? 0 }, set: { onDailyReminderChange(nil, nil, nil, min(max(0, $0), 1439)) })
+    }
     var selectedShellBinding: Binding<String> {
         Binding(get: { selectedConfiguration?.shellCommand.shell ?? "" }, set: { if let id = interactionState.selectedKeyID { onShellConfigurationChange(id, $0, nil) } })
     }
@@ -218,6 +234,22 @@ extension ContentView {
                     }
                 }
 
+                Spacer()
+            }
+
+        case .dailyReminder:
+            HStack(alignment: .top, spacing: 28) {
+                functionParameterColumn(for: configuration)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("提醒文本").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    TextField("每日提醒", text: dailyReminderTextBinding).textFieldStyle(.roundedBorder)
+                    Toggle("正数", isOn: dailyReminderCountUpBinding)
+                    if !configuration.dailyReminder.isCountUp {
+                        Stepper("次数 \(configuration.dailyReminder.count)", value: dailyReminderCountBinding, in: 0...999)
+                    }
+                    Stepper("重置时间（分钟）\(configuration.dailyReminder.resetMinutes)", value: dailyReminderResetMinutesBinding, in: 0...1439)
+                    Text("当前值：\(configuration.dailyReminder.value)").foregroundStyle(.secondary)
+                }
                 Spacer()
             }
 
@@ -944,7 +976,7 @@ extension ContentView {
             FunctionSection(
                 title: "数字",
                 systemImageName: "number.square",
-                functions: [.tally]
+                functions: [.tally, .dailyReminder]
             ),
             FunctionSection(
                 title: "访达",
