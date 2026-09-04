@@ -380,6 +380,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
 
         let inset = rect.height * 0.08
         let cardRect = rect.insetBy(dx: inset, dy: inset)
+        if display.isDailyReminder {
+            drawDailyReminderContent(display, in: cardRect, buttonRect: rect)
+            return
+        }
         if display.buttonVisualContent.hasCustomDisplayName {
             drawShortcutContent(display.title, in: cardRect, buttonRect: rect)
             return
@@ -441,6 +445,56 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             color: NSColor(calibratedWhite: 0.82, alpha: 1),
             rect: NSRect(x: cardRect.minX, y: cardRect.midY - rect.height * 0.26, width: cardRect.width, height: rect.height * 0.2)
         )
+    }
+
+    private func drawDailyReminderContent(_ display: DeckKeyDisplay, in rect: NSRect, buttonRect: NSRect) {
+        let lines = display.title.components(separatedBy: "\n")
+        let minimumNumberHeight = max(18, rect.height * 0.2)
+        let maximumTextHeight = max(1, rect.height - minimumNumberHeight)
+        let textFont = fittedManualLineBreakFont(
+            text: lines.joined(separator: "\n"),
+            width: rect.width,
+            maximumHeight: maximumTextHeight,
+            maxSize: rect.height * 0.6,
+            minSize: max(8, rect.height * 0.08)
+        )
+        let lineHeight = ceil(textFont.ascender - textFont.descender + textFont.leading)
+        let textHeight = min(maximumTextHeight, max(lineHeight, lineHeight * CGFloat(lines.count)))
+        let firstY = rect.maxY - textHeight
+        for (index, line) in lines.enumerated() {
+            let lineRect = NSRect(x: rect.minX, y: firstY + CGFloat(lines.count - index - 1) * lineHeight, width: rect.width, height: lineHeight)
+            drawCenteredSingleLineText(line, font: textFont, color: .white, rect: lineRect, shadow: textShadow())
+        }
+
+        let numberRect = NSRect(x: rect.minX, y: rect.minY, width: rect.width, height: max(1, rect.height - textHeight))
+        drawCenteredAutoSizedSingleLineText(
+            display.subtitle,
+            weight: .semibold,
+            maxFontSize: numberRect.height * 0.8,
+            minFontSize: max(8, numberRect.height * 0.18),
+            color: NSColor(calibratedWhite: 0.9, alpha: 1),
+            rect: numberRect,
+            shadow: textShadow()
+        )
+    }
+
+    private func fittedManualLineBreakFont(text: String, width: CGFloat, maximumHeight: CGFloat, maxSize: CGFloat, minSize: CGFloat) -> NSFont {
+        var low = max(1, minSize)
+        var high = max(low, maxSize)
+        for _ in 0..<12 {
+            let size = (low + high) / 2
+            let font = NSFont.systemFont(ofSize: size, weight: .bold)
+            let lines = text.components(separatedBy: "\n")
+            let naturalWidth = lines.map { ($0 as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+            let lineHeight = ceil(font.ascender - font.descender + font.leading)
+            let totalHeight = lineHeight * CGFloat(lines.count)
+            if totalHeight <= maximumHeight && naturalWidth <= width * 0.96 {
+                low = size
+            } else {
+                high = size
+            }
+        }
+        return NSFont.systemFont(ofSize: low, weight: .bold)
     }
 
     private func drawBackground(for display: DeckKeyDisplay, in rect: NSRect) {

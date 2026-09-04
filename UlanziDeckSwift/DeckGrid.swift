@@ -76,6 +76,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
     let isPressed: Bool
     let canDelete: Bool
     let canDrag: Bool
+    let isDailyReminder: Bool
 
     init(
         key: DeckGridLayout.Key,
@@ -88,6 +89,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
         column = key.column
         columnSpan = key.columnSpan
         displayMode = key.columnSpan > 1 ? configuration.displayMode : .function
+        isDailyReminder = configuration.function == .dailyReminder
         let configuredMihoyoGame = configuration.function.game
         var mihoyoGameButtonContent: MihoyoGameButtonContent?
         var codexUsageButtonContent: CodexUsageButtonContent?

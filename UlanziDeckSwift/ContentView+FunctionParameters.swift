@@ -242,7 +242,10 @@ extension ContentView {
                 functionParameterColumn(for: configuration)
                 VStack(alignment: .leading, spacing: 8) {
                     Text("提醒文本").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    TextField("每日提醒", text: dailyReminderTextBinding).textFieldStyle(.roundedBorder)
+                    TextEditor(text: dailyReminderTextBinding)
+                        .font(.body)
+                        .frame(minHeight: 60, maxHeight: 120)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.secondary.opacity(0.25)))
                     Toggle("正数", isOn: dailyReminderCountUpBinding)
                     if !configuration.dailyReminder.isCountUp {
                         Stepper("次数 \(configuration.dailyReminder.count)", value: dailyReminderCountBinding, in: 0...999)
