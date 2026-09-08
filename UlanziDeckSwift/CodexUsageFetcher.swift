@@ -16,71 +16,6 @@ nonisolated enum CodexAuthSource: String, Codable, Equatable, CaseIterable, Iden
     }
 }
 
-nonisolated struct CodexUsageQuota: Codable, Equatable, Sendable {
-    let remainingPercent: Int
-    let resetAfterSeconds: Int
-    let resetAt: Int?
-    let limitWindowSeconds: Int
-    let usedPercent: Double
-
-    init(
-        remainingPercent: Int,
-        resetAfterSeconds: Int,
-        resetAt: Int? = nil,
-        limitWindowSeconds: Int,
-        usedPercent: Double
-    ) {
-        self.remainingPercent = remainingPercent
-        self.resetAfterSeconds = resetAfterSeconds
-        self.resetAt = resetAt
-        self.limitWindowSeconds = limitWindowSeconds
-        self.usedPercent = usedPercent
-    }
-
-    var remainingTimeVsUsage: Double {
-        let remainingWindowFraction = Double(resetAfterSeconds) / Double(limitWindowSeconds)
-        let usedFraction = usedPercent * 0.01
-        return remainingWindowFraction / usedFraction
-    }
-
-    var resetAfterText: String {
-        let clampedSeconds = max(0, resetAfterSeconds)
-        let days = clampedSeconds / 86_400
-        let hours = clampedSeconds % 86_400 / 3_600
-        let minutes = clampedSeconds % 3_600 / 60
-        let clockText = "\(hours):\(String(format: "%02d", minutes))"
-        return days > 0 ? "\(days)天 \(clockText)" : clockText
-    }
-
-    func resetAtText(timeZone: TimeZone = .current) -> String? {
-        guard let resetAt else {
-            return nil
-        }
-
-        let date = Date(timeIntervalSince1970: TimeInterval(resetAt))
-        let components = Calendar(identifier: .gregorian).dateComponents(in: timeZone, from: date)
-        guard let month = components.month,
-              let day = components.day,
-              let hour = components.hour,
-              let minute = components.minute
-        else {
-            return nil
-        }
-
-        return String(format: "%d/%d %d:%02d", month, day, hour, minute)
-    }
-}
-
-nonisolated enum CodexUsageResult: Codable, Equatable, Sendable {
-    case success(CodexUsageQuota)
-    case authFileNotSelected
-    case authFileNeedsReselection
-    case invalidAuthFile
-    case unsupportedAuthMode
-    case unauthorized
-    case networkError(String)
-}
-
 nonisolated enum CodexUsageColorMode: String, Codable, Equatable, CaseIterable, Identifiable, Sendable {
     case highIsRed
     case lowIsRed
@@ -162,10 +97,28 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         try Self(authFileURL: defaultAuthFileURL(homeDirectory: homeDirectory))
     }
 
+    static func defaultZcodeConfigFileURL(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory
+            .appendingPathComponent(".zcode", isDirectory: true)
+            .appendingPathComponent("v2", isDirectory: true)
+            .appendingPathComponent("config.json", isDirectory: false)
+    }
+
+    static func defaultZcodeConfigFileConfiguration(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) throws -> Self {
+        try Self().updatingToDefaultZcodeConfigFile(homeDirectory: homeDirectory)
+    }
+
+    var dataSource: UsageDataSource
     var authSource: CodexAuthSource
     var authFilePath: String?
     var bookmarkData: Data?
     var manualAuthData: String
+    var zcodeConfigFilePath: String?
+    var zcodeBookmarkData: Data?
     var accountNickname: String
     var refreshIntervalMinutes: Int
     var colorMode: CodexUsageColorMode
@@ -178,10 +131,13 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     var lastSuccessfulRefreshAt: Date?
 
     init(
+        dataSource: UsageDataSource = .codex,
         authSource: CodexAuthSource = .authFile,
         authFilePath: String? = nil,
         bookmarkData: Data? = nil,
         manualAuthData: String = "",
+        zcodeConfigFilePath: String? = nil,
+        zcodeBookmarkData: Data? = nil,
         accountNickname: String = "",
         refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
         colorMode: CodexUsageColorMode = .highIsRed,
@@ -191,10 +147,13 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         lastSuccessfulRefreshAt: Date? = nil
         , lastSuccessfulSnapshot: CodexUsageResult? = nil
     ) {
+        self.dataSource = dataSource
         self.authSource = authSource
         self.authFilePath = authFilePath
         self.bookmarkData = bookmarkData
         self.manualAuthData = manualAuthData
+        self.zcodeConfigFilePath = zcodeConfigFilePath
+        self.zcodeBookmarkData = zcodeBookmarkData
         self.accountNickname = accountNickname
         self.refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(refreshIntervalMinutes)
         self.colorMode = colorMode
@@ -220,9 +179,12 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         resetDisplayMode: CodexUsageResetDisplayMode = .remainingTime,
         visual: DeckKeyVisualConfiguration = DeckKeyVisualConfiguration()
     ) throws {
+        dataSource = .codex
         authSource = .authFile
         authFilePath = authFileURL.path
         manualAuthData = ""
+        zcodeConfigFilePath = nil
+        zcodeBookmarkData = nil
         self.accountNickname = accountNickname
         bookmarkData = try authFileURL.bookmarkData(
             options: Self.securityScopedBookmarkCreationOptions,
@@ -237,7 +199,57 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     }
 
     var needsReselection: Bool {
-        authFilePath != nil && bookmarkData == nil
+        switch dataSource {
+        case .codex: return authFilePath != nil && bookmarkData == nil
+        case .zcode: return zcodeConfigFilePath != nil && zcodeBookmarkData == nil
+        }
+    }
+
+    var selectedConfigurationFilePath: String? {
+        dataSource == .codex ? authFilePath : zcodeConfigFilePath
+    }
+
+    var selectedConfigurationBookmarkData: Data? {
+        dataSource == .codex ? bookmarkData : zcodeBookmarkData
+    }
+
+    func updatingZcodeConfigFileURL(_ url: URL) throws -> Self {
+        var updated = self
+        updated.dataSource = .zcode
+        updated.zcodeConfigFilePath = url.path
+        updated.zcodeBookmarkData = try url.bookmarkData(
+            options: Self.securityScopedBookmarkCreationOptions,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        updated.lastResult = nil
+        updated.lastSuccessfulSnapshot = nil
+        updated.lastSuccessfulRefreshAt = nil
+        return updated
+    }
+
+    func updatingToDefaultZcodeConfigFile(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) throws -> Self {
+        try updatingZcodeConfigFileURL(
+            Self.defaultZcodeConfigFileURL(homeDirectory: homeDirectory)
+        )
+    }
+
+    func updatingCodexAuthFileURL(_ url: URL) throws -> Self {
+        var updated = self
+        updated.dataSource = .codex
+        updated.authSource = .authFile
+        updated.authFilePath = url.path
+        updated.bookmarkData = try url.bookmarkData(
+            options: Self.securityScopedBookmarkCreationOptions,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+        updated.lastResult = nil
+        updated.lastSuccessfulSnapshot = nil
+        updated.lastSuccessfulRefreshAt = nil
+        return updated
     }
 
     var displayAccountNickname: String? {
@@ -246,10 +258,13 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     }
 
     enum CodingKeys: CodingKey {
+        case dataSource
         case authSource
         case authFilePath
         case bookmarkData
         case manualAuthData
+        case zcodeConfigFilePath
+        case zcodeBookmarkData
         case accountNickname
         case refreshIntervalMinutes
         case colorMode
@@ -261,10 +276,13 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        dataSource = try container.decodeIfPresent(UsageDataSource.self, forKey: .dataSource) ?? .codex
         authSource = try container.decodeIfPresent(CodexAuthSource.self, forKey: .authSource) ?? .authFile
         authFilePath = try container.decodeIfPresent(String.self, forKey: .authFilePath)
         bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
         manualAuthData = try container.decodeIfPresent(String.self, forKey: .manualAuthData) ?? ""
+        zcodeConfigFilePath = try container.decodeIfPresent(String.self, forKey: .zcodeConfigFilePath)
+        zcodeBookmarkData = try container.decodeIfPresent(Data.self, forKey: .zcodeBookmarkData)
         accountNickname = try container.decodeIfPresent(String.self, forKey: .accountNickname) ?? ""
         refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(
             try container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes)
@@ -288,10 +306,13 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(dataSource, forKey: .dataSource)
         try container.encode(authSource, forKey: .authSource)
         try container.encodeIfPresent(authFilePath, forKey: .authFilePath)
         try container.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
         try container.encode(manualAuthData, forKey: .manualAuthData)
+        try container.encodeIfPresent(zcodeConfigFilePath, forKey: .zcodeConfigFilePath)
+        try container.encodeIfPresent(zcodeBookmarkData, forKey: .zcodeBookmarkData)
         try container.encode(accountNickname, forKey: .accountNickname)
         try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
         try container.encode(colorMode, forKey: .colorMode)

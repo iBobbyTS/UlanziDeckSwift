@@ -51,6 +51,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case sub2APIDailyCost
     case newAPIModelAvailability
     case codexUsage
+    case zcodeUsage
     case genshinStatus
     case starRailStatus
     case zenlessZoneStatus
@@ -72,6 +73,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
         .sub2APIDailyCost,
         .newAPIModelAvailability,
         .codexUsage,
+        .zcodeUsage,
         .genshinStatus,
         .starRailStatus,
         .zenlessZoneStatus,
@@ -109,6 +111,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "模型可用率"
         case .codexUsage:
             return "Codex 剩余额度"
+        case .zcodeUsage:
+            return "Zcode 剩余额度"
         case .genshinStatus:
             return "原神状态"
         case .starRailStatus:
@@ -148,7 +152,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "sun.max"
         case .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability:
             return "globe"
-        case .codexUsage:
+        case .codexUsage, .zcodeUsage:
             return "gauge.with.dots.needle.67percent"
         case .genshinStatus:
             return "sparkles"
@@ -177,7 +181,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return .starRail
         case .zenlessZoneStatus:
             return .zenlessZoneZero
-        case .none, .tally, .dailyReminder, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
+        case .none, .tally, .dailyReminder, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .zcodeUsage, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
             return nil
         }
     }
@@ -214,6 +218,21 @@ nonisolated enum DeckKeyScheduledRuntime: Equatable {
 }
 
 extension DeckKeyFunction {
+    nonisolated var isUsage: Bool {
+        usageDataSource != nil
+    }
+
+    nonisolated var usageDataSource: UsageDataSource? {
+        switch self {
+        case .codexUsage:
+            return .codex
+        case .zcodeUsage:
+            return .zcode
+        default:
+            return nil
+        }
+    }
+
     nonisolated var isSub2APIQuery: Bool {
         self == .sub2API || self == .sub2APIBalance || self == .sub2APIDailyCost
     }
@@ -240,7 +259,7 @@ extension DeckKeyFunction {
             return .refreshSub2APIDailyCost
         case .newAPIModelAvailability:
             return .refreshNewAPIModelAvailability
-        case .codexUsage:
+        case .codexUsage, .zcodeUsage:
             return .refreshCodexUsage
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .refreshMihoyoGame
@@ -269,7 +288,7 @@ extension DeckKeyFunction {
             return .sub2APIDailyCost
         case .newAPIModelAvailability:
             return .newAPIModelAvailability
-        case .codexUsage:
+        case .codexUsage, .zcodeUsage:
             return .codexUsage
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .mihoyoGame
@@ -2071,6 +2090,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
         self.sub2APIDailyCost = sub2APIDailyCost
         self.newAPIModelAvailability = newAPIModelAvailability
         self.codexUsage = codexUsage
+        self.codexUsage.dataSource = function.usageDataSource ?? codexUsage.dataSource
         self.mihoyoGame = mihoyoGame
         self.pageFolder = pageFolder
         self.shellCommand = shellCommand
@@ -2260,6 +2280,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
                 smbServer: smbServer,
                 pageFolder: pageFolder
             )
+        normalizeUsageFunctionIdentity()
     }
 
     func encode(to encoder: Encoder) throws {
@@ -2328,7 +2349,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return pageFolder.visual.backgroundPNGData
         case .pageBack:
             return visual.backgroundPNGData
-        case .codexUsage:
+        case .codexUsage, .zcodeUsage:
             return codexUsage.visual.backgroundPNGData
         case .none, .tally, .dailyReminder, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability:
             return nil
@@ -2355,7 +2376,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return pageFolder.visual.blurredBackgroundPNGData
         case .pageBack:
             return visual.blurredBackgroundPNGData
-        case .codexUsage:
+        case .codexUsage, .zcodeUsage:
             return codexUsage.visual.blurredBackgroundPNGData
         case .none, .tally, .dailyReminder, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability:
             return nil
@@ -2394,6 +2415,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return newAPIModelAvailability.groupDisplayName
         case .codexUsage:
             return "Codex 额度"
+        case .zcodeUsage:
+            return "Zcode 额度"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return function.game?.shortDisplayName ?? "游戏"
         case .pageFolder:
@@ -2404,6 +2427,16 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return function.title
         case .shellCommand:
             return shellCommand.command.isEmpty ? "Shell 命令" : shellCommand.command
+        }
+    }
+
+    /// 功能身份是额度来源的唯一权威；旧版 `codexUsage + dataSource.zcode` 在加载时迁移。
+    mutating func normalizeUsageFunctionIdentity() {
+        if function == .codexUsage, codexUsage.dataSource == .zcode {
+            function = .zcodeUsage
+        }
+        if let dataSource = function.usageDataSource {
+            codexUsage.dataSource = dataSource
         }
     }
 
@@ -2435,7 +2468,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return DeckKeyPageFolderConfiguration.migratingLegacyDefaultName(in: pageFolder.visual)
         case .pageBack:
             return DeckKeyVisualConfiguration(dimsBackground: false)
-        case .none, .tally, .dailyReminder, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage, .shellCommand:
+        case .none, .tally, .dailyReminder, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .zcodeUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage, .shellCommand:
             return DeckKeyVisualConfiguration()
         }
     }

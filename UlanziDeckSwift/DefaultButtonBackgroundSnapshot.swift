@@ -26,7 +26,7 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "FolderBackground"
         case .connectSMBServer:
             return "SMBServerBackground"
-        case .codexUsage:
+        case .codexUsage, .zcodeUsage:
             return "CodexUsageBackground"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return function.game?.buttonBackgroundAssetName
@@ -47,7 +47,7 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "chevron.left"
         case .nextPage:
             return "chevron.right"
-        case .none, .tally, .dailyReminder, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .shellCommand:
+        case .none, .tally, .dailyReminder, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .codexUsage, .zcodeUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .shellCommand:
             return nil
         }
     }
@@ -144,7 +144,7 @@ extension DeckKeyConfiguration {
             openWebPage.visual.replaceBackground(with: defaultVisual)
         case .connectSMBServer:
             smbServer.visual.replaceBackground(with: defaultVisual)
-        case .codexUsage:
+        case .codexUsage, .zcodeUsage:
             let hadDefaultBackground = codexUsage.visual.backgroundPNGData != nil
             codexUsage.visual.replaceBackground(with: defaultVisual)
             if !hadDefaultBackground && !visual.hasCustomBackground {
@@ -174,7 +174,7 @@ extension DeckKeyConfiguration {
             openWebPage.visual.clearBackground()
         case .connectSMBServer:
             smbServer.visual.clearBackground()
-        case .codexUsage:
+        case .codexUsage, .zcodeUsage:
             codexUsage.visual.clearBackground()
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             mihoyoGame.visual.clearBackground()

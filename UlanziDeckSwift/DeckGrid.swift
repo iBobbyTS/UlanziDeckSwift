@@ -298,47 +298,13 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                     title = configuration.visual.displayName(fallback: "可用率")
                     subtitle = availability.groupDisplayName
                 }
-            case .codexUsage:
-                switch configuration.codexUsage.lastResult {
-                case let .success(quota):
-                    codexUsageButtonContent = CodexUsageButtonContent(
-                        accountNickname: configuration.codexUsage.displayAccountNickname,
-                        percentageText: "\(quota.remainingPercent)%",
-                        resetLabelText: "下次重设",
-                        resetAfterText: configuration.codexUsage.resetDisplayMode.text(for: quota),
-                        percentageColor: configuration.codexUsage.colorMode.metricColor(
-                            for: quota.remainingPercent
-                        ),
-                        resetAfterColor: configuration.codexUsage.colorMode.resetTimeMetricColor(
-                            for: quota.remainingTimeVsUsage
-                        )
-                    )
-                    title = configuration.visual.displayName(
-                        fallback: "\(quota.remainingPercent)%"
-                    )
-                    subtitle = quota.resetAfterText
-                case .authFileNotSelected:
-                    title = configuration.visual.displayName(fallback: "Codex 额度")
-                    subtitle = "未选择 auth.json"
-                case .authFileNeedsReselection:
-                    title = configuration.visual.displayName(fallback: "Codex 额度")
-                    subtitle = "需重选文件"
-                case .invalidAuthFile:
-                    title = configuration.visual.displayName(fallback: "auth.json")
-                    subtitle = "JSON 格式无效"
-                case .unsupportedAuthMode:
-                    title = configuration.visual.displayName(fallback: "auth.json")
-                    subtitle = "仅支持 ChatGPT 登录"
-                case .unauthorized:
-                    title = configuration.visual.displayName(fallback: "Codex 额度")
-                    subtitle = "登录已失效"
-                case .networkError:
-                    title = configuration.visual.displayName(fallback: "Codex 额度")
-                    subtitle = "刷新失败"
-                case nil:
-                    title = configuration.visual.displayName(fallback: "Codex 额度")
-                    subtitle = configuration.codexUsage.authFilePath == nil ? "未配置" : "未刷新"
-                }
+            case .codexUsage, .zcodeUsage:
+                let presentation = UsagePresentationFormatter.presentation(
+                    for: configuration.codexUsage
+                )
+                codexUsageButtonContent = presentation.buttonContent
+                title = configuration.visual.displayName(fallback: presentation.title)
+                subtitle = presentation.subtitle
             case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
                 buttonBackgroundUsesFittedImage = false
                 if case let .success(status) = configuration.mihoyoGame.lastResult {
@@ -455,15 +421,6 @@ nonisolated struct NewAPIModelAvailabilityButtonContent: Equatable {
     var successRateText: String {
         String(format: "%.1f%%", locale: Locale(identifier: "en_US_POSIX"), successRate)
     }
-}
-
-nonisolated struct CodexUsageButtonContent: Equatable, Sendable {
-    let accountNickname: String?
-    let percentageText: String
-    let resetLabelText: String
-    let resetAfterText: String
-    let percentageColor: MihoyoGameMetricColor
-    let resetAfterColor: MihoyoGameMetricColor
 }
 
 nonisolated struct ButtonVisualContent: Equatable {
@@ -1047,6 +1004,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
         if normalizedConfiguration.function == .pageFolder, isWide {
             normalizedConfiguration = .empty
         }
+
+        normalizedConfiguration.normalizeUsageFunctionIdentity()
 
         if !isWide {
             normalizedConfiguration.displayMode = .function
@@ -1985,20 +1944,23 @@ nonisolated struct DeckGridInteractionState: Equatable {
         for keyID: Int
     ) -> Bool {
         guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .codexUsage
+              configurations[keyID, default: .tallyDefault].function.isUsage
         else {
             return false
         }
 
         selectedKeyID = keyID
-        configurations[keyID, default: .tallyDefault].codexUsage = configuration
+        var normalizedConfiguration = configuration
+        normalizedConfiguration.dataSource = configurations[keyID, default: .tallyDefault]
+            .function.usageDataSource ?? configuration.dataSource
+        configurations[keyID, default: .tallyDefault].codexUsage = normalizedConfiguration
         return true
     }
 
     @discardableResult
     mutating func setCodexUsageRefreshIntervalMinutes(_ minutes: Int, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .codexUsage
+              configurations[keyID, default: .tallyDefault].function.isUsage
         else {
             return false
         }
@@ -2012,7 +1974,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
     @discardableResult
     mutating func setCodexUsageColorMode(_ colorMode: CodexUsageColorMode, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .codexUsage
+              configurations[keyID, default: .tallyDefault].function.isUsage
         else {
             return false
         }
@@ -2028,7 +1990,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
         for keyID: Int
     ) -> Bool {
         guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .codexUsage
+              configurations[keyID, default: .tallyDefault].function.isUsage
         else {
             return false
         }
@@ -2065,7 +2027,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     mutating func setCodexUsageAccountNickname(_ accountNickname: String, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .codexUsage
+              configurations[keyID, default: .tallyDefault].function.isUsage
         else {
             return false
         }
@@ -2078,7 +2040,7 @@ nonisolated struct DeckGridInteractionState: Equatable {
     @discardableResult
     mutating func setCodexUsageLastResult(_ result: CodexUsageResult, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
-              configurations[keyID, default: .tallyDefault].function == .codexUsage
+              configurations[keyID, default: .tallyDefault].function.isUsage
         else {
             return false
         }
@@ -2461,6 +2423,15 @@ nonisolated struct DeckGridInteractionState: Equatable {
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].clearDefaultButtonBackgroundSnapshot(for: previousFunction)
         configurations[keyID, default: .tallyDefault].function = function
+        if let dataSource = function.usageDataSource {
+            let sourceChanged = configurations[keyID, default: .tallyDefault].codexUsage.dataSource != dataSource
+            configurations[keyID, default: .tallyDefault].codexUsage.dataSource = dataSource
+            if sourceChanged {
+                configurations[keyID, default: .tallyDefault].codexUsage.lastResult = nil
+                configurations[keyID, default: .tallyDefault].codexUsage.lastSuccessfulSnapshot = nil
+                configurations[keyID, default: .tallyDefault].codexUsage.lastSuccessfulRefreshAt = nil
+            }
+        }
         if function.isSub2APIQuery {
             ensureUniqueSub2APIInstanceID(for: keyID)
         }

@@ -155,6 +155,16 @@ extension ContentView {
         currentFunction == DeckKeyFunction.none && selectedFunction == .codexUsage
     }
 
+    nonisolated static func shouldAutomaticallySelectDefaultZcodeConfigFile(
+        currentFunction: DeckKeyFunction?,
+        selectedFunction: DeckKeyFunction,
+        currentZcodeConfigFilePath: String?
+    ) -> Bool {
+        currentFunction != .zcodeUsage
+            && selectedFunction == .zcodeUsage
+            && currentZcodeConfigFilePath == nil
+    }
+
     @ViewBuilder
     func parameterContent(for configuration: DeckKeyConfiguration) -> some View {
         switch configuration.function {
@@ -579,7 +589,7 @@ extension ContentView {
                 Spacer()
             }
 
-        case .codexUsage:
+        case .codexUsage, .zcodeUsage:
             codexUsageParameterContent(for: configuration)
 
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
@@ -757,31 +767,16 @@ extension ContentView {
             functionParameterColumn(for: configuration)
 
             VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("认证来源")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-
-                    Picker("认证来源", selection: selectedCodexUsageAuthSourceBinding) {
-                        ForEach(CodexAuthSource.allCases) { source in
-                            Text(source.title).tag(source)
-                        }
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.menu)
-                    .frame(width: 180, alignment: .leading)
-                }
-
-                if configuration.codexUsage.authSource == .authFile {
+                if configuration.function == .zcodeUsage {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Codex auth.json")
+                        Text("Zcode config.json")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
-                        Text(configuration.codexUsage.authFilePath ?? "未选择 auth.json")
+                        Text(configuration.codexUsage.zcodeConfigFilePath ?? "未选择 config.json")
                             .font(.callout)
                             .foregroundStyle(
-                                configuration.codexUsage.authFilePath == nil
+                                configuration.codexUsage.zcodeConfigFilePath == nil
                                     ? Color.secondary
                                     : Color.primary
                             )
@@ -797,30 +792,82 @@ extension ContentView {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     Button {
-                        chooseCodexAuthFile()
+                        chooseZcodeConfigurationFile()
                     } label: {
                         Label(
                             configuration.codexUsage.needsReselection
-                                ? "重新选择 auth.json"
-                                : "选择 auth.json",
-                            systemImage: "key.horizontal"
+                                ? "重新选择 config.json"
+                                : "选择 config.json",
+                            systemImage: "doc.badge.gearshape"
                         )
                     }
                     .buttonStyle(.bordered)
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("认证 JSON 内容")
+                        Text("认证来源")
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
-                        TextEditor(text: selectedCodexUsageManualAuthDataBinding)
-                            .font(.system(size: 11, design: .monospaced))
-                            .frame(height: 120)
-                            .scrollContentBackground(.hidden)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 4)
-                                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                        Picker("认证来源", selection: selectedCodexUsageAuthSourceBinding) {
+                            ForEach(CodexAuthSource.allCases) { source in
+                                Text(source.title).tag(source)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 180, alignment: .leading)
+                    }
+
+                    if configuration.codexUsage.authSource == .authFile {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Codex auth.json")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+
+                            Text(configuration.codexUsage.authFilePath ?? "未选择 auth.json")
+                                .font(.callout)
+                                .foregroundStyle(
+                                    configuration.codexUsage.authFilePath == nil
+                                        ? Color.secondary
+                                        : Color.primary
+                                )
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+
+                            if configuration.codexUsage.needsReselection {
+                                Text("需要重新选择")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Button {
+                            chooseCodexAuthFile()
+                        } label: {
+                            Label(
+                                configuration.codexUsage.needsReselection
+                                    ? "重新选择 auth.json"
+                                    : "选择 auth.json",
+                                systemImage: "key.horizontal"
                             )
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("认证 JSON 内容")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+
+                            TextEditor(text: selectedCodexUsageManualAuthDataBinding)
+                                .font(.system(size: 11, design: .monospaced))
+                                .frame(height: 120)
+                                .scrollContentBackground(.hidden)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 4)
+                                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                                )
+                        }
                     }
                 }
 
@@ -995,7 +1042,7 @@ extension ContentView {
             FunctionSection(
                 title: "网站",
                 systemImageName: "globe",
-                functions: [.openWebPage, .codexUsage]
+                functions: [.openWebPage, .codexUsage, .zcodeUsage]
             ),
             FunctionSection(
                 title: "Sub2API",
@@ -1634,24 +1681,44 @@ extension ContentView {
         panel.showsHiddenFiles = true
         panel.allowedContentTypes = [.json]
         guard panel.runModal() == .OK,
-              let url = panel.url
+              let url = panel.url,
+              let configuration = selectedConfiguration?.codexUsage
         else {
             return
         }
 
         do {
-            onCodexAuthFileSelection(try DeckKeyCodexUsageConfiguration(
-                authFileURL: url,
-                accountNickname: selectedConfiguration?.codexUsage.accountNickname ?? "",
-                refreshIntervalMinutes: selectedConfiguration?.codexUsage.refreshIntervalMinutes
-                    ?? DeckKeyCodexUsageConfiguration.defaultRefreshIntervalMinutes,
-                colorMode: selectedConfiguration?.codexUsage.colorMode ?? .highIsRed,
-                resetDisplayMode: selectedConfiguration?.codexUsage.resetDisplayMode
-                    ?? .remainingTime
-            ))
+            onCodexAuthFileSelection(try configuration.updatingCodexAuthFileURL(url))
         } catch {
             showWarningAlert(
                 title: "无法保存 auth.json 权限",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    func chooseZcodeConfigurationFile() {
+        let panel = NSOpenPanel()
+        panel.title = "选择 Zcode config.json"
+        panel.prompt = "选择"
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.showsHiddenFiles = true
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK,
+              let url = panel.url,
+              let configuration = selectedConfiguration?.codexUsage
+        else {
+            return
+        }
+
+        do {
+            onCodexAuthFileSelection(try configuration.updatingZcodeConfigFileURL(url))
+        } catch {
+            showWarningAlert(
+                title: "无法保存 config.json 权限",
                 message: error.localizedDescription
             )
         }

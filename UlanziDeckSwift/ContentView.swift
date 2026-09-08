@@ -463,6 +463,13 @@ struct ContentView: View {
 
     private func selectSidebarFunction(_ function: DeckKeyFunction) {
         let currentFunction = selectedConfiguration?.function
+        let shouldSelectDefaultZcodeConfig = Self.shouldAutomaticallySelectDefaultZcodeConfigFile(
+            currentFunction: currentFunction,
+            selectedFunction: function,
+            currentZcodeConfigFilePath: selectedConfiguration?.codexUsage.zcodeConfigFilePath
+        )
+        let existingUsageConfiguration = selectedConfiguration?.codexUsage
+            ?? DeckKeyCodexUsageConfiguration()
         onFunctionSelection(function)
 
         if Self.shouldAutomaticallySelectDefaultCodexAuthFile(
@@ -476,6 +483,19 @@ struct ContentView: View {
             } catch {
                 showWarningAlert(
                     title: "无法使用默认 auth.json",
+                    message: error.localizedDescription
+                )
+            }
+        }
+
+        if shouldSelectDefaultZcodeConfig {
+            do {
+                onCodexAuthFileSelection(
+                    try existingUsageConfiguration.updatingToDefaultZcodeConfigFile()
+                )
+            } catch {
+                showWarningAlert(
+                    title: "无法使用默认 config.json",
                     message: error.localizedDescription
                 )
             }

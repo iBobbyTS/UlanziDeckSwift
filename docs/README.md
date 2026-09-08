@@ -10,7 +10,7 @@
 - [shortcuts.md](shortcuts.md)：macOS Shortcuts 暴露的亮度调节器动作。
 - [menu-bar-smoke.md](menu-bar-smoke.md)：菜单栏应用生命周期的发布前手工 smoke 清单。
 - [mihoyo-games.md](mihoyo-games.md)：米游社扫码登录和原神、星铁、绝区零状态按键功能。
-- [codex-usage.md](codex-usage.md)：Codex `auth.json` 额度按键的文件权限、请求协议和刷新规则。
+- [codex-usage.md](codex-usage.md)：独立 Codex / Zcode 剩余额度功能的文件权限、兼容迁移、请求协议及共享显示和刷新规则。
 - [engineering-notes/macos-appintents-signing-runtime.md](engineering-notes/macos-appintents-signing-runtime.md)：macOS AppIntents 执行通信对签名和 TeamIdentifier 的要求。
 
 ## 更新规则

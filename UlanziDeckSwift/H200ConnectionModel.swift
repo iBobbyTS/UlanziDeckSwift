@@ -108,6 +108,7 @@ final class H200ConnectionModel: ObservableObject {
     private let sub2APIFetcher: Sub2APIFetching
     private let newAPIFetcher: NewAPIFetching
     private let codexUsageFetcher: CodexUsageFetching
+    private let zcodeUsageFetcher: ZcodeUsageFetching
     private let mihoyoGameService: MihoyoGameServicing
     private let mihoyoSessionStore: MihoyoSessionStoring
     private let pageFolderAutoReturnTimer: PageFolderAutoReturnTimer
@@ -158,6 +159,7 @@ final class H200ConnectionModel: ObservableObject {
     private var codexUsageTimers: [RuntimeInstanceID: Timer] = [:]
     private var codexUsageNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
     private var codexUsageFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
+    private var codexUsageRequestIDs: [RuntimeInstanceID: UUID] = [:]
     private var webPageMetadataTasks: [Int: Task<Void, Never>] = [:]
     private var webPageMetadataFetchedURLStrings: [Int: String] = [:]
     private var mihoyoLoginTask: Task<Void, Never>?
@@ -198,6 +200,7 @@ final class H200ConnectionModel: ObservableObject {
         sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher(),
         newAPIFetcher: NewAPIFetching = NewAPIFetcher(),
         codexUsageFetcher: CodexUsageFetching = CodexUsageFetcher(),
+        zcodeUsageFetcher: ZcodeUsageFetching = ZcodeUsageFetcher(),
         mihoyoGameService: MihoyoGameServicing = MihoyoGameClient(),
         mihoyoSessionStore: MihoyoSessionStoring = KeychainMihoyoSessionStore(),
         longPressDurationNanoseconds: UInt64 = 1_000_000_000,
@@ -222,6 +225,7 @@ final class H200ConnectionModel: ObservableObject {
         self.sub2APIFetcher = sub2APIFetcher
         self.newAPIFetcher = newAPIFetcher
         self.codexUsageFetcher = codexUsageFetcher
+        self.zcodeUsageFetcher = zcodeUsageFetcher
         self.mihoyoGameService = mihoyoGameService
         self.mihoyoSessionStore = mihoyoSessionStore
         self.pageFolderAutoReturnTimer = PageFolderAutoReturnTimer(
@@ -676,9 +680,12 @@ final class H200ConnectionModel: ObservableObject {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
                 fetchNewAPIModelAvailability(for: selectedKeyID)
             }
-            if function == .codexUsage {
+            if function.isUsage {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
-                fetchCodexUsage(for: selectedKeyID)
+                let configuration = interactionState.codexUsageConfiguration(for: selectedKeyID)
+                if Self.canRefreshUsage(configuration) {
+                    fetchCodexUsage(for: selectedKeyID)
+                }
             }
             if function.game != nil {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
@@ -815,6 +822,7 @@ final class H200ConnectionModel: ObservableObject {
             stopCodexUsageTimer(for: instanceID, preservesNextFire: false)
             codexUsageFetchTasks[instanceID]?.cancel()
             codexUsageFetchTasks[instanceID] = nil
+            codexUsageRequestIDs[instanceID] = nil
         }
         fetchCodexUsage(for: selectedKeyID)
     }
@@ -1862,6 +1870,7 @@ final class H200ConnectionModel: ObservableObject {
         codexUsageNextFireNanoseconds[instanceID] = nil
         codexUsageFetchTasks[instanceID]?.cancel()
         codexUsageFetchTasks[instanceID] = nil
+        codexUsageRequestIDs[instanceID] = nil
 
         mihoyoGameTimers[instanceID]?.invalidate()
         mihoyoGameTimers[instanceID] = nil
@@ -1946,6 +1955,7 @@ final class H200ConnectionModel: ObservableObject {
         codexUsageTimers[instanceID] = nil
         codexUsageFetchTasks[instanceID]?.cancel()
         codexUsageFetchTasks[instanceID] = nil
+        codexUsageRequestIDs[instanceID] = nil
 
         mihoyoGameTimers[instanceID]?.invalidate()
         mihoyoGameTimers[instanceID] = nil
@@ -2703,13 +2713,16 @@ final class H200ConnectionModel: ObservableObject {
     ) -> (slot: RuntimeSlotID, config: DeckKeyCodexUsageConfiguration)? {
         guard let slot = runtimeSlotsByInstance[instanceID],
               slot.pageID == interactionState.currentPageID,
-              interactionState.configuration(for: slot.keyID)?.displayMode == .function,
-              interactionState.configuration(for: slot.keyID)?.function == .codexUsage
+              let keyConfiguration = interactionState.configuration(for: slot.keyID),
+              keyConfiguration.displayMode == .function,
+              let dataSource = keyConfiguration.function.usageDataSource
         else {
             return nil
         }
 
-        return (slot, interactionState.codexUsageConfiguration(for: slot.keyID))
+        var configuration = keyConfiguration.codexUsage
+        configuration.dataSource = dataSource
+        return (slot, configuration)
     }
 
     private func fetchCodexUsage(for keyID: Int) {
@@ -2718,6 +2731,20 @@ final class H200ConnectionModel: ObservableObject {
         }
 
         fetchCodexUsage(for: instanceID)
+    }
+
+    private static func canRefreshUsage(_ configuration: DeckKeyCodexUsageConfiguration) -> Bool {
+        switch configuration.dataSource {
+        case .zcode:
+            return configuration.zcodeBookmarkData != nil
+        case .codex:
+            switch configuration.authSource {
+            case .authFile:
+                return configuration.bookmarkData != nil
+            case .manualJSON:
+                return !configuration.manualAuthData.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        }
     }
 
     private func fetchCodexUsage(for instanceID: RuntimeInstanceID) {
@@ -2729,27 +2756,44 @@ final class H200ConnectionModel: ObservableObject {
 
         stopCodexUsageTimer(for: instanceID, preservesNextFire: false)
         codexUsageFetchTasks[instanceID]?.cancel()
+        let requestID = UUID()
+        codexUsageRequestIDs[instanceID] = requestID
         let pageID = resolved.slot.pageID
         let authFilePath = resolved.config.authFilePath
         let bookmarkData = resolved.config.bookmarkData
         let manualAuthData = resolved.config.manualAuthData
         let authSource = resolved.config.authSource
-        let fetcher = codexUsageFetcher
+        let dataSource = resolved.config.dataSource
+        let zcodeConfigFilePath = resolved.config.zcodeConfigFilePath
+        let zcodeBookmarkData = resolved.config.zcodeBookmarkData
+        let codexFetcher = codexUsageFetcher
+        let zcodeFetcher = zcodeUsageFetcher
         codexUsageFetchTasks[instanceID] = Task { @MainActor [weak self] in
-            let result = await fetcher.fetchUsage(configuration: resolved.config)
+            let result: CodexUsageResult
+            switch dataSource {
+            case .codex:
+                result = await codexFetcher.fetchUsage(configuration: resolved.config)
+            case .zcode:
+                result = await zcodeFetcher.fetchUsage(configuration: resolved.config)
+            }
             guard !Task.isCancelled,
                   let self,
+                  self.codexUsageRequestIDs[instanceID] == requestID,
                   let latest = self.resolveCurrentCodexUsageSlot(for: instanceID),
                   latest.slot.pageID == pageID,
+                  latest.config.dataSource == dataSource,
                   latest.config.authSource == authSource,
                   latest.config.authFilePath == authFilePath,
                   latest.config.bookmarkData == bookmarkData,
-                  latest.config.manualAuthData == manualAuthData
+                  latest.config.manualAuthData == manualAuthData,
+                  latest.config.zcodeConfigFilePath == zcodeConfigFilePath,
+                  latest.config.zcodeBookmarkData == zcodeBookmarkData
             else {
                 return
             }
 
             self.codexUsageFetchTasks[instanceID] = nil
+            self.codexUsageRequestIDs[instanceID] = nil
             self.interactionState.setCodexUsageLastResult(result, for: latest.slot.keyID)
             _ = self.persistCurrentConfiguration()
             self.syncKeyDisplay(keyID: latest.slot.keyID)
@@ -2760,9 +2804,7 @@ final class H200ConnectionModel: ObservableObject {
     private func scheduleNextCodexUsageRefresh(for instanceID: RuntimeInstanceID) {
         guard canRunInternalRefresh,
               let resolved = resolveCurrentCodexUsageSlot(for: instanceID),
-              resolved.config.authSource == .authFile
-                ? resolved.config.bookmarkData != nil
-                : !resolved.config.manualAuthData.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              Self.canRefreshUsage(resolved.config)
         else {
             return
         }
@@ -3604,7 +3646,7 @@ final class H200ConnectionModel: ObservableObject {
 
         ensureCurrentPageRuntimeInstances()
         for key in layout.keys
-        where interactionState.configuration(for: key.id)?.function == .codexUsage {
+        where interactionState.configuration(for: key.id)?.function.isUsage == true {
             fetchCodexUsage(for: key.id)
         }
     }

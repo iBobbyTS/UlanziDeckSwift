@@ -43,6 +43,22 @@ struct UlanziDeckSwiftTests {
         #expect(sidebarFunctions.count == Set(sidebarFunctions).count)
     }
 
+    @Test("Codex 与 Zcode 在右侧提供两个独立额度功能")
+    func usageFunctionsHaveIndependentSidebarEntries() {
+        let websiteFunctions = ContentView.functionSections
+            .first { $0.title == "网站" }?
+            .functions
+
+        #expect(websiteFunctions?.contains(.codexUsage) == true)
+        #expect(websiteFunctions?.contains(.zcodeUsage) == true)
+        #expect(DeckKeyFunction.codexUsage.title == "Codex 剩余额度")
+        #expect(DeckKeyFunction.zcodeUsage.title == "Zcode 剩余额度")
+        #expect(DeckKeyFunction.codexUsage.usageDataSource == .codex)
+        #expect(DeckKeyFunction.zcodeUsage.usageDataSource == .zcode)
+        #expect(DeckKeyFunction.zcodeUsage.pressRuntimeAction == .refreshCodexUsage)
+        #expect(DeckKeyFunction.zcodeUsage.scheduledRuntime == .codexUsage)
+    }
+
     @Test("Sub2API 功能独立显示在 Sub2API 卡片")
     func sub2APIFunctionsHaveDedicatedSidebarSection() {
         let section = ContentView.functionSections.first { $0.title == "Sub2API" }
@@ -1876,6 +1892,14 @@ struct UlanziDeckSwiftTests {
         #expect(!configuration.visual.dimsBackground)
         #expect(configuration.defaultButtonBackgroundPNGData != nil)
         #expect(configuration.defaultButtonBlurredBackgroundPNGData != nil)
+
+        let didAssignZcodeUsage = state.assign(.zcodeUsage, to: 3)
+        #expect(didAssignZcodeUsage)
+        let zcodeConfiguration = try #require(state.configuration(for: 3))
+        #expect(zcodeConfiguration.defaultButtonBackgroundPNGData != nil)
+        #expect(zcodeConfiguration.defaultButtonBlurredBackgroundPNGData != nil)
+        #expect(zcodeConfiguration.visual.usesBlurredBackground)
+        #expect(zcodeConfiguration.visual.dimsBackground)
     }
 
     @Test func connectSMBServerFunctionDisplaysNameAndPersistsNormalizedAddress() {
@@ -8968,6 +8992,316 @@ struct UlanziDeckSwiftTests {
         #expect(request.value(forHTTPHeaderField: "User-Agent") == "codex-cli")
     }
 
+    @Test func zcodeUsageFetcherSelectsOnlyWeeklyCreditLimitAndUsesBareAuthorization() async throws {
+        let usageURL = try #require(URL(string: "https://api.z.ai/api/monitor/usage/quota/limit"))
+        let responseData = try JSONSerialization.data(withJSONObject: [
+            "code": 200,
+            "success": true,
+            "data": [
+                "limits": [
+                    ["type": "OTHER", "unit": 6, "number": 1, "percentage": 99],
+                    ["type": "CREDIT_LIMIT", "unit": 3, "number": 5, "percentage": 1],
+                    [
+                        "type": "CREDIT_LIMIT",
+                        "unit": 6,
+                        "number": 1,
+                        "percentage": 9,
+                        "nextResetTime": 1_789_256_403_998,
+                    ],
+                ],
+            ],
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            usageURL: .init(statusCode: 200, mimeType: "application/json", data: responseData),
+        ])
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let configData = Data(#"{"provider":{"builtin:zai-coding-plan":{"options":{"apiKey":"secret-token","baseURL":"https://api.z.ai/api/anthropic"}}}}"#.utf8)
+        let fetcher = ZcodeUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            configurationFileLoader: FakeZcodeConfigurationFileLoader(result: .success(configData)),
+            now: { Date(timeIntervalSince1970: 1_789_252_803.998) }
+        )
+        let configuration = DeckKeyCodexUsageConfiguration(
+            dataSource: .zcode,
+            zcodeConfigFilePath: "/tmp/config.json",
+            zcodeBookmarkData: Data("bookmark".utf8)
+        )
+
+        #expect(await fetcher.fetchUsage(configuration: configuration) == .success(CodexUsageQuota(
+            remainingPercent: 91,
+            resetAfterSeconds: 3_600,
+            resetAt: 1_789_256_403,
+            limitWindowSeconds: 604_800,
+            usedPercent: 9
+        )))
+        let utc = try #require(TimeZone(secondsFromGMT: 0))
+        guard case let .success(quota) = await fetcher.fetchUsage(configuration: configuration) else {
+            Issue.record("有效周重置时间应解析为额度结果")
+            return
+        }
+        #expect(quota.resetAtText(timeZone: utc) == "9/12 23:40")
+
+        let afterResetFetcher = ZcodeUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            configurationFileLoader: FakeZcodeConfigurationFileLoader(result: .success(configData)),
+            now: { Date(timeIntervalSince1970: 1_789_256_500) }
+        )
+        guard case let .success(expiredQuota) = await afterResetFetcher.fetchUsage(configuration: configuration) else {
+            Issue.record("过期周重置时间仍应保留额度结果")
+            return
+        }
+        #expect(expiredQuota.resetAfterSeconds == 0)
+        let request = try #require(WebPageMetadataURLProtocol.receivedRequests.last)
+        #expect(request.url == usageURL)
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "secret-token")
+        #expect(request.value(forHTTPHeaderField: "Authorization") != "Bearer secret-token")
+    }
+
+    @Test func zcodeUsageFetcherDistinguishesConfigurationAuthenticationNetworkAndMissingWeek() async throws {
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let session = URLSession(configuration: sessionConfiguration)
+        let baseConfiguration = DeckKeyCodexUsageConfiguration(
+            dataSource: .zcode,
+            zcodeConfigFilePath: "/tmp/config.json",
+            zcodeBookmarkData: Data("bookmark".utf8)
+        )
+
+        let notSelected = ZcodeUsageFetcher(
+            urlSession: session,
+            configurationFileLoader: FakeZcodeConfigurationFileLoader(result: .notSelected)
+        )
+        #expect(await notSelected.fetchUsage(configuration: baseConfiguration) == .authFileNotSelected)
+
+        let needsReselection = ZcodeUsageFetcher(
+            urlSession: session,
+            configurationFileLoader: FakeZcodeConfigurationFileLoader(result: .needsReselection)
+        )
+        #expect(await needsReselection.fetchUsage(configuration: baseConfiguration) == .authFileNeedsReselection)
+
+        let invalidJSON = ZcodeUsageFetcher(
+            urlSession: session,
+            configurationFileLoader: FakeZcodeConfigurationFileLoader(result: .success(Data("{".utf8)))
+        )
+        #expect(await invalidJSON.fetchUsage(configuration: baseConfiguration) == .invalidAuthFile)
+
+        let missingProvider = ZcodeUsageFetcher(
+            urlSession: session,
+            configurationFileLoader: FakeZcodeConfigurationFileLoader(result: .success(Data("{}".utf8)))
+        )
+        #expect(await missingProvider.fetchUsage(configuration: baseConfiguration) == .invalidConfiguration)
+
+        let configData = Data(#"{"provider":{"builtin:zai-coding-plan":{"options":{"apiKey":"token","baseURL":"https://api.z.ai/api/anthropic"}}}}"#.utf8)
+        let usageURL = try #require(ZcodeUsageFetcher.usageURL(from: "https://api.z.ai/api/anthropic"))
+        WebPageMetadataURLProtocol.setStubs([
+            usageURL: .init(statusCode: 401, mimeType: "application/json", data: Data()),
+        ])
+        let fetcher = ZcodeUsageFetcher(
+            urlSession: session,
+            configurationFileLoader: FakeZcodeConfigurationFileLoader(result: .success(configData))
+        )
+        #expect(await fetcher.fetchUsage(configuration: baseConfiguration) == .unauthorized)
+
+        let fiveHourOnly = try JSONSerialization.data(withJSONObject: [
+            "code": 200,
+            "success": true,
+            "data": ["limits": [["type": "CREDIT_LIMIT", "unit": 3, "number": 5, "percentage": 1]]],
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            usageURL: .init(statusCode: 200, mimeType: "application/json", data: fiveHourOnly),
+        ])
+        #expect(await fetcher.fetchUsage(configuration: baseConfiguration) == .missingWeeklyQuota)
+
+        WebPageMetadataURLProtocol.setStubs([:])
+        guard case .networkError = await fetcher.fetchUsage(configuration: baseConfiguration) else {
+            Issue.record("无响应时应返回网络错误")
+            return
+        }
+    }
+
+    @Test func zcodeUsageFetcherKeepsWeeklyPercentageWhenResetTimeIsMissingOrInvalid() async throws {
+        let usageURL = try #require(URL(string: "https://api.z.ai/api/monitor/usage/quota/limit"))
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let configData = Data(#"{"provider":{"builtin:zai-coding-plan":{"options":{"apiKey":"token","baseURL":"https://api.z.ai/api/anthropic"}}}}"#.utf8)
+        let fetcher = ZcodeUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            configurationFileLoader: FakeZcodeConfigurationFileLoader(result: .success(configData)),
+            now: { Date(timeIntervalSince1970: 1_789_252_803.998) }
+        )
+        let configuration = DeckKeyCodexUsageConfiguration(
+            dataSource: .zcode,
+            zcodeConfigFilePath: "/tmp/config.json",
+            zcodeBookmarkData: Data("bookmark".utf8)
+        )
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+
+        for weeklyLimit in [
+            ["type": "CREDIT_LIMIT", "unit": 6, "number": 1, "percentage": 9],
+            ["type": "CREDIT_LIMIT", "unit": 6, "number": 1, "percentage": 9, "nextResetTime": "invalid"],
+            ["type": "CREDIT_LIMIT", "unit": 6, "number": 1, "percentage": 9, "nextResetTime": true],
+            ["type": "CREDIT_LIMIT", "unit": 6, "number": 1, "percentage": 9, "nextResetTime": false],
+            ["type": "CREDIT_LIMIT", "unit": 6, "number": 1, "percentage": 9, "nextResetTime": "9223372036854775808000"],
+            ["type": "CREDIT_LIMIT", "unit": 6, "number": 1, "percentage": 9, "nextResetTime": -1],
+        ] as [[String: Any]] {
+            let responseData = try JSONSerialization.data(withJSONObject: [
+                "code": 200,
+                "success": true,
+                "data": ["limits": [weeklyLimit]],
+            ])
+            WebPageMetadataURLProtocol.setStubs([
+                usageURL: .init(statusCode: 200, mimeType: "application/json", data: responseData),
+            ])
+            #expect(await fetcher.fetchUsage(configuration: configuration) == .success(CodexUsageQuota(
+                remainingPercent: 91,
+                resetAfterSeconds: 0,
+                resetAt: nil,
+                limitWindowSeconds: 604_800,
+                usedPercent: 9
+            )))
+        }
+
+        let epochResetData = try JSONSerialization.data(withJSONObject: [
+            "code": 200,
+            "success": true,
+            "data": ["limits": [[
+                "type": "CREDIT_LIMIT",
+                "unit": 6,
+                "number": 1,
+                "percentage": 9,
+                "nextResetTime": 0,
+            ]]],
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            usageURL: .init(statusCode: 200, mimeType: "application/json", data: epochResetData),
+        ])
+        #expect(await fetcher.fetchUsage(configuration: configuration) == .success(CodexUsageQuota(
+            remainingPercent: 91,
+            resetAfterSeconds: 0,
+            resetAt: 0,
+            limitWindowSeconds: 604_800,
+            usedPercent: 9
+        )))
+    }
+
+    @Test func zcodeUsageFetcherRejectsBooleanPercentageButAcceptsNumericZeroAndOne() async throws {
+        let usageURL = try #require(URL(string: "https://api.z.ai/api/monitor/usage/quota/limit"))
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let configData = Data(#"{"provider":{"builtin:zai-coding-plan":{"options":{"apiKey":"token","baseURL":"https://api.z.ai/api/anthropic"}}}}"#.utf8)
+        let fetcher = ZcodeUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            configurationFileLoader: FakeZcodeConfigurationFileLoader(result: .success(configData))
+        )
+        let configuration = DeckKeyCodexUsageConfiguration(
+            dataSource: .zcode,
+            zcodeConfigFilePath: "/tmp/config.json",
+            zcodeBookmarkData: Data("bookmark".utf8)
+        )
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+
+        for booleanPercentage in [true, false] {
+            let data = try JSONSerialization.data(withJSONObject: [
+                "code": 200,
+                "success": true,
+                "data": ["limits": [[
+                    "type": "CREDIT_LIMIT",
+                    "unit": 6,
+                    "number": 1,
+                    "percentage": booleanPercentage,
+                ]]],
+            ])
+            WebPageMetadataURLProtocol.setStubs([
+                usageURL: .init(statusCode: 200, mimeType: "application/json", data: data),
+            ])
+            #expect(await fetcher.fetchUsage(configuration: configuration) == .missingWeeklyQuota)
+        }
+
+        for (percentage, remaining) in [(0, 100), (1, 99)] {
+            let data = try JSONSerialization.data(withJSONObject: [
+                "code": 200,
+                "success": true,
+                "data": ["limits": [[
+                    "type": "CREDIT_LIMIT",
+                    "unit": 6,
+                    "number": 1,
+                    "percentage": percentage,
+                ]]],
+            ])
+            WebPageMetadataURLProtocol.setStubs([
+                usageURL: .init(statusCode: 200, mimeType: "application/json", data: data),
+            ])
+            #expect(await fetcher.fetchUsage(configuration: configuration) == .success(CodexUsageQuota(
+                remainingPercent: remaining,
+                resetAfterSeconds: 0,
+                resetAt: nil,
+                limitWindowSeconds: 604_800,
+                usedPercent: Double(percentage)
+            )))
+        }
+    }
+
+    @Test func zcodeUsagePresentationShowsWeeklyRemainingWithoutResetTime() throws {
+        var configuration = DeckKeyConfiguration(function: .zcodeUsage)
+        configuration.codexUsage.accountNickname = " 工作账号 "
+        configuration.codexUsage.lastResult = .success(CodexUsageQuota(
+            remainingPercent: 91,
+            resetAfterSeconds: 0,
+            limitWindowSeconds: 604_800,
+            usedPercent: 9
+        ))
+        let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
+        let display = DeckKeyDisplay(key: key, configuration: configuration, isSelected: false, isPressed: false)
+
+        #expect(display.title == "91%")
+        #expect(display.subtitle == "周额度")
+        #expect(display.codexUsageButtonContent == UsageButtonContent(
+            accountNickname: "工作账号",
+            percentageText: "91%",
+            detailLabelText: "周额度",
+            detailValueText: nil,
+            percentageColor: .yellow,
+            detailValueColor: .yellow
+        ))
+    }
+
+    @Test func zcodeUsagePresentationUsesBothResetDisplayModesWhenWeeklyResetExists() throws {
+        var configuration = DeckKeyConfiguration(function: .zcodeUsage)
+        let quota = CodexUsageQuota(
+            remainingPercent: 91,
+            resetAfterSeconds: 3_600,
+            resetAt: 1_789_256_403,
+            limitWindowSeconds: 604_800,
+            usedPercent: 9
+        )
+        configuration.codexUsage.lastResult = .success(quota)
+        let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
+
+        let remainingDisplay = DeckKeyDisplay(
+            key: key,
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+        #expect(remainingDisplay.subtitle == "周额度 · 1:00")
+        #expect(remainingDisplay.codexUsageButtonContent?.detailLabelText == "周额度 · 下次重设")
+        #expect(remainingDisplay.codexUsageButtonContent?.detailValueText == "1:00")
+        #expect(remainingDisplay.codexUsageButtonContent?.detailValueColor == .red)
+
+        configuration.codexUsage.resetDisplayMode = .resetTime
+        let absoluteDisplay = DeckKeyDisplay(
+            key: key,
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+        #expect(absoluteDisplay.codexUsageButtonContent?.detailValueText == quota.resetAtText())
+        #expect(absoluteDisplay.subtitle == "周额度 · \(quota.resetAtText() ?? "")")
+    }
+
     @Test func newCodexUsageComponentDirectlySelectsDefaultAuthFileOnlyFromEmptyKey() throws {
         let homeDirectory = FileManager.default.temporaryDirectory
             .appending(path: "UlanziDeckSwiftCodexHome-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -9005,6 +9339,131 @@ struct UlanziDeckSwiftTests {
             currentFunction: DeckKeyFunction.none,
             selectedFunction: .openFile
         ))
+    }
+
+    @Test func newZcodeUsageComponentDirectlySelectsDefaultConfigWithoutCodexAuth() throws {
+        let homeDirectory = FileManager.default.temporaryDirectory
+            .appending(path: "UlanziDeckSwiftZcodeHome-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let zcodeDirectory = homeDirectory
+            .appending(path: ".zcode", directoryHint: .isDirectory)
+            .appending(path: "v2", directoryHint: .isDirectory)
+        let configFileURL = zcodeDirectory.appending(path: "config.json")
+        try FileManager.default.createDirectory(at: zcodeDirectory, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: configFileURL)
+        defer { try? FileManager.default.removeItem(at: homeDirectory) }
+
+        let previousSnapshot = CodexUsageResult.success(CodexUsageQuota(
+            remainingPercent: 70,
+            resetAfterSeconds: 600,
+            limitWindowSeconds: 18_000,
+            usedPercent: 30
+        ))
+        let existingConfiguration = DeckKeyCodexUsageConfiguration(
+            authSource: .manualJSON,
+            authFilePath: "/Users/test/.codex/auth.json",
+            bookmarkData: Data("codex-bookmark".utf8),
+            manualAuthData: "{\"tokens\":{}}",
+            accountNickname: "共同昵称",
+            refreshIntervalMinutes: 30,
+            colorMode: .lowIsRed,
+            resetDisplayMode: .resetTime,
+            lastResult: previousSnapshot
+        )
+        let configuration = try existingConfiguration.updatingToDefaultZcodeConfigFile(
+            homeDirectory: homeDirectory
+        )
+        #expect(configuration.dataSource == .zcode)
+        #expect(configuration.zcodeConfigFilePath == configFileURL.path)
+        #expect(configuration.zcodeBookmarkData != nil)
+        #expect(configuration.authSource == .manualJSON)
+        #expect(configuration.authFilePath == existingConfiguration.authFilePath)
+        #expect(configuration.bookmarkData == existingConfiguration.bookmarkData)
+        #expect(configuration.manualAuthData == existingConfiguration.manualAuthData)
+        #expect(configuration.accountNickname == "共同昵称")
+        #expect(configuration.refreshIntervalMinutes == 30)
+        #expect(configuration.colorMode == .lowIsRed)
+        #expect(configuration.resetDisplayMode == .resetTime)
+        #expect(configuration.lastResult == nil)
+        #expect(configuration.lastSuccessfulSnapshot == nil)
+        #expect(!configuration.needsReselection)
+
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        let didAssignCodex = state.assign(.codexUsage, to: 3)
+        let didSetCodex = state.setCodexUsageConfiguration(existingConfiguration, for: 3)
+        let didAssignZcode = state.assign(.zcodeUsage, to: 3)
+        let didSetZcode = state.setCodexUsageConfiguration(configuration, for: 3)
+        let didReturnToCodex = state.assign(.codexUsage, to: 3)
+        #expect(didAssignCodex)
+        #expect(didSetCodex)
+        #expect(didAssignZcode)
+        #expect(didSetZcode)
+        #expect(didReturnToCodex)
+        let restoredCodex = state.codexUsageConfiguration(for: 3)
+        #expect(state.configuration(for: 3)?.function == .codexUsage)
+        #expect(restoredCodex.dataSource == .codex)
+        #expect(restoredCodex.authFilePath == existingConfiguration.authFilePath)
+        #expect(restoredCodex.bookmarkData == existingConfiguration.bookmarkData)
+        #expect(restoredCodex.manualAuthData == existingConfiguration.manualAuthData)
+        #expect(restoredCodex.accountNickname == existingConfiguration.accountNickname)
+        #expect(restoredCodex.refreshIntervalMinutes == existingConfiguration.refreshIntervalMinutes)
+        #expect(restoredCodex.colorMode == existingConfiguration.colorMode)
+        #expect(restoredCodex.resetDisplayMode == existingConfiguration.resetDisplayMode)
+
+        #expect(ContentView.shouldAutomaticallySelectDefaultZcodeConfigFile(
+            currentFunction: .none,
+            selectedFunction: .zcodeUsage,
+            currentZcodeConfigFilePath: nil
+        ))
+        #expect(!ContentView.shouldAutomaticallySelectDefaultZcodeConfigFile(
+            currentFunction: .tally,
+            selectedFunction: .zcodeUsage,
+            currentZcodeConfigFilePath: "/tmp/custom-config.json"
+        ))
+        #expect(!ContentView.shouldAutomaticallySelectDefaultZcodeConfigFile(
+            currentFunction: .zcodeUsage,
+            selectedFunction: .zcodeUsage,
+            currentZcodeConfigFilePath: nil
+        ))
+    }
+
+    @Test func reselectingCodexAuthFilePreservesCustomZcodeConfiguration() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "UlanziDeckSwiftUsageFiles-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let zcodeURL = directory.appending(path: "zcode-config.json")
+        let codexURL = directory.appending(path: "codex-auth.json")
+        try Data("{}".utf8).write(to: zcodeURL)
+        try Data("{}".utf8).write(to: codexURL)
+
+        var configuration = try DeckKeyCodexUsageConfiguration()
+            .updatingZcodeConfigFileURL(zcodeURL)
+        let zcodePath = configuration.zcodeConfigFilePath
+        let zcodeBookmark = configuration.zcodeBookmarkData
+        configuration.dataSource = .codex
+        configuration.lastResult = .success(CodexUsageQuota(
+            remainingPercent: 70,
+            resetAfterSeconds: 60,
+            limitWindowSeconds: 300,
+            usedPercent: 30
+        ))
+        configuration.lastSuccessfulSnapshot = configuration.lastResult
+        configuration.lastSuccessfulRefreshAt = Date()
+
+        configuration = try configuration.updatingCodexAuthFileURL(codexURL)
+        #expect(configuration.authFilePath == codexURL.path)
+        #expect(configuration.bookmarkData != nil)
+        #expect(configuration.zcodeConfigFilePath == zcodePath)
+        #expect(configuration.zcodeBookmarkData == zcodeBookmark)
+        #expect(configuration.lastResult == nil)
+        #expect(configuration.lastSuccessfulSnapshot == nil)
+        #expect(configuration.lastSuccessfulRefreshAt == nil)
+
+        configuration.dataSource = .zcode
+        #expect(configuration.selectedConfigurationFilePath == zcodeURL.path)
+        #expect(configuration.selectedConfigurationBookmarkData == zcodeBookmark)
     }
 
     @Test func codexUsageConfigurationPersistsFileAccessButNotRuntimeResult() throws {
@@ -9047,6 +9506,188 @@ struct UlanziDeckSwiftTests {
         #expect(legacyConfiguration.colorMode == .highIsRed)
         #expect(legacyConfiguration.accountNickname.isEmpty)
         #expect(legacyConfiguration.resetDisplayMode == .remainingTime)
+        #expect(legacyConfiguration.dataSource == .codex)
+
+        let wholeKeyData = try JSONEncoder().encode(DeckKeyConfiguration(function: .codexUsage))
+        let wholeKeyObject = try #require(JSONSerialization.jsonObject(with: wholeKeyData) as? [String: Any])
+        #expect(wholeKeyObject["function"] as? String == "codexUsage")
+    }
+
+    @Test func legacyZcodeSourceMigratesToIndependentFunctionAndRoundTrips() throws {
+        let snapshot = CodexUsageResult.success(CodexUsageQuota(
+            remainingPercent: 64,
+            resetAfterSeconds: 3_600,
+            limitWindowSeconds: 604_800,
+            usedPercent: 36
+        ))
+        let defaultVisual = DeckKeyVisualConfiguration(
+            name: "Zcode 工作账号",
+            backgroundPNGData: Data("default-background".utf8),
+            blurredBackgroundPNGData: Data("default-blurred".utf8)
+        )
+        let customVisual = DeckKeyVisualConfiguration(
+            name: "自定义名称",
+            backgroundPNGData: Data("custom-background".utf8)
+        )
+        let usage = DeckKeyCodexUsageConfiguration(
+            dataSource: .zcode,
+            zcodeConfigFilePath: "/Users/test/.zcode/v2/config.json",
+            zcodeBookmarkData: Data("zcode-bookmark".utf8),
+            accountNickname: "工作账号",
+            refreshIntervalMinutes: 30,
+            colorMode: .lowIsRed,
+            resetDisplayMode: .resetTime,
+            visual: defaultVisual,
+            lastResult: snapshot,
+            lastSuccessfulRefreshAt: Date(timeIntervalSince1970: 123)
+        )
+        var legacy = DeckKeyConfiguration(
+            function: .zcodeUsage,
+            codexUsage: usage,
+            visual: customVisual
+        )
+        legacy.function = .codexUsage
+
+        let migrated = try JSONDecoder().decode(
+            DeckKeyConfiguration.self,
+            from: JSONEncoder().encode(legacy)
+        )
+        #expect(migrated.function == .zcodeUsage)
+        #expect(migrated.codexUsage.dataSource == .zcode)
+        #expect(migrated.codexUsage.zcodeConfigFilePath == usage.zcodeConfigFilePath)
+        #expect(migrated.codexUsage.zcodeBookmarkData == usage.zcodeBookmarkData)
+        #expect(migrated.codexUsage.accountNickname == usage.accountNickname)
+        #expect(migrated.codexUsage.visual == defaultVisual)
+        #expect(migrated.visual == customVisual)
+        #expect(migrated.codexUsage.lastResult == snapshot)
+        #expect(migrated.codexUsage.lastSuccessfulRefreshAt == usage.lastSuccessfulRefreshAt)
+
+        let roundTripped = try JSONDecoder().decode(
+            DeckKeyConfiguration.self,
+            from: JSONEncoder().encode(migrated)
+        )
+        #expect(roundTripped.function == .zcodeUsage)
+        #expect(roundTripped.codexUsage.dataSource == .zcode)
+
+        let layout = DeckGridLayout.h200Prototype
+        let normalizedState = DeckGridInteractionState(layout: layout, configurations: [3: legacy])
+        #expect(normalizedState.configuration(for: 3)?.function == .zcodeUsage)
+        #expect(normalizedState.codexUsageConfiguration(for: 3).zcodeBookmarkData == usage.zcodeBookmarkData)
+    }
+
+    @MainActor
+    @Test func usageFunctionSwitchClearsCodexSnapshotAndIgnoresItsLateResult() async throws {
+        let delayedCodex = DelayedCodexUsageFetcher()
+        let zcodeResult = CodexUsageResult.success(CodexUsageQuota(
+            remainingPercent: 91,
+            resetAfterSeconds: 0,
+            limitWindowSeconds: 1,
+            usedPercent: 9
+        ))
+        let zcodeFetcher = FakeZcodeUsageFetcher(result: zcodeResult)
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.codexUsage, to: 3)
+        loadedState.setCodexUsageConfiguration(
+            DeckKeyCodexUsageConfiguration(
+                authFilePath: "/tmp/auth.json",
+                bookmarkData: Data("bookmark".utf8),
+                zcodeConfigFilePath: "/tmp/zcode-config.json",
+                zcodeBookmarkData: Data("zcode-bookmark".utf8),
+                lastResult: .success(CodexUsageQuota(
+                    remainingPercent: 25,
+                    resetAfterSeconds: 600,
+                    limitWindowSeconds: 18_000,
+                    usedPercent: 75
+                ))
+            ),
+            for: 3
+        )
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            codexUsageFetcher: delayedCodex,
+            zcodeUsageFetcher: zcodeFetcher,
+            codexUsageRefreshMinuteDuration: 60
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil { delayedCodex.requestCount == 1 }
+        model.assignSelectedFunction(.zcodeUsage)
+        #expect(model.interactionState.configuration(for: 3)?.function == .zcodeUsage)
+        #expect(model.interactionState.codexUsageConfiguration(for: 3).lastResult == nil)
+        try await Self.waitUntil {
+            zcodeFetcher.requestCount == 1
+                && model.interactionState.codexUsageConfiguration(for: 3).lastResult == zcodeResult
+        }
+
+        delayedCodex.complete(with: .success(CodexUsageQuota(
+            remainingPercent: 12,
+            resetAfterSeconds: 60,
+            limitWindowSeconds: 18_000,
+            usedPercent: 88
+        )))
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(model.interactionState.codexUsageConfiguration(for: 3).dataSource == .zcode)
+        #expect(model.interactionState.codexUsageConfiguration(for: 3).lastResult == zcodeResult)
+    }
+
+    @MainActor
+    @Test func zcodeUsageRefreshesOnPressAndAutomaticTimerWithoutCallingCodex() async throws {
+        let result = CodexUsageResult.success(CodexUsageQuota(
+            remainingPercent: 91,
+            resetAfterSeconds: 3_600,
+            limitWindowSeconds: 604_800,
+            usedPercent: 9
+        ))
+        let codexFetcher = FakeCodexUsageFetcher(results: [], defaultResult: .networkError("测试错误"))
+        let zcodeFetcher = FakeZcodeUsageFetcher(result: result)
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.zcodeUsage, to: 3)
+        loadedState.setCodexUsageConfiguration(
+            DeckKeyCodexUsageConfiguration(
+                dataSource: .codex,
+                zcodeConfigFilePath: "/Users/test/.zcode/v2/config.json",
+                zcodeBookmarkData: Data("bookmark".utf8),
+                refreshIntervalMinutes: 1
+            ),
+            for: 3
+        )
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            codexUsageFetcher: codexFetcher,
+            zcodeUsageFetcher: zcodeFetcher,
+            codexUsageRefreshMinuteDuration: 0.2
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil { zcodeFetcher.requestCount >= 1 }
+        #expect(zcodeFetcher.requestCount == 1)
+        #expect(codexFetcher.requestCount == 0)
+        #expect(model.interactionState.codexUsageConfiguration(for: 3).dataSource == .zcode)
+        #expect(model.interactionState.codexUsageConfiguration(for: 3).lastResult == result)
+
+        model.setSelectedCodexUsageRefreshIntervalMinutes(5)
+        model.setSelectedCodexUsageColorMode(.lowIsRed)
+        model.setSelectedCodexUsageAccountNickname("Zcode 工作账号")
+        model.setSelectedCodexUsageResetDisplayMode(.resetTime)
+        let updatedConfiguration = model.interactionState.codexUsageConfiguration(for: 3)
+        #expect(updatedConfiguration.refreshIntervalMinutes == 5)
+        #expect(updatedConfiguration.colorMode == .lowIsRed)
+        #expect(updatedConfiguration.accountNickname == "Zcode 工作账号")
+        #expect(updatedConfiguration.resetDisplayMode == .resetTime)
+        model.setSelectedCodexUsageRefreshIntervalMinutes(1)
+
+        syncer.emitInput(H200InputEvent(state: 1, index: 2, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 2, type: .button, action: .release))
+        try await Self.waitUntil { zcodeFetcher.requestCount >= 2 }
+        try await Self.waitUntil { zcodeFetcher.requestCount >= 3 }
+        #expect(codexFetcher.requestCount == 0)
     }
 
     @Test func codexUsageDisplayShowsRemainingPercentAndFormattedResetTime() throws {
@@ -9727,6 +10368,75 @@ private struct FakeCodexAuthFileLoader: CodexAuthFileLoading {
         configuration: DeckKeyCodexUsageConfiguration
     ) -> CodexAuthFileLoadResult {
         result
+    }
+}
+
+private struct FakeZcodeConfigurationFileLoader: ZcodeConfigurationFileLoading {
+    let result: CodexAuthFileLoadResult
+
+    func loadConfigurationData(
+        configuration: DeckKeyCodexUsageConfiguration
+    ) -> CodexAuthFileLoadResult {
+        result
+    }
+}
+
+private final class FakeZcodeUsageFetcher: ZcodeUsageFetching, @unchecked Sendable {
+    private let lock = NSLock()
+    private let result: CodexUsageResult
+    private var storedRequestCount = 0
+
+    init(result: CodexUsageResult) {
+        self.result = result
+    }
+
+    var requestCount: Int {
+        locked { storedRequestCount }
+    }
+
+    func fetchUsage(configuration: DeckKeyCodexUsageConfiguration) async -> CodexUsageResult {
+        locked { storedRequestCount += 1 }
+        return result
+    }
+
+    private func locked<Value>(_ body: () -> Value) -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
+private final class DelayedCodexUsageFetcher: CodexUsageFetching, @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<CodexUsageResult, Never>?
+    private var storedRequestCount = 0
+
+    var requestCount: Int {
+        locked { storedRequestCount }
+    }
+
+    func fetchUsage(configuration: DeckKeyCodexUsageConfiguration) async -> CodexUsageResult {
+        await withCheckedContinuation { continuation in
+            locked {
+                storedRequestCount += 1
+                self.continuation = continuation
+            }
+        }
+    }
+
+    func complete(with result: CodexUsageResult) {
+        let pending = locked {
+            let pending = continuation
+            continuation = nil
+            return pending
+        }
+        pending?.resume(returning: result)
+    }
+
+    private func locked<Value>(_ body: () -> Value) -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
     }
 }
 

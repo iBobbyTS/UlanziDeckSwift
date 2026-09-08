@@ -846,13 +846,13 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
     }
 
     private func drawCodexUsageContent(
-        _ content: CodexUsageButtonContent,
+        _ content: UsageButtonContent,
         in rect: NSRect,
         buttonRect: NSRect
     ) {
         let percentageHeight = buttonRect.height * 0.36
         let resetLabelHeight = buttonRect.height * 0.10
-        let resetHeight = buttonRect.height * 0.16
+        let resetHeight = content.detailValueText == nil ? 0 : buttonRect.height * 0.16
         let gap = buttonRect.height * 0.012
         let nicknameHeight = buttonRect.height * 0.125
         let nicknameGap = buttonRect.height * 0.015
@@ -895,7 +895,7 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             shadow: shadow
         )
         drawCenteredAutoSizedSingleLineText(
-            content.resetLabelText,
+            content.detailLabelText,
             weight: .semibold,
             maxFontSize: buttonRect.height * 0.095,
             minFontSize: buttonRect.height * 0.075,
@@ -908,20 +908,22 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             ),
             shadow: shadow
         )
-        drawCenteredAutoSizedSingleLineText(
-            content.resetAfterText,
-            weight: .semibold,
-            maxFontSize: buttonRect.height * 0.145,
-            minFontSize: buttonRect.height * 0.09,
-            color: mihoyoGameMetricColor(for: content.resetAfterColor),
-            rect: NSRect(
-                x: rect.minX,
-                y: metricsTop - metricsHeight,
-                width: rect.width,
-                height: resetHeight
-            ),
-            shadow: shadow
-        )
+        if let detailValueText = content.detailValueText {
+            drawCenteredAutoSizedSingleLineText(
+                detailValueText,
+                weight: .semibold,
+                maxFontSize: buttonRect.height * 0.145,
+                minFontSize: buttonRect.height * 0.09,
+                color: mihoyoGameMetricColor(for: content.detailValueColor),
+                rect: NSRect(
+                    x: rect.minX,
+                    y: metricsTop - metricsHeight,
+                    width: rect.width,
+                    height: resetHeight
+                ),
+                shadow: shadow
+            )
+        }
     }
 
     private func mihoyoGameMetricColor(for color: MihoyoGameMetricColor) -> NSColor {
