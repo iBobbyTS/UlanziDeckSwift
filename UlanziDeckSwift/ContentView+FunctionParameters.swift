@@ -69,6 +69,20 @@ extension ContentView {
     var dailyReminderResetMinutesBinding: Binding<Int> {
         Binding(get: { selectedDailyReminder?.resetMinutes ?? 0 }, set: { onDailyReminderChange(nil, nil, nil, min(max(0, $0), 1439)) })
     }
+    var dailyReminderResetTimeBinding: Binding<Date> {
+        Binding(
+            get: {
+                let minutes = selectedDailyReminder?.resetMinutes ?? 0
+                let startOfToday = Calendar.current.startOfDay(for: Date())
+                return Calendar.current.date(byAdding: .minute, value: minutes, to: startOfToday) ?? startOfToday
+            },
+            set: {
+                let components = Calendar.current.dateComponents([.hour, .minute], from: $0)
+                let minutes = (components.hour ?? 0) * 60 + (components.minute ?? 0)
+                onDailyReminderChange(nil, nil, nil, minutes)
+            }
+        )
+    }
     var selectedShellBinding: Binding<String> {
         Binding(get: { selectedConfiguration?.shellCommand.shell ?? "" }, set: { if let id = interactionState.selectedKeyID { onShellConfigurationChange(id, $0, nil) } })
     }
@@ -260,7 +274,7 @@ extension ContentView {
                     if !configuration.dailyReminder.isCountUp {
                         Stepper("次数 \(configuration.dailyReminder.count)", value: dailyReminderCountBinding, in: 0...999)
                     }
-                    Stepper("重置时间（分钟）\(configuration.dailyReminder.resetMinutes)", value: dailyReminderResetMinutesBinding, in: 0...1439)
+                    DatePicker("重置时间", selection: dailyReminderResetTimeBinding, displayedComponents: [.hourAndMinute])
                     Text("当前值：\(configuration.dailyReminder.value)").foregroundStyle(.secondary)
                 }
                 Spacer()

@@ -11217,7 +11217,15 @@ private final class FakeSMBURLOpener: SMBURLOpening {
     state.assign(.dailyReminder, to: 1)
     state.updateDailyReminder(for: 1, isCountUp: true, resetMinutes: 120)
     state.triggerShortPress(keyID: 1)
+    var configured = state.configurations[1]!
+    configured.dailyReminder.lastResetDate = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: day))
+    state.configurations[1] = configured
     let valueBefore = state.configuration(for: 1)?.dailyReminder.value
     _ = state.resetDailyReminders(now: before, calendar: calendar)
     #expect(state.configuration(for: 1)?.dailyReminder.value == valueBefore)
+
+    let after = calendar.date(byAdding: .minute, value: 121, to: calendar.startOfDay(for: day))!
+    let didReset = state.resetDailyReminders(now: after, calendar: calendar)
+    #expect(didReset)
+    #expect(state.configuration(for: 1)?.dailyReminder.value == 0)
 }

@@ -1095,9 +1095,11 @@ nonisolated struct DeckGridInteractionState: Equatable {
             for keyID in page.configurations.keys where page.configurations[keyID]?.function == .dailyReminder {
                 guard var config = page.configurations[keyID] else { continue }
                 let cal = calendar
-                let components = cal.dateComponents([.year, .month, .day, .hour, .minute], from: now)
                 let dayStart = cal.startOfDay(for: now)
-                let resetDate = cal.date(byAdding: .minute, value: config.dailyReminder.resetMinutes, to: dayStart) ?? dayStart
+                var resetComponents = cal.dateComponents([.year, .month, .day], from: now)
+                resetComponents.hour = config.dailyReminder.resetMinutes / 60
+                resetComponents.minute = config.dailyReminder.resetMinutes % 60
+                let resetDate = cal.date(from: resetComponents) ?? dayStart
                 let last = config.dailyReminder.lastResetDate
                 if last == nil {
                     if now >= resetDate {
@@ -1112,7 +1114,6 @@ nonisolated struct DeckGridInteractionState: Equatable {
                     page.configurations[keyID] = config
                     changed = true
                 }
-                _ = components
             }
             pages[pageID] = page
         }
