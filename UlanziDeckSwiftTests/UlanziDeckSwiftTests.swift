@@ -1900,6 +1900,12 @@ struct UlanziDeckSwiftTests {
         #expect(zcodeConfiguration.defaultButtonBlurredBackgroundPNGData != nil)
         #expect(zcodeConfiguration.visual.usesBlurredBackground)
         #expect(zcodeConfiguration.visual.dimsBackground)
+        #expect(zcodeConfiguration.defaultButtonBackgroundPNGData != directBackground)
+        #expect(zcodeConfiguration.defaultButtonBlurredBackgroundPNGData != blurredBackground)
+        let zcodeImage = try #require(NSImage(named: "ZcodeUsageBackground"))
+        let zcodeBlurredImage = try #require(NSImage(named: "ZcodeUsageBackgroundBlurred"))
+        #expect(zcodeConfiguration.defaultButtonBackgroundPNGData == FileIconSnapshot.pngData(for: zcodeImage))
+        #expect(zcodeConfiguration.selectedButtonBackgroundPNGData == FileIconSnapshot.pngData(for: zcodeBlurredImage))
     }
 
     @Test func connectSMBServerFunctionDisplaysNameAndPersistsNormalizedAddress() {

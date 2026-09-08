@@ -7,6 +7,19 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return visualFromSystemSymbol(named: symbolName)
         }
 
+        if function == .zcodeUsage {
+            guard let sourceImage = NSImage(named: "ZcodeUsageBackground"),
+                  let blurredImage = NSImage(named: "ZcodeUsageBackgroundBlurred"),
+                  let sourceData = FileIconSnapshot.pngData(for: sourceImage),
+                  let blurredData = FileIconSnapshot.pngData(for: blurredImage) else {
+                return nil
+            }
+            return DeckKeyVisualConfiguration(
+                backgroundPNGData: sourceData,
+                blurredBackgroundPNGData: blurredData
+            )
+        }
+
         guard let sourceAssetName = sourceAssetName(for: function),
               let sourceImage = NSImage(named: NSImage.Name(sourceAssetName)),
               let snapshot = FileIconSnapshot.snapshotData(for: sourceImage)
@@ -26,8 +39,10 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "FolderBackground"
         case .connectSMBServer:
             return "SMBServerBackground"
-        case .codexUsage, .zcodeUsage:
+        case .codexUsage:
             return "CodexUsageBackground"
+        case .zcodeUsage:
+            return "ZcodeUsageBackground"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return function.game?.buttonBackgroundAssetName
         case .none, .tally, .dailyReminder, .openFile, .openWebPage, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
