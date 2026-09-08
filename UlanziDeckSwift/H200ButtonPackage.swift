@@ -405,27 +405,61 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             return
         }
         if let content = display.folderButtonContent {
-            drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
+            drawShortcutContent(
+                content.displayName,
+                in: cardRect,
+                buttonRect: rect,
+                shouldRenderDisplayName: display.buttonVisualContent.hasCustomDisplayName
+            )
             return
         }
         if let content = display.fileButtonContent {
-            drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
+            drawShortcutContent(
+                content.displayName,
+                in: cardRect,
+                buttonRect: rect,
+                shouldRenderDisplayName: display.buttonVisualContent.hasCustomDisplayName
+            )
             return
         }
         if let content = display.webPageButtonContent {
-            drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
+            drawShortcutContent(
+                content.displayName,
+                in: cardRect,
+                buttonRect: rect,
+                shouldRenderDisplayName: display.buttonVisualContent.hasCustomDisplayName
+            )
             return
         }
         if let content = display.smbServerButtonContent {
-            drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
+            drawShortcutContent(
+                content.displayName,
+                in: cardRect,
+                buttonRect: rect,
+                shouldRenderDisplayName: display.buttonVisualContent.hasCustomDisplayName
+            )
             return
         }
         if let content = display.pageFolderButtonContent {
-            drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
+            drawShortcutContent(
+                content.displayName,
+                in: cardRect,
+                buttonRect: rect,
+                shouldRenderDisplayName: display.buttonVisualContent.hasCustomDisplayName
+            )
             return
         }
         if let content = display.pageBackButtonContent {
-            drawShortcutContent(content.displayName, in: cardRect, buttonRect: rect)
+            drawShortcutContent(
+                content.displayName,
+                in: cardRect,
+                buttonRect: rect,
+                shouldRenderDisplayName: display.buttonVisualContent.hasCustomDisplayName
+            )
+            return
+        }
+
+        guard display.buttonVisualContent.hasCustomDisplayName else {
             return
         }
 
@@ -569,8 +603,13 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
     private func drawShortcutContent(
         _ displayName: String,
         in rect: NSRect,
-        buttonRect: NSRect
+        buttonRect: NSRect,
+        shouldRenderDisplayName: Bool = true
     ) {
+        guard shouldRenderDisplayName, !displayName.isEmpty else {
+            return
+        }
+
         drawCenteredAutoSizedSingleLineText(
             displayName,
             weight: .heavy,

@@ -7834,6 +7834,46 @@ struct UlanziDeckSwiftTests {
         #expect(color.alphaComponent > 0.999)
     }
 
+    @Test func iconRendererDoesNotDrawFallbackNameWhenDisplayNameIsEmpty() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.openFolder, to: 2)
+        state.setFolderConfiguration(Self.folderConfiguration(
+            path: "/Users/ibobby/Documents",
+            backgroundPNGData: Self.solidColorIconPNGData(color: .black)
+        ), for: 2)
+        state.setButtonVisualDimmingEnabled(false, for: 2)
+        let display = state.display(for: layout.keys[1])
+
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+
+        #expect(display.folderButtonContent?.displayName == "Documents")
+        #expect(display.buttonVisualContent.hasCustomDisplayName == false)
+        #expect(Self.brightPixelBounds(in: image) == nil)
+    }
+
+    @Test func iconRendererDoesNotDrawFallbackNextPageNameWhenDisplayNameIsEmpty() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        state.assign(.nextPage, to: 2)
+        state.setButtonVisualConfiguration(
+            DeckKeyVisualConfiguration(
+                backgroundPNGData: Self.solidColorIconPNGData(color: .black),
+                dimsBackground: false
+            ),
+            for: 2
+        )
+        let display = state.display(for: layout.keys[1])
+
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+
+        #expect(display.title == "下一页")
+        #expect(display.buttonVisualContent.hasCustomDisplayName == false)
+        #expect(Self.brightPixelBounds(in: image) == nil)
+    }
+
     @Test func iconRendererUsesPageFolderBackgroundAndDisplayName() throws {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)
