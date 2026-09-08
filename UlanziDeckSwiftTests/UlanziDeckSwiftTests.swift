@@ -4348,6 +4348,7 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil { model.syncSummary != nil }
         try await Self.waitUntil {
             fetcher.dailyCostRequests.count >= 2
                 && model.interactionState.sub2APIDailyCostConfiguration(for: 3).lastResult
@@ -4664,6 +4665,7 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil { model.syncSummary != nil }
         try await Self.waitUntil {
             fetcher.balanceRequests.count >= 2
                 && model.interactionState.sub2APIBalanceConfiguration(for: 3).lastResult
@@ -5276,6 +5278,7 @@ struct UlanziDeckSwiftTests {
         )
 
         model.checkOnLaunch()
+        try await Self.waitUntil { model.syncSummary != nil }
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
