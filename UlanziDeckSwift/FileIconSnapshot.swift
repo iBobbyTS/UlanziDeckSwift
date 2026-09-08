@@ -17,7 +17,8 @@ extension FileIconSnapshotData: Equatable {
 
 nonisolated enum FileIconSnapshot {
     static let targetLongEdge = 512
-    private static let blurRadius = 14.0
+    static let defaultBlurRadius = 14.0
+    static let maximumBlurRadius = 30.0
     private static let ciContext = CIContext()
 
     static func snapshotData(for fileURL: URL) -> FileIconSnapshotData? {
@@ -27,7 +28,7 @@ nonisolated enum FileIconSnapshot {
 
     static func snapshotData(for image: NSImage, targetLongEdge: Int = targetLongEdge) -> FileIconSnapshotData? {
         guard let iconPNGData = pngData(for: image, targetLongEdge: targetLongEdge),
-              let blurredIconPNGData = blurredPNGData(for: image, targetLongEdge: targetLongEdge)
+              let blurredIconPNGData = blurredPNGData(for: image, targetLongEdge: targetLongEdge, radius: defaultBlurRadius)
         else {
             return nil
         }
@@ -58,7 +59,7 @@ nonisolated enum FileIconSnapshot {
         )
     }
 
-    private static func blurredPNGData(for image: NSImage, targetLongEdge: Int) -> Data? {
+    static func blurredPNGData(for image: NSImage, targetLongEdge: Int = targetLongEdge, radius: Double) -> Data? {
         guard let imageSize = normalizedImageSize(for: image) else {
             return nil
         }
@@ -71,7 +72,7 @@ nonisolated enum FileIconSnapshot {
         let sourceImage = CIImage(cgImage: sourceCGImage)
         let filter = CIFilter.gaussianBlur()
         filter.inputImage = sourceImage
-        filter.radius = Float(blurRadius)
+        filter.radius = Float(max(0, radius))
         guard let outputImage = filter.outputImage?.cropped(to: sourceImage.extent),
               let blurredCGImage = ciContext.createCGImage(outputImage, from: sourceImage.extent)
         else {

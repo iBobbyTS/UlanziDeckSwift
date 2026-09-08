@@ -1001,22 +1001,39 @@ extension ContentView {
                 }
             }
 
-            HStack(spacing: 6) {
-                Button {
-                    updateSelectedButtonVisual { updatedVisual in
-                        updatedVisual.usesBlurredBackground.toggle()
-                    }
-                } label: {
-                    Label("高斯模糊", systemImage: visual.usesBlurredBackground ? "checkmark.circle.fill" : "circle")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(visual.usesBlurredBackground ? .accentColor : .secondary)
+            HStack(spacing: 8) {
+                Text("模糊")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Slider(
+                    value: Binding(
+                        get: { Double(visual.blurPercent) },
+                        set: { value in
+                            updateSelectedButtonVisual { updatedVisual in
+                                updatedVisual.blurPercent = DeckKeyVisualConfiguration.clampedBlurPercent(Int(value.rounded()))
+                                updatedVisual.blurredBackgroundPNGData = blurredBackgroundData(
+                                    for: updatedVisual.backgroundPNGData ?? configuration.defaultButtonBackgroundPNGData,
+                                    radius: updatedVisual.blurRadius
+                                )
+                            }
+                        }
+                    ),
+                    in: 0...100
+                )
+                .frame(maxWidth: .infinity)
+                .focusable(false)
+                .focusEffectDisabled()
                 .disabled(!configuration.buttonVisualCanUseBlurredBackground)
-                .help(configuration.buttonVisualCanUseBlurredBackground ? "切换背景的高斯模糊版本" : "替换背景或选择带图标的文件后可用")
-                .accessibilityLabel("高斯模糊")
-                .accessibilityValue(visual.usesBlurredBackground ? "已开启" : "已关闭")
+                .accessibilityLabel("模糊")
+                .accessibilityValue("\(visual.blurPercent)%")
+
+                Text("\(visual.blurPercent)%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 34, alignment: .trailing)
             }
+            .help(configuration.buttonVisualCanUseBlurredBackground ? "设置背景的高斯模糊强度" : "替换背景或选择带图标的文件后可用")
 
             HStack(spacing: 8) {
                 Text("亮度")
@@ -1571,6 +1588,16 @@ extension ContentView {
             visual.usesBlurredBackground = false
         }
         onButtonVisualChange(selectedKeyID, visual)
+    }
+
+    func blurredBackgroundData(for data: Data?, radius: Double) -> Data? {
+        guard radius > 0 else {
+            return data
+        }
+        guard let data, let image = NSImage(data: data) else {
+            return nil
+        }
+        return FileIconSnapshot.blurredPNGData(for: image, radius: radius)
     }
 
     func chooseFolder() {

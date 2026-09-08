@@ -1946,6 +1946,20 @@ struct UlanziDeckSwiftTests {
         #expect(state.configuration(for: 3)?.visual.backgroundOpacityPercent == 80)
     }
 
+    @Test func buttonBlurSliderMapsPercentToRadiusAndMigratesLegacyEnabledState() throws {
+        var visual = DeckKeyVisualConfiguration(blurPercent: 0)
+        #expect(visual.blurPercent == 0)
+        #expect(visual.blurRadius == 0)
+
+        visual.blurPercent = 100
+        #expect(visual.blurRadius == 30)
+
+        let legacyData = Data("{\"name\":\"\",\"usesBlurredBackground\":true}".utf8)
+        let migrated = try JSONDecoder().decode(DeckKeyVisualConfiguration.self, from: legacyData)
+        #expect(migrated.blurPercent == DeckKeyVisualConfiguration.defaultBlurPercent)
+        #expect(migrated.blurRadius == 14)
+    }
+
     @Test func connectSMBServerFunctionDisplaysNameAndPersistsNormalizedAddress() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)

@@ -429,8 +429,15 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
     var name: String
     var backgroundPNGData: Data?
     var blurredBackgroundPNGData: Data?
-    var usesBlurredBackground: Bool
+    var blurPercent: Int
     var dimmingPercent: Int
+
+    var usesBlurredBackground: Bool {
+        get { blurPercent > 0 }
+        set { blurPercent = newValue ? Self.defaultBlurPercent : 0 }
+    }
+
+    static let defaultBlurPercent = Int((FileIconSnapshot.defaultBlurRadius / FileIconSnapshot.maximumBlurRadius * 100).rounded())
 
     var dimsBackground: Bool {
         get { dimmingPercent > 0 }
@@ -448,6 +455,7 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
         backgroundPNGData: Data? = nil,
         blurredBackgroundPNGData: Data? = nil,
         usesBlurredBackground: Bool = false,
+        blurPercent: Int? = nil,
         dimsBackground: Bool = true,
         dimmingPercent: Int? = nil
     ) {
@@ -455,7 +463,7 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
         self.backgroundPNGData = backgroundPNGData
         self.blurredBackgroundPNGData = blurredBackgroundPNGData
         self.dimmingPercent = Self.clampedDimmingPercent(dimmingPercent ?? (dimsBackground ? Self.defaultDimmingPercent : 0))
-        self.usesBlurredBackground = usesBlurredBackground
+        self.blurPercent = Self.clampedBlurPercent(blurPercent ?? (usesBlurredBackground ? Self.defaultBlurPercent : 0))
     }
 
     var canUseBlurredBackground: Bool {
@@ -483,6 +491,7 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
         case backgroundPNGData
         case blurredBackgroundPNGData
         case usesBlurredBackground
+        case blurPercent
         case dimsBackground
         case dimmingPercent
     }
@@ -492,7 +501,13 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
         name = Self.normalizedName(try container.decodeIfPresent(String.self, forKey: .name) ?? "")
         backgroundPNGData = try container.decodeIfPresent(Data.self, forKey: .backgroundPNGData)
         blurredBackgroundPNGData = try container.decodeIfPresent(Data.self, forKey: .blurredBackgroundPNGData)
-        usesBlurredBackground = try container.decodeIfPresent(Bool.self, forKey: .usesBlurredBackground) ?? false
+        if let blurPercent = try container.decodeIfPresent(Int.self, forKey: .blurPercent) {
+            self.blurPercent = Self.clampedBlurPercent(blurPercent)
+        } else {
+            self.blurPercent = (try container.decodeIfPresent(Bool.self, forKey: .usesBlurredBackground) ?? false)
+                ? Self.defaultBlurPercent
+                : 0
+        }
         if let dimmingPercent = try container.decodeIfPresent(Int.self, forKey: .dimmingPercent) {
             self.dimmingPercent = Self.clampedDimmingPercent(dimmingPercent)
         } else {
@@ -508,6 +523,7 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
         try container.encodeIfPresent(backgroundPNGData, forKey: .backgroundPNGData)
         try container.encodeIfPresent(blurredBackgroundPNGData, forKey: .blurredBackgroundPNGData)
         try container.encode(usesBlurredBackground, forKey: .usesBlurredBackground)
+        try container.encode(blurPercent, forKey: .blurPercent)
         try container.encode(dimsBackground, forKey: .dimsBackground)
         try container.encode(dimmingPercent, forKey: .dimmingPercent)
     }
@@ -518,6 +534,14 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
 
     static func clampedDimmingPercent(_ value: Int) -> Int {
         min(100, max(0, value))
+    }
+
+    static func clampedBlurPercent(_ value: Int) -> Int {
+        min(100, max(0, value))
+    }
+
+    var blurRadius: Double {
+        Double(blurPercent) / 100 * FileIconSnapshot.maximumBlurRadius
     }
 }
 
@@ -2348,15 +2372,14 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
     }
 
     var selectedButtonBackgroundPNGData: Data? {
-        if visual.hasCustomBackground {
-            return visual.selectedBackgroundPNGData
-        }
-
         if visual.usesBlurredBackground {
-            return defaultButtonBlurredBackgroundPNGData ?? defaultButtonBackgroundPNGData
+            return visual.blurredBackgroundPNGData
+                ?? (visual.hasCustomBackground ? visual.backgroundPNGData : nil)
+                ?? defaultButtonBlurredBackgroundPNGData
+                ?? defaultButtonBackgroundPNGData
         }
 
-        return defaultButtonBackgroundPNGData
+        return visual.hasCustomBackground ? visual.backgroundPNGData : defaultButtonBackgroundPNGData
     }
 
     var defaultButtonBackgroundPNGData: Data? {
