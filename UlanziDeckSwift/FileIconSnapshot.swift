@@ -38,15 +38,24 @@ nonisolated enum FileIconSnapshot {
         )
     }
 
-    static func pngData(for image: NSImage, targetLongEdge: Int = targetLongEdge) -> Data? {
+    static func pngData(
+        for image: NSImage,
+        targetLongEdge: Int = targetLongEdge,
+        brightness: Double = 1
+    ) -> Data? {
         guard targetLongEdge > 0,
-              let imageSize = normalizedImageSize(for: image)
+              let imageSize = normalizedImageSize(for: image),
+              brightness.isFinite
         else {
             return nil
         }
 
         let pixelSize = pixelSize(for: imageSize, targetLongEdge: targetLongEdge)
-        return renderPNGData(for: image, pixelSize: pixelSize)
+        return renderPNGData(
+            for: image,
+            pixelSize: pixelSize,
+            brightness: min(1, max(0, brightness))
+        )
     }
 
     private static func blurredPNGData(for image: NSImage, targetLongEdge: Int) -> Data? {
@@ -73,12 +82,24 @@ nonisolated enum FileIconSnapshot {
         return renderPNGData(for: blurredImage, pixelSize: pixelSize)
     }
 
-    private static func renderPNGData(for image: NSImage, pixelSize: NSSize) -> Data? {
+    private static func renderPNGData(
+        for image: NSImage,
+        pixelSize: NSSize,
+        brightness: Double = 1
+    ) -> Data? {
         guard let rep = bitmapImageRep(pixelSize: pixelSize) else {
             return nil
         }
 
         draw(image, in: rep)
+        if brightness < 1 {
+            NSGraphicsContext.saveGraphicsState()
+            let context = NSGraphicsContext(bitmapImageRep: rep)
+            NSGraphicsContext.current = context
+            NSColor(calibratedWhite: 0, alpha: 1 - brightness).setFill()
+            NSRect(origin: .zero, size: pixelSize).fill()
+            NSGraphicsContext.restoreGraphicsState()
+        }
         return rep.representation(using: .png, properties: [:])
     }
 

@@ -10,8 +10,8 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
         if function == .zcodeUsage {
             guard let sourceImage = NSImage(named: "ZcodeUsageBackground"),
                   let blurredImage = NSImage(named: "ZcodeUsageBackgroundBlurred"),
-                  let sourceData = FileIconSnapshot.pngData(for: sourceImage),
-                  let blurredData = FileIconSnapshot.pngData(for: blurredImage) else {
+                  let sourceData = FileIconSnapshot.pngData(for: sourceImage, brightness: 0.2),
+                  let blurredData = FileIconSnapshot.pngData(for: blurredImage, brightness: 0.2) else {
                 return nil
             }
             return DeckKeyVisualConfiguration(

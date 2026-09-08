@@ -1904,8 +1904,31 @@ struct UlanziDeckSwiftTests {
         #expect(zcodeConfiguration.defaultButtonBlurredBackgroundPNGData != blurredBackground)
         let zcodeImage = try #require(NSImage(named: "ZcodeUsageBackground"))
         let zcodeBlurredImage = try #require(NSImage(named: "ZcodeUsageBackgroundBlurred"))
-        #expect(zcodeConfiguration.defaultButtonBackgroundPNGData == FileIconSnapshot.pngData(for: zcodeImage))
-        #expect(zcodeConfiguration.selectedButtonBackgroundPNGData == FileIconSnapshot.pngData(for: zcodeBlurredImage))
+        #expect(zcodeConfiguration.defaultButtonBackgroundPNGData == FileIconSnapshot.pngData(for: zcodeImage, brightness: 0.2))
+        #expect(zcodeConfiguration.selectedButtonBackgroundPNGData == FileIconSnapshot.pngData(for: zcodeBlurredImage, brightness: 0.2))
+    }
+
+    @Test func zcodePreRenderedBackgroundUsesTwentyPercentBrightness() throws {
+        let image = NSImage(size: NSSize(width: 32, height: 32))
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: 32, height: 32).fill()
+        image.unlockFocus()
+
+        let brightData = try #require(FileIconSnapshot.pngData(for: image))
+        let dimmedData = try #require(FileIconSnapshot.pngData(for: image, brightness: 0.2))
+        let brightImage = try #require(NSBitmapImageRep(data: brightData))
+        let dimmedImage = try #require(NSBitmapImageRep(data: dimmedData))
+        let brightColor = try #require(brightImage.colorAt(x: 16, y: 16)?.usingColorSpace(.deviceRGB))
+        let dimmedColor = try #require(dimmedImage.colorAt(x: 16, y: 16)?.usingColorSpace(.deviceRGB))
+
+        // CoreGraphics 的 Device RGB 转换会让白色黑色叠加后的采样值略高于
+        // 理论值；亮度应明显落在 20% 附近，而不是原始 100%。
+        #expect(dimmedColor.redComponent > 0.1)
+        #expect(dimmedColor.redComponent < 0.35)
+        #expect(abs(dimmedColor.redComponent - dimmedColor.greenComponent) < 0.01)
+        #expect(abs(dimmedColor.greenComponent - dimmedColor.blueComponent) < 0.01)
+        #expect(brightColor.redComponent > dimmedColor.redComponent * 3)
     }
 
     @Test func connectSMBServerFunctionDisplaysNameAndPersistsNormalizedAddress() {

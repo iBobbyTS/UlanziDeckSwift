@@ -37,7 +37,7 @@ Codex 读取用户选择的 `auth.json`，查询 ChatGPT Codex 的主额度窗�
 
 ## 显示与刷新
 
-- Zcode 使用独立内置图标背景，原图复制自 ZCode.app 的 `Contents/Resources/icon_windows.png`；模糊资源沿用 `FileIconSnapshot` 的 512 像素长边、半径 14 高斯模糊参数预生成。默认开启模糊和调暗，仍支持原有背景设置。
+- Zcode 使用独立内置图标背景，原图复制自 ZCode.app 的 `Contents/Resources/icon_windows.png`；模糊资源沿用 `FileIconSnapshot` 的 512 像素长边、半径 14 高斯模糊参数预生成，预渲染原图和模糊图均使用 20% 亮度。默认开启模糊和调暗，仍支持原有背景设置。
 - Codex 单窗口继续使用原有百分比、重置标签和时间布局，只解析 `primary_window`。
 - Zcode 双窗口从上到下显示可选账号昵称、`5h <百分比>%`、五小时时间、`7d <百分比>%`、七天时间；空白昵称不占行。单窗口快照继续使用原有单窗口布局，并标明实际窗口。
 - “剩余时间”模式将各窗口的倒计时格式化为 `<天>天 H:MM`；不足一天时显示 `H:MM`，不足一小时仍保留 `0:MM`。“重置时间”模式分别显示各窗口自己的本地月日和时间。
