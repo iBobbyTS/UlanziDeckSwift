@@ -43,7 +43,7 @@ struct ContentView: View {
     let onKeyNavigation: (Int) -> Void
     let onKeyFunctionDeletion: (Int) -> Void
     let onKeyDisplayModeSelection: (Int, DeckKeyDisplayMode) -> Void
-    let onKeySwap: (Int, Int) -> Void
+    let onKeySwap: (String, Int, String, Int) -> Void
     let onRootPageAddition: () -> Void
     let onRootPageSelection: (String) -> Void
     let onRootPageDeletion: () -> Void
@@ -309,7 +309,8 @@ struct ContentView: View {
                     ForEach(row) { key in
                         DeckKeyButton(
                             display: interactionState.display(for: key),
-                            metrics: previewGridMetrics
+                            metrics: previewGridMetrics,
+                            pageID: interactionState.currentPageID
                         ) {
                             onKeySelection(key.id)
                         } navigationAction: {
@@ -318,8 +319,8 @@ struct ContentView: View {
                             onKeyFunctionDeletion(key.id)
                         } displayModeSelectionAction: { displayMode in
                             onKeyDisplayModeSelection(key.id, displayMode)
-                        } swapAction: { sourceKeyID, targetKeyID in
-                            onKeySwap(sourceKeyID, targetKeyID)
+                        } swapAction: { sourcePageID, sourceKeyID, targetKeyID in
+                            onKeySwap(sourcePageID, sourceKeyID, interactionState.currentPageID, targetKeyID)
                         }
                     }
                 }
@@ -354,7 +355,15 @@ struct ContentView: View {
                 )) { element in
                     switch element {
                     case let .page(item):
-                        rootPageSelectorItem(item)
+                        RootPageDropTarget(
+                            item: item,
+                            onSelect: onRootPageSelection,
+                            onDelete: {
+                                if item.canDelete {
+                                    confirmCurrentRootPageDeletion()
+                                }
+                            }
+                        )
                     case .addition:
                         Button(action: onRootPageAddition) {
                             Image(systemName: "plus")
@@ -388,39 +397,14 @@ struct ContentView: View {
         }
         .padding(2)
         .frame(height: pageSelectorHeight)
-        .background(Color(nsColor: .controlBackgroundColor), in: Capsule())
+        .background(Color(nsColor: .controlBackgroundColor))
+        .mask(Capsule())
     }
 
     nonisolated static func rootPageSelectorElements(
         from items: [RootPageNavigationItem]
     ) -> [RootPageSelectorElement] {
         items.map(RootPageSelectorElement.page) + [.addition]
-    }
-
-    private func rootPageSelectorItem(_ item: RootPageNavigationItem) -> some View {
-        Button {
-            onRootPageSelection(item.id)
-        } label: {
-            Text(item.title)
-                .font(.caption.weight(item.isCurrent ? .bold : .semibold))
-                .foregroundStyle(item.isCurrent ? Color.white : Color.secondary)
-                .padding(.horizontal, 9)
-                .frame(minWidth: 32, minHeight: 22)
-                .background(item.isCurrent ? Color.accentColor : Color.clear, in: Capsule())
-                .contentShape(Capsule())
-        }
-            .buttonStyle(.plain)
-            .contextMenu {
-                if item.canDelete {
-                    Button(role: .destructive) {
-                        confirmCurrentRootPageDeletion()
-                    } label: {
-                        Label("删除当前页面", systemImage: "trash")
-                    }
-                }
-            }
-            .accessibilityLabel("页面 \(item.title)")
-            .accessibilityValue(item.isCurrent ? "当前页面" : "未选中")
     }
 
     private func confirmCurrentRootPageDeletion() {
@@ -662,14 +646,64 @@ private struct FunctionRow: View {
     }
 }
 
+private struct RootPageDropTarget: View {
+    let item: RootPageNavigationItem
+    let onSelect: (String) -> Void
+    let onDelete: (() -> Void)?
+
+    @State private var isDropTargeted = false
+    @State private var pendingSwitch: DispatchWorkItem?
+
+    var body: some View {
+        Button {
+            onSelect(item.id)
+        } label: {
+            Text(item.title)
+                .font(.caption.weight(item.isCurrent ? .bold : .semibold))
+                .foregroundStyle(item.isCurrent ? Color.white : Color.secondary)
+                .padding(.horizontal, 9)
+                .frame(minWidth: 32, minHeight: 22)
+                .background(item.isCurrent ? Color.accentColor : (isDropTargeted ? Color.accentColor.opacity(0.25) : Color.clear), in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if let onDelete {
+                Button(role: .destructive, action: onDelete) {
+                    Label("删除当前页面", systemImage: "trash")
+                }
+            }
+        }
+        .onDrop(of: [UTType.text], isTargeted: $isDropTargeted) { _ in
+            pendingSwitch?.cancel()
+            pendingSwitch = nil
+            return true
+        }
+        .onChange(of: isDropTargeted) { _, targeted in
+            pendingSwitch?.cancel()
+            pendingSwitch = nil
+            guard targeted, !item.isCurrent else { return }
+
+            let workItem = DispatchWorkItem {
+                onSelect(item.id)
+            }
+            pendingSwitch = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: workItem)
+        }
+        .accessibilityLabel("页面 \(item.title)")
+        .accessibilityValue(item.isCurrent ? "当前页面" : "未选中")
+    }
+}
+
 private struct DeckKeyButton: View {
     let display: DeckKeyDisplay
     let metrics: DeckPreviewGridMetrics
+    let pageID: String
     let action: () -> Void
     let navigationAction: () -> Void
     let deleteAction: () -> Void
     let displayModeSelectionAction: (DeckKeyDisplayMode) -> Void
-    let swapAction: (Int, Int) -> Void
+    let swapAction: (String, Int, Int) -> Void
 
     @State private var isHovered = false
 
@@ -718,6 +752,7 @@ private struct DeckKeyButton: View {
         .accessibilityValue(accessibilityValue)
         .modifier(SquareKeyDragSwapModifier(
             isEnabled: display.canDrag,
+            pageID: pageID,
             keyID: display.id,
             swapAction: swapAction
         ))
@@ -772,8 +807,9 @@ private struct DeckKeyButton: View {
 
 private struct SquareKeyDragSwapModifier: ViewModifier {
     let isEnabled: Bool
+    let pageID: String
     let keyID: Int
-    let swapAction: (Int, Int) -> Void
+    let swapAction: (String, Int, Int) -> Void
 
     @State private var isDropTargeted = false
 
@@ -790,7 +826,7 @@ private struct SquareKeyDragSwapModifier: ViewModifier {
                         .allowsHitTesting(false)
                 }
                 .onDrag {
-                    NSItemProvider(object: "\(keyID)" as NSString)
+                    NSItemProvider(object: "\(pageID)|\(keyID)" as NSString)
                 }
                 .onDrop(of: [UTType.text], isTargeted: $isDropTargeted) { providers in
                     guard let provider = providers.first(where: { $0.canLoadObject(ofClass: NSString.self) }) else {
@@ -799,14 +835,16 @@ private struct SquareKeyDragSwapModifier: ViewModifier {
 
                     provider.loadObject(ofClass: NSString.self) { object, _ in
                         guard let value = object as? NSString,
-                              let sourceKeyID = Int(value as String),
+                              let parts = Optional((value as String).split(separator: "|", maxSplits: 1)),
+                              parts.count == 2,
+                              let sourceKeyID = Int(parts[1]),
                               sourceKeyID != keyID
                         else {
                             return
                         }
 
                         DispatchQueue.main.async {
-                            swapAction(sourceKeyID, keyID)
+                            swapAction(String(parts[0]), sourceKeyID, keyID)
                         }
                     }
                     return true
@@ -913,7 +951,7 @@ struct MihoyoQRCodeView: View {
         onKeyNavigation: { _ in },
         onKeyFunctionDeletion: { _ in },
         onKeyDisplayModeSelection: { _, _ in },
-        onKeySwap: { _, _ in },
+        onKeySwap: { _, _, _, _ in },
         onRootPageAddition: {},
         onRootPageSelection: { _ in },
         onRootPageDeletion: {},

@@ -28,8 +28,13 @@ struct RootView: View {
             onKeyDisplayModeSelection: { keyID, displayMode in
                 connectionModel.setKeyDisplayMode(displayMode, for: keyID)
             },
-            onKeySwap: { sourceKeyID, targetKeyID in
-                connectionModel.swapSquareKeyConfigurations(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID)
+            onKeySwap: { sourcePageID, sourceKeyID, targetPageID, targetKeyID in
+                connectionModel.swapSquareKeyConfigurations(
+                    sourcePageID: sourcePageID,
+                    sourceKeyID: sourceKeyID,
+                    targetPageID: targetPageID,
+                    targetKeyID: targetKeyID
+                )
             },
             onRootPageAddition: {
                 connectionModel.addRootPageAfterCurrent()

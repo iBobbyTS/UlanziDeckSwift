@@ -446,6 +446,34 @@ struct UlanziDeckSwiftTests {
         #expect(swappedSecond.lastSuccessfulRefreshAt == firstTimestamp)
     }
 
+    @Test func swappingSquareConfigurationsAcrossRootPagesMovesBothFunctions() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        let firstPageID = state.currentPageID
+        let didAddPage = state.addRootPageAfterCurrent()
+        #expect(didAddPage)
+        let secondPageID = state.currentPageID
+
+        let didAssignFolder = state.assign(.openFolder, to: 3)
+        #expect(didAssignFolder)
+        let didReturnToFirstPage = state.goToRootPage(id: firstPageID)
+        #expect(didReturnToFirstPage)
+        let didAssignTally = state.assign(.tally, to: 4)
+        #expect(didAssignTally)
+
+        let didSwap = state.swapSquareConfigurations(
+            sourcePageID: firstPageID,
+            sourceKeyID: 4,
+            targetPageID: secondPageID,
+            targetKeyID: 3
+        )
+        #expect(didSwap)
+
+        #expect(state.configuration(for: 4)?.function == .openFolder)
+        let didGoToSecondPage = state.goToRootPage(id: secondPageID)
+        #expect(didGoToSecondPage)
+        #expect(state.configuration(for: 3)?.function == .tally)
+    }
+
     @Test func newAPINetworkErrorKeepsSuccessfulSnapshotAndConfigurationInvalidationClearsIt() throws {
         var state = DeckGridInteractionState(layout: .h200Prototype)
         state.assign(.newAPIModelAvailability, to: 3)

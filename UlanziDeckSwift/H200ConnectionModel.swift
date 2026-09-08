@@ -381,29 +381,71 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     func swapSquareKeyConfigurations(sourceKeyID: Int, targetKeyID: Int) {
-        guard interactionState.canSwapSquareConfigurations(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID) else {
+        swapSquareKeyConfigurations(
+            sourcePageID: interactionState.currentPageID,
+            sourceKeyID: sourceKeyID,
+            targetPageID: interactionState.currentPageID,
+            targetKeyID: targetKeyID
+        )
+    }
+
+    func swapSquareKeyConfigurations(
+        sourcePageID: String,
+        sourceKeyID: Int,
+        targetPageID: String,
+        targetKeyID: Int
+    ) {
+        guard interactionState.canSwapSquareConfigurations(
+            sourcePageID: sourcePageID,
+            sourceKeyID: sourceKeyID,
+            targetPageID: targetPageID,
+            targetKeyID: targetKeyID
+        ) else {
             return
         }
 
-        let pageID = interactionState.currentPageID
-        _ = ensureRuntimeInstance(for: sourceKeyID)
-        _ = ensureRuntimeInstance(for: targetKeyID)
-        cancelLongPressRuntime(for: sourceKeyID)
-        cancelLongPressRuntime(for: targetKeyID)
+        if sourcePageID == interactionState.currentPageID { _ = ensureRuntimeInstance(for: sourceKeyID) }
+        if targetPageID == interactionState.currentPageID { _ = ensureRuntimeInstance(for: targetKeyID) }
+        let sourceInstanceID = runtimeInstanceID(for: sourceKeyID, pageID: sourcePageID)
+        let targetInstanceID = runtimeInstanceID(for: targetKeyID, pageID: targetPageID)
+        if sourcePageID == interactionState.currentPageID { cancelLongPressRuntime(for: sourceKeyID) }
+        if targetPageID == interactionState.currentPageID { cancelLongPressRuntime(for: targetKeyID) }
         cancelWebPageMetadataTask(for: sourceKeyID)
         cancelWebPageMetadataTask(for: targetKeyID)
         cancelNewAPIGroupListTask(for: sourceKeyID)
         cancelNewAPIGroupListTask(for: targetKeyID)
         webPageMetadataFetchedURLStrings[sourceKeyID] = nil
         webPageMetadataFetchedURLStrings[targetKeyID] = nil
-        guard interactionState.swapSquareConfigurations(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID) else {
+        guard interactionState.swapSquareConfigurations(
+            sourcePageID: sourcePageID,
+            sourceKeyID: sourceKeyID,
+            targetPageID: targetPageID,
+            targetKeyID: targetKeyID
+        ) else {
             return
         }
-        swapRuntimeInstances(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID, pageID: pageID)
+        swapRuntimeInstances(
+            sourceKeyID: sourceKeyID,
+            targetKeyID: targetKeyID,
+            sourcePageID: sourcePageID,
+            targetPageID: targetPageID,
+            sourceInstanceID: sourceInstanceID,
+            targetInstanceID: targetInstanceID
+        )
         reconcileRuntimeInstancesWithInteractionState()
 
         persistCurrentConfiguration()
-        syncKeyDisplays(keyIDs: [sourceKeyID, targetKeyID])
+        if sourcePageID == interactionState.currentPageID,
+           targetPageID == interactionState.currentPageID {
+            syncKeyDisplays(keyIDs: [sourceKeyID, targetKeyID])
+        } else {
+            if sourcePageID == interactionState.currentPageID {
+                syncKeyDisplay(keyID: sourceKeyID)
+            }
+            if targetPageID == interactionState.currentPageID {
+                syncKeyDisplay(keyID: targetKeyID)
+            }
+        }
     }
 
     func navigateKey(keyID: Int) {
@@ -1899,11 +1941,16 @@ final class H200ConnectionModel: ObservableObject {
         )
     }
 
-    private func swapRuntimeInstances(sourceKeyID: Int, targetKeyID: Int, pageID: String) {
-        let sourceSlot = RuntimeSlotID(pageID: pageID, keyID: sourceKeyID)
-        let targetSlot = RuntimeSlotID(pageID: pageID, keyID: targetKeyID)
-        let sourceInstanceID = runtimeInstancesBySlot[sourceSlot]
-        let targetInstanceID = runtimeInstancesBySlot[targetSlot]
+    private func swapRuntimeInstances(
+        sourceKeyID: Int,
+        targetKeyID: Int,
+        sourcePageID: String,
+        targetPageID: String,
+        sourceInstanceID: RuntimeInstanceID?,
+        targetInstanceID: RuntimeInstanceID?
+    ) {
+        let sourceSlot = RuntimeSlotID(pageID: sourcePageID, keyID: sourceKeyID)
+        let targetSlot = RuntimeSlotID(pageID: targetPageID, keyID: targetKeyID)
 
         runtimeInstancesBySlot[sourceSlot] = targetInstanceID
         runtimeInstancesBySlot[targetSlot] = sourceInstanceID

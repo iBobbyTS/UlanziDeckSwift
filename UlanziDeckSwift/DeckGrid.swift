@@ -1043,6 +1043,21 @@ nonisolated struct DeckGridInteractionState: Equatable {
             && !wideKeyIDs.contains(targetKeyID)
     }
 
+    func canSwapSquareConfigurations(
+        sourcePageID: String,
+        sourceKeyID: Int,
+        targetPageID: String,
+        targetKeyID: Int
+    ) -> Bool {
+        (sourcePageID != targetPageID || sourceKeyID != targetKeyID)
+            && pages[sourcePageID] != nil
+            && pages[targetPageID] != nil
+            && validKeyIDs.contains(sourceKeyID)
+            && validKeyIDs.contains(targetKeyID)
+            && !wideKeyIDs.contains(sourceKeyID)
+            && !wideKeyIDs.contains(targetKeyID)
+    }
+
     @discardableResult
     mutating func swapSquareConfigurations(sourceKeyID: Int, targetKeyID: Int) -> Bool {
         guard canSwapSquareConfigurations(sourceKeyID: sourceKeyID, targetKeyID: targetKeyID) else {
@@ -1061,6 +1076,36 @@ nonisolated struct DeckGridInteractionState: Equatable {
             selectedKeyID = sourceKeyID
         }
 
+        return true
+    }
+
+    @discardableResult
+    mutating func swapSquareConfigurations(
+        sourcePageID: String,
+        sourceKeyID: Int,
+        targetPageID: String,
+        targetKeyID: Int
+    ) -> Bool {
+        guard canSwapSquareConfigurations(
+            sourcePageID: sourcePageID,
+            sourceKeyID: sourceKeyID,
+            targetPageID: targetPageID,
+            targetKeyID: targetKeyID
+        ) else {
+            return false
+        }
+
+        let sourceConfiguration = pages[sourcePageID]?.configurations[sourceKeyID, default: .tallyDefault]
+        let targetConfiguration = pages[targetPageID]?.configurations[targetKeyID, default: .tallyDefault]
+        pages[sourcePageID]?.configurations[sourceKeyID] = targetConfiguration
+        pages[targetPageID]?.configurations[targetKeyID] = sourceConfiguration
+        pressedKeyIDs.remove(sourceKeyID)
+        pressedKeyIDs.remove(targetKeyID)
+        if currentPageID == sourcePageID, selectedKeyID == sourceKeyID {
+            selectedKeyID = targetKeyID
+        } else if currentPageID == targetPageID, selectedKeyID == targetKeyID {
+            selectedKeyID = sourceKeyID
+        }
         return true
     }
 
