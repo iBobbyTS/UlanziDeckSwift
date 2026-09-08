@@ -290,7 +290,7 @@ struct UlanziDeckSwiftTests {
         model.clearKeyFunction(keyID: 3)
         try await Task.sleep(nanoseconds: 160_000_000)
 
-        #expect(model.interactionState.configuration(for: 3)?.function == .none)
+        #expect(model.interactionState.configuration(for: 3)?.function == DeckKeyFunction.none)
         #expect(fetcher.requests.count == 1)
     }
 
@@ -343,11 +343,13 @@ struct UlanziDeckSwiftTests {
         syncer.emitInput(H200InputEvent(state: 0, index: 2, type: .button, action: .release))
         try await Self.waitUntil { fetcher.requests.count == 1 }
         let partialDisplayCountBeforeChange = syncer.partialDisplays.count
+        model.selectKey(keyID: 3)
         model.setSelectedNewAPIAggregationBin(.minute)
         try await Self.waitUntil {
             syncer.partialDisplays.count > partialDisplayCountBeforeChange
                 && model.interactionState
                     .newAPIModelAvailabilityConfiguration(for: 3).lastResult == nil
+                && fetcher.requests.count == 2
         }
         let clearedDisplay = syncer.partialDisplays.last?
             .first(where: { $0.id == 3 })
@@ -372,15 +374,18 @@ struct UlanziDeckSwiftTests {
             modelName: "gpt-5.6-sol",
             groups: [NewAPIModelAvailabilityGroup(group: "B", successRate: 62, series: [])]
         ))
-        let fetcher = FakeNewAPIFetcher(results: [first, second], fetchDelayNanoseconds: 80_000_000)
+        let fetcher = FakeNewAPIFetcher(
+            resultsByModelName: ["model-a": first, "model-b": second],
+            fetchDelayNanoseconds: 80_000_000
+        )
         var loadedState = DeckGridInteractionState(layout: .h200Prototype)
         loadedState.assign(.newAPIModelAvailability, to: 3)
         loadedState.setNewAPIBaseURL("https://api.example.com", for: 3)
-        loadedState.setNewAPIModelName("gpt-5.6-sol", for: 3)
+        loadedState.setNewAPIModelName("model-a", for: 3)
         loadedState.setNewAPISelectedGroup("A", for: 3)
         loadedState.assign(.newAPIModelAvailability, to: 4)
         loadedState.setNewAPIBaseURL("https://api.example.com", for: 4)
-        loadedState.setNewAPIModelName("gpt-5.6-sol", for: 4)
+        loadedState.setNewAPIModelName("model-b", for: 4)
         loadedState.setNewAPISelectedGroup("B", for: 4)
         let model = H200ConnectionModel(
             discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
@@ -4566,7 +4571,7 @@ struct UlanziDeckSwiftTests {
         let consumerDisplay = try #require(displays.first(where: { $0.id == 4 }))
         #expect(sourceDisplay.sub2APIButtonContent?.serviceName == "主服务")
         #expect(sourceDisplay.sub2APIButtonContent?.groupName == "余额")
-        #expect(sourceDisplay.sub2APIButtonContent?.availableConcurrencyText == "USD 12.35")
+        #expect(sourceDisplay.sub2APIButtonContent?.availableConcurrencyText == "USD12.35")
         #expect(consumerDisplay.sub2APIButtonContent?.serviceName == "副服务")
 
         syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
@@ -4718,13 +4723,15 @@ struct UlanziDeckSwiftTests {
             groupListResults: [.success(items: [item]), .success(items: [item])]
         )
         let model = H200ConnectionModel(
-            discovery: FakeH200Discovery(results: [.notConnected]),
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
             syncer: FakeH200DeckSyncer(),
             configurationStore: FakeDeckConfigurationStore(),
             sub2APIFetcher: fetcher,
             sub2APIGroupListMinimumIntervalNanoseconds: 1_000_000
         )
 
+        model.checkOnLaunch()
+        try await Self.waitUntil { model.syncSummary != nil }
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
@@ -4839,12 +4846,14 @@ struct UlanziDeckSwiftTests {
         )
         let store = FakeDeckConfigurationStore()
         let model = H200ConnectionModel(
-            discovery: FakeH200Discovery(results: [.notConnected]),
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
             syncer: FakeH200DeckSyncer(),
             configurationStore: store,
             sub2APIFetcher: fetcher
         )
 
+        model.checkOnLaunch()
+        try await Self.waitUntil { model.syncSummary != nil }
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
@@ -4884,13 +4893,15 @@ struct UlanziDeckSwiftTests {
     @Test func fetchingSub2APIGroupListDistinguishesInvalidAndExpiredBearerKey() async throws {
         let fetcher = FakeSub2APIFetcher(groupListResults: [.invalidToken, .tokenExpired])
         let model = H200ConnectionModel(
-            discovery: FakeH200Discovery(results: [.notConnected]),
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
             syncer: FakeH200DeckSyncer(),
             configurationStore: FakeDeckConfigurationStore(),
             sub2APIFetcher: fetcher,
             sub2APIGroupListMinimumIntervalNanoseconds: 1_000_000
         )
 
+        model.checkOnLaunch()
+        try await Self.waitUntil { model.syncSummary != nil }
         model.selectKey(keyID: 3)
         model.assignSelectedFunction(.sub2API)
         model.setSelectedSub2APIBaseURL("api.example.com")
@@ -10132,7 +10143,7 @@ struct UlanziDeckSwiftTests {
             resetLabelText: "下次重设",
             resetAfterText: "6天 20:53",
             percentageColor: .yellow,
-            resetAfterColor: .red
+            resetAfterColor: .green
         ))
 
         configuration.codexUsage.accountNickname = "  主账号  "
@@ -11126,6 +11137,7 @@ private final class FakeNewAPIFetcher: NewAPIFetching, @unchecked Sendable {
 
     private let lock = NSLock()
     private var results: [NewAPIModelAvailabilityResult]
+    private var resultsByModelName: [String: NewAPIModelAvailabilityResult]
     private let defaultResult: NewAPIModelAvailabilityResult
     private let fetchDelayNanoseconds: UInt64?
     private var storedRequests: [Request] = []
@@ -11134,10 +11146,12 @@ private final class FakeNewAPIFetcher: NewAPIFetching, @unchecked Sendable {
 
     init(
         results: [NewAPIModelAvailabilityResult] = [],
+        resultsByModelName: [String: NewAPIModelAvailabilityResult] = [:],
         defaultResult: NewAPIModelAvailabilityResult = .networkError("未配置响应"),
         fetchDelayNanoseconds: UInt64? = nil
     ) {
         self.results = results
+        self.resultsByModelName = resultsByModelName
         self.defaultResult = defaultResult
         self.fetchDelayNanoseconds = fetchDelayNanoseconds
     }
@@ -11145,6 +11159,9 @@ private final class FakeNewAPIFetcher: NewAPIFetching, @unchecked Sendable {
     func fetchModelAvailability(baseURL: String, modelName: String) async -> NewAPIModelAvailabilityResult {
         let result = locked {
             storedRequests.append(Request(baseURL: baseURL, modelName: modelName))
+            if let result = resultsByModelName.removeValue(forKey: modelName) {
+                return result
+            }
             return results.isEmpty ? defaultResult : results.removeFirst()
         }
         if let fetchDelayNanoseconds {

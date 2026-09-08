@@ -2481,11 +2481,6 @@ nonisolated struct DeckGridInteractionState: Equatable {
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].clearDefaultButtonBackgroundSnapshot(for: previousFunction)
         configurations[keyID, default: .tallyDefault].function = function
-        if function == .zcodeUsage {
-            configurations[keyID, default: .tallyDefault].visual.dimmingPercent = 20
-        } else if previousFunction == .zcodeUsage {
-            configurations[keyID, default: .tallyDefault].visual.dimmingPercent = DeckKeyVisualConfiguration.defaultDimmingPercent
-        }
         if let dataSource = function.usageDataSource {
             let sourceChanged = configurations[keyID, default: .tallyDefault].codexUsage.dataSource != dataSource
             configurations[keyID, default: .tallyDefault].codexUsage.dataSource = dataSource
@@ -2499,6 +2494,11 @@ nonisolated struct DeckGridInteractionState: Equatable {
             ensureUniqueSub2APIInstanceID(for: keyID)
         }
         configurations[keyID, default: .tallyDefault].refreshDefaultButtonBackgroundSnapshot()
+        if function == .zcodeUsage {
+            configurations[keyID, default: .tallyDefault].visual.dimmingPercent = 20
+        } else if previousFunction == .zcodeUsage {
+            configurations[keyID, default: .tallyDefault].visual.dimmingPercent = DeckKeyVisualConfiguration.defaultDimmingPercent
+        }
         if function == .newAPIModelAvailability {
             ensureUniqueNewAPIInstanceID(for: keyID)
         }

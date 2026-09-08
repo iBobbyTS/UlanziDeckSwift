@@ -541,7 +541,10 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
     }
 
     var blurRadius: Double {
-        Double(blurPercent) / 100 * FileIconSnapshot.maximumBlurRadius
+        if blurPercent == Self.defaultBlurPercent {
+            return FileIconSnapshot.defaultBlurRadius
+        }
+        return Double(blurPercent) / 100 * FileIconSnapshot.maximumBlurRadius
     }
 }
 
