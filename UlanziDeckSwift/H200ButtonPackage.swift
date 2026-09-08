@@ -850,6 +850,11 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         in rect: NSRect,
         buttonRect: NSRect
     ) {
+        guard content.metrics.count == 1 else {
+            drawMultipleUsageMetrics(content, in: rect, buttonRect: buttonRect)
+            return
+        }
+
         let percentageHeight = buttonRect.height * 0.36
         let resetLabelHeight = buttonRect.height * 0.10
         let resetHeight = content.detailValueText == nil ? 0 : buttonRect.height * 0.16
@@ -923,6 +928,88 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
                 ),
                 shadow: shadow
             )
+        }
+    }
+
+    private func drawMultipleUsageMetrics(
+        _ content: UsageButtonContent,
+        in rect: NSRect,
+        buttonRect: NSRect
+    ) {
+        let percentageHeight = buttonRect.height * 0.19
+        let detailHeight = buttonRect.height * 0.115
+        let detailGap = buttonRect.height * 0.006
+        let windowGap = buttonRect.height * 0.018
+        let nicknameHeight = buttonRect.height * 0.105
+        let nicknameGap = buttonRect.height * 0.018
+        let nicknameExtraHeight = content.accountNickname == nil ? 0 : nicknameHeight + nicknameGap
+        let metricsHeight = content.metrics.enumerated().reduce(CGFloat.zero) { height, item in
+            let (index, metric) = item
+            let detailExtraHeight = metric.detailValueText == nil ? 0 : detailGap + detailHeight
+            let followingWindowGap = index == content.metrics.indices.last ? 0 : windowGap
+            return height + percentageHeight + detailExtraHeight + followingWindowGap
+        }
+        let top = rect.midY + (nicknameExtraHeight + metricsHeight) / 2
+        let shadow = textShadow()
+        var cursor = top
+
+        if let accountNickname = content.accountNickname {
+            drawCenteredAutoSizedSingleLineText(
+                accountNickname,
+                weight: .semibold,
+                maxFontSize: buttonRect.height * 0.105,
+                minFontSize: buttonRect.height * 0.075,
+                color: NSColor(calibratedWhite: 0.88, alpha: 1),
+                rect: NSRect(
+                    x: rect.minX,
+                    y: cursor - nicknameHeight,
+                    width: rect.width,
+                    height: nicknameHeight
+                ),
+                shadow: shadow
+            )
+            cursor -= nicknameExtraHeight
+        }
+
+        for (index, metric) in content.metrics.enumerated() {
+            drawCenteredAutoSizedSingleLineText(
+                metric.percentageText,
+                weight: .heavy,
+                maxFontSize: buttonRect.height * 0.185,
+                minFontSize: buttonRect.height * 0.115,
+                color: mihoyoGameMetricColor(for: metric.percentageColor),
+                rect: NSRect(
+                    x: rect.minX,
+                    y: cursor - percentageHeight,
+                    width: rect.width,
+                    height: percentageHeight
+                ),
+                shadow: shadow
+            )
+            cursor -= percentageHeight
+
+            if let detailValueText = metric.detailValueText {
+                cursor -= detailGap
+                drawCenteredAutoSizedSingleLineText(
+                    detailValueText,
+                    weight: .semibold,
+                    maxFontSize: buttonRect.height * 0.115,
+                    minFontSize: buttonRect.height * 0.075,
+                    color: mihoyoGameMetricColor(for: metric.detailValueColor),
+                    rect: NSRect(
+                        x: rect.minX,
+                        y: cursor - detailHeight,
+                        width: rect.width,
+                        height: detailHeight
+                    ),
+                    shadow: shadow
+                )
+                cursor -= detailHeight
+            }
+
+            if index != content.metrics.indices.last {
+                cursor -= windowGap
+            }
         }
     }
 

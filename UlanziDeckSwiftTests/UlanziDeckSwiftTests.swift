@@ -8998,7 +8998,7 @@ struct UlanziDeckSwiftTests {
         #expect(request.value(forHTTPHeaderField: "User-Agent") == "codex-cli")
     }
 
-    @Test func zcodeUsageFetcherSelectsOnlyWeeklyCreditLimitAndUsesBareAuthorization() async throws {
+    @Test func zcodeUsageFetcherParsesBothCreditLimitWindowsInStableOrderAndUsesBareAuthorization() async throws {
         let usageURL = try #require(URL(string: "https://api.z.ai/api/monitor/usage/quota/limit"))
         let responseData = try JSONSerialization.data(withJSONObject: [
             "code": 200,
@@ -9006,13 +9006,19 @@ struct UlanziDeckSwiftTests {
             "data": [
                 "limits": [
                     ["type": "OTHER", "unit": 6, "number": 1, "percentage": 99],
-                    ["type": "CREDIT_LIMIT", "unit": 3, "number": 5, "percentage": 1],
                     [
                         "type": "CREDIT_LIMIT",
                         "unit": 6,
                         "number": 1,
                         "percentage": 9,
                         "nextResetTime": 1_789_256_403_998,
+                    ],
+                    [
+                        "type": "CREDIT_LIMIT",
+                        "unit": 3,
+                        "number": 5,
+                        "percentage": 1,
+                        "nextResetTime": 1_789_254_603_998,
                     ],
                 ],
             ],
@@ -9036,26 +9042,42 @@ struct UlanziDeckSwiftTests {
             zcodeBookmarkData: Data("bookmark".utf8)
         )
 
-        #expect(await fetcher.fetchUsage(configuration: configuration) == .success(CodexUsageQuota(
-            remainingPercent: 91,
-            resetAfterSeconds: 3_600,
-            resetAt: 1_789_256_403,
-            limitWindowSeconds: 604_800,
-            usedPercent: 9
-        )))
+        #expect(await fetcher.fetchUsage(configuration: configuration) == .success(UsageQuotaSnapshot(quotas: [
+            CodexUsageQuota(
+                window: .fiveHours,
+                remainingPercent: 99,
+                resetAfterSeconds: 1_800,
+                resetAt: 1_789_254_603,
+                limitWindowSeconds: 18_000,
+                usedPercent: 1
+            ),
+            CodexUsageQuota(
+                window: .sevenDays,
+                remainingPercent: 91,
+                resetAfterSeconds: 3_600,
+                resetAt: 1_789_256_403,
+                limitWindowSeconds: 604_800,
+                usedPercent: 9
+            ),
+        ])))
         let utc = try #require(TimeZone(secondsFromGMT: 0))
-        guard case let .success(quota) = await fetcher.fetchUsage(configuration: configuration) else {
-            Issue.record("有效周重置时间应解析为额度结果")
+        guard case let .success(snapshot) = await fetcher.fetchUsage(configuration: configuration),
+              let weeklyQuota = snapshot.quotas.first(where: { $0.window == .sevenDays })
+        else {
+            Issue.record("有效双窗口重置时间应解析为同一额度结果")
             return
         }
-        #expect(quota.resetAtText(timeZone: utc) == "9/12 23:40")
+        #expect(snapshot.quotas.map(\.window) == [.fiveHours, .sevenDays])
+        #expect(weeklyQuota.resetAtText(timeZone: utc) == "9/12 23:40")
 
         let afterResetFetcher = ZcodeUsageFetcher(
             urlSession: URLSession(configuration: sessionConfiguration),
             configurationFileLoader: FakeZcodeConfigurationFileLoader(result: .success(configData)),
             now: { Date(timeIntervalSince1970: 1_789_256_500) }
         )
-        guard case let .success(expiredQuota) = await afterResetFetcher.fetchUsage(configuration: configuration) else {
+        guard case let .success(expiredSnapshot) = await afterResetFetcher.fetchUsage(configuration: configuration),
+              let expiredQuota = expiredSnapshot.quotas.first(where: { $0.window == .sevenDays })
+        else {
             Issue.record("过期周重置时间仍应保留额度结果")
             return
         }
@@ -9064,6 +9086,64 @@ struct UlanziDeckSwiftTests {
         #expect(request.url == usageURL)
         #expect(request.value(forHTTPHeaderField: "Authorization") == "secret-token")
         #expect(request.value(forHTTPHeaderField: "Authorization") != "Bearer secret-token")
+    }
+
+    @Test func zcodeUsageFetcherParsesObservedThreeAndNinePercentDualWindowShape() async throws {
+        let usageURL = try #require(URL(string: "https://api.z.ai/api/monitor/usage/quota/limit"))
+        let responseData = try JSONSerialization.data(withJSONObject: [
+            "code": 200,
+            "success": true,
+            "data": [
+                "limits": [
+                    [
+                        "type": "CREDIT_LIMIT",
+                        "unit": 3,
+                        "number": 5,
+                        "usage": 2_000,
+                        "currentValue": 66,
+                        "remaining": 1_933,
+                        "percentage": 3,
+                        "nextResetTime": 1_788_836_586_193,
+                    ],
+                    [
+                        "type": "CREDIT_LIMIT",
+                        "unit": 6,
+                        "number": 1,
+                        "usage": 10_000,
+                        "currentValue": 961,
+                        "remaining": 9_038,
+                        "percentage": 9,
+                        "nextResetTime": 1_789_256_403_998,
+                    ],
+                ],
+            ],
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            usageURL: .init(statusCode: 200, mimeType: "application/json", data: responseData),
+        ])
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let configData = Data(#"{"provider":{"builtin:zai-coding-plan":{"options":{"apiKey":"token","baseURL":"https://api.z.ai/api/anthropic"}}}}"#.utf8)
+        let fetcher = ZcodeUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            configurationFileLoader: FakeZcodeConfigurationFileLoader(result: .success(configData)),
+            now: { Date(timeIntervalSince1970: 1_788_830_000) }
+        )
+        let result = await fetcher.fetchUsage(configuration: DeckKeyCodexUsageConfiguration(
+            dataSource: .zcode,
+            zcodeConfigFilePath: "/tmp/config.json",
+            zcodeBookmarkData: Data("bookmark".utf8)
+        ))
+
+        guard case let .success(snapshot) = result else {
+            Issue.record("实测响应形状应产生双窗口成功快照")
+            return
+        }
+        #expect(snapshot.quotas.map(\.window) == [.fiveHours, .sevenDays])
+        #expect(snapshot.quotas.map(\.remainingPercent) == [97, 91])
+        #expect(snapshot.quotas.map(\.limitWindowSeconds) == [18_000, 604_800])
+        #expect(snapshot.quotas.allSatisfy { $0.resetAt != nil })
     }
 
     @Test func zcodeUsageFetcherDistinguishesConfigurationAuthenticationNetworkAndMissingWeek() async throws {
@@ -9119,6 +9199,23 @@ struct UlanziDeckSwiftTests {
         WebPageMetadataURLProtocol.setStubs([
             usageURL: .init(statusCode: 200, mimeType: "application/json", data: fiveHourOnly),
         ])
+        #expect(await fetcher.fetchUsage(configuration: baseConfiguration) == .success(CodexUsageQuota(
+            window: .fiveHours,
+            remainingPercent: 99,
+            resetAfterSeconds: 0,
+            resetAt: nil,
+            limitWindowSeconds: 18_000,
+            usedPercent: 1
+        )))
+
+        let noSupportedWindow = try JSONSerialization.data(withJSONObject: [
+            "code": 200,
+            "success": true,
+            "data": ["limits": [["type": "OTHER", "unit": 6, "number": 1, "percentage": 1]]],
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            usageURL: .init(statusCode: 200, mimeType: "application/json", data: noSupportedWindow),
+        ])
         #expect(await fetcher.fetchUsage(configuration: baseConfiguration) == .missingWeeklyQuota)
 
         WebPageMetadataURLProtocol.setStubs([:])
@@ -9162,6 +9259,7 @@ struct UlanziDeckSwiftTests {
                 usageURL: .init(statusCode: 200, mimeType: "application/json", data: responseData),
             ])
             #expect(await fetcher.fetchUsage(configuration: configuration) == .success(CodexUsageQuota(
+                window: .sevenDays,
                 remainingPercent: 91,
                 resetAfterSeconds: 0,
                 resetAt: nil,
@@ -9185,6 +9283,7 @@ struct UlanziDeckSwiftTests {
             usageURL: .init(statusCode: 200, mimeType: "application/json", data: epochResetData),
         ])
         #expect(await fetcher.fetchUsage(configuration: configuration) == .success(CodexUsageQuota(
+            window: .sevenDays,
             remainingPercent: 91,
             resetAfterSeconds: 0,
             resetAt: 0,
@@ -9193,7 +9292,7 @@ struct UlanziDeckSwiftTests {
         )))
     }
 
-    @Test func zcodeUsageFetcherRejectsBooleanPercentageButAcceptsNumericZeroAndOne() async throws {
+    @Test func zcodeUsageFetcherRejectsBooleanNumericFieldsButAcceptsZeroAndHundredPercent() async throws {
         let usageURL = try #require(URL(string: "https://api.z.ai/api/monitor/usage/quota/limit"))
         let sessionConfiguration = URLSessionConfiguration.ephemeral
         sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
@@ -9226,7 +9325,24 @@ struct UlanziDeckSwiftTests {
             #expect(await fetcher.fetchUsage(configuration: configuration) == .missingWeeklyQuota)
         }
 
-        for (percentage, remaining) in [(0, 100), (1, 99)] {
+        for (unit, number) in [(true, 1 as Any), (6 as Any, false)] {
+            let data = try JSONSerialization.data(withJSONObject: [
+                "code": 200,
+                "success": true,
+                "data": ["limits": [[
+                    "type": "CREDIT_LIMIT",
+                    "unit": unit,
+                    "number": number,
+                    "percentage": 9,
+                ]]],
+            ])
+            WebPageMetadataURLProtocol.setStubs([
+                usageURL: .init(statusCode: 200, mimeType: "application/json", data: data),
+            ])
+            #expect(await fetcher.fetchUsage(configuration: configuration) == .missingWeeklyQuota)
+        }
+
+        for (percentage, remaining) in [(0, 100), (1, 99), (100, 0)] {
             let data = try JSONSerialization.data(withJSONObject: [
                 "code": 200,
                 "success": true,
@@ -9241,6 +9357,7 @@ struct UlanziDeckSwiftTests {
                 usageURL: .init(statusCode: 200, mimeType: "application/json", data: data),
             ])
             #expect(await fetcher.fetchUsage(configuration: configuration) == .success(CodexUsageQuota(
+                window: .sevenDays,
                 remainingPercent: remaining,
                 resetAfterSeconds: 0,
                 resetAt: nil,
@@ -9306,6 +9423,111 @@ struct UlanziDeckSwiftTests {
         )
         #expect(absoluteDisplay.codexUsageButtonContent?.detailValueText == quota.resetAtText())
         #expect(absoluteDisplay.subtitle == "周额度 · \(quota.resetAtText() ?? "")")
+    }
+
+    @Test func zcodeUsagePresentationBuildsNamedFiveLineDualWindowContentInStableOrder() throws {
+        var configuration = DeckKeyConfiguration(function: .zcodeUsage)
+        configuration.codexUsage.accountNickname = " 工作账号 "
+        let fiveHourQuota = CodexUsageQuota(
+            window: .fiveHours,
+            remainingPercent: 99,
+            resetAfterSeconds: 1_800,
+            resetAt: 1_789_254_603,
+            limitWindowSeconds: 18_000,
+            usedPercent: 1
+        )
+        let sevenDayQuota = CodexUsageQuota(
+            window: .sevenDays,
+            remainingPercent: 91,
+            resetAfterSeconds: 3_600,
+            resetAt: 1_789_256_403,
+            limitWindowSeconds: 604_800,
+            usedPercent: 9
+        )
+        configuration.codexUsage.lastResult = .success(UsageQuotaSnapshot(
+            quotas: [sevenDayQuota, fiveHourQuota]
+        ))
+        let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
+
+        let remainingDisplay = DeckKeyDisplay(
+            key: key,
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+        #expect(remainingDisplay.title == "99% / 91%")
+        #expect(remainingDisplay.subtitle == "5h / 7d")
+        #expect(remainingDisplay.codexUsageButtonContent == UsageButtonContent(
+            accountNickname: "工作账号",
+            metrics: [
+                UsageButtonMetric(
+                    percentageText: "5h 99%",
+                    detailLabelText: nil,
+                    detailValueText: "0:30",
+                    percentageColor: .red,
+                    detailValueColor: .green
+                ),
+                UsageButtonMetric(
+                    percentageText: "7d 91%",
+                    detailLabelText: nil,
+                    detailValueText: "1:00",
+                    percentageColor: .yellow,
+                    detailValueColor: .red
+                ),
+            ]
+        ))
+
+        configuration.codexUsage.resetDisplayMode = .resetTime
+        let resetTimeDisplay = DeckKeyDisplay(
+            key: key,
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+        #expect(resetTimeDisplay.codexUsageButtonContent?.metrics.map(\.detailValueText) == [
+            fiveHourQuota.resetAtText(),
+            sevenDayQuota.resetAtText(),
+        ])
+    }
+
+    @Test func zcodeUsagePresentationKeepsOnlyValidWindowAndOmitsMissingWindowTime() throws {
+        var configuration = DeckKeyConfiguration(function: .zcodeUsage)
+        configuration.codexUsage.lastResult = .success(UsageQuotaSnapshot(quotas: [
+            CodexUsageQuota(
+                window: .sevenDays,
+                remainingPercent: 91,
+                resetAfterSeconds: 0,
+                resetAt: nil,
+                limitWindowSeconds: 604_800,
+                usedPercent: 9
+            ),
+            CodexUsageQuota(
+                window: .fiveHours,
+                remainingPercent: 97,
+                resetAfterSeconds: 900,
+                resetAt: 1_800_000_000,
+                limitWindowSeconds: 18_000,
+                usedPercent: 3
+            ),
+        ]))
+        let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
+        let dualDisplay = DeckKeyDisplay(key: key, configuration: configuration, isSelected: false, isPressed: false)
+
+        #expect(dualDisplay.codexUsageButtonContent?.metrics.map(\.percentageText) == ["5h 97%", "7d 91%"])
+        #expect(dualDisplay.codexUsageButtonContent?.metrics.map(\.detailValueText) == ["0:15", nil])
+
+        configuration.codexUsage.lastResult = .success(CodexUsageQuota(
+            window: .fiveHours,
+            remainingPercent: 97,
+            resetAfterSeconds: 0,
+            resetAt: nil,
+            limitWindowSeconds: 18_000,
+            usedPercent: 3
+        ))
+        let singleDisplay = DeckKeyDisplay(key: key, configuration: configuration, isSelected: false, isPressed: false)
+        #expect(singleDisplay.codexUsageButtonContent?.percentageText == "97%")
+        #expect(singleDisplay.codexUsageButtonContent?.detailLabelText == "5h")
+        #expect(singleDisplay.codexUsageButtonContent?.detailValueText == nil)
     }
 
     @Test func newCodexUsageComponentDirectlySelectsDefaultAuthFileOnlyFromEmptyKey() throws {
@@ -9517,6 +9739,75 @@ struct UlanziDeckSwiftTests {
         let wholeKeyData = try JSONEncoder().encode(DeckKeyConfiguration(function: .codexUsage))
         let wholeKeyObject = try #require(JSONSerialization.jsonObject(with: wholeKeyData) as? [String: Any])
         #expect(wholeKeyObject["function"] as? String == "codexUsage")
+    }
+
+    @Test func codexUsageConfigurationReadsLegacySingleWindowSnapshotAndRoundTripsDualWindows() throws {
+        let legacyConfigurationData = Data(#"""
+        {
+          "dataSource": "zcode",
+          "accountNickname": "旧账号",
+          "refreshIntervalMinutes": 10,
+          "colorMode": "highIsRed",
+          "resetDisplayMode": "remainingTime",
+          "lastSuccessfulSnapshot": {
+            "success": {
+              "_0": {
+                "remainingPercent": 64,
+                "resetAfterSeconds": 3600,
+                "limitWindowSeconds": 604800,
+                "usedPercent": 36
+              }
+            }
+          }
+        }
+        """#.utf8)
+        let legacy = try JSONDecoder().decode(
+            DeckKeyCodexUsageConfiguration.self,
+            from: legacyConfigurationData
+        )
+        guard case let .success(legacySnapshot) = legacy.lastResult else {
+            Issue.record("旧单窗口成功快照应恢复为可显示结果")
+            return
+        }
+        #expect(legacySnapshot.quotas == [CodexUsageQuota(
+            window: .primary,
+            remainingPercent: 64,
+            resetAfterSeconds: 3_600,
+            resetAt: nil,
+            limitWindowSeconds: 604_800,
+            usedPercent: 36
+        )])
+        #expect(legacy.accountNickname == "旧账号")
+
+        let dualSnapshot = CodexUsageResult.success(UsageQuotaSnapshot(quotas: [
+            CodexUsageQuota(
+                window: .fiveHours,
+                remainingPercent: 97,
+                resetAfterSeconds: 900,
+                resetAt: 1_800_000_000,
+                limitWindowSeconds: 18_000,
+                usedPercent: 3
+            ),
+            CodexUsageQuota(
+                window: .sevenDays,
+                remainingPercent: 91,
+                resetAfterSeconds: 3_600,
+                resetAt: 1_800_003_600,
+                limitWindowSeconds: 604_800,
+                usedPercent: 9
+            ),
+        ]))
+        let current = DeckKeyCodexUsageConfiguration(
+            dataSource: .zcode,
+            accountNickname: "当前账号",
+            lastResult: dualSnapshot
+        )
+        let restored = try JSONDecoder().decode(
+            DeckKeyCodexUsageConfiguration.self,
+            from: JSONEncoder().encode(current)
+        )
+        #expect(restored.lastResult == dualSnapshot)
+        #expect(restored.lastSuccessfulSnapshot == dualSnapshot)
     }
 
     @Test func legacyZcodeSourceMigratesToIndependentFunctionAndRoundTrips() throws {
@@ -9831,6 +10122,60 @@ struct UlanziDeckSwiftTests {
             color.redComponent < 0.35
                 && color.greenComponent > 0.65
                 && color.blueComponent < 0.45
+        })
+    }
+
+    @Test func zcodeDualWindowRendererDrawsBothWindowColorsWithLongNickname() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var configuration = DeckKeyConfiguration(function: .zcodeUsage)
+        configuration.codexUsage.accountNickname = "这是一个需要自动缩小字号的很长工作账号名称"
+        configuration.codexUsage.colorMode = .lowIsRed
+        configuration.codexUsage.lastResult = .success(UsageQuotaSnapshot(quotas: [
+            CodexUsageQuota(
+                window: .fiveHours,
+                remainingPercent: 100,
+                resetAfterSeconds: 3_600,
+                resetAt: 1_800_000_000,
+                limitWindowSeconds: 18_000,
+                usedPercent: 0
+            ),
+            CodexUsageQuota(
+                window: .sevenDays,
+                remainingPercent: 0,
+                resetAfterSeconds: 86_400,
+                resetAt: 1_800_086_400,
+                limitWindowSeconds: 604_800,
+                usedPercent: 100
+            ),
+        ]))
+        let display = DeckKeyDisplay(
+            key: layout.keys[0],
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+
+        #expect(image.pixelsWide == display.devicePixelSize.width)
+        #expect(image.pixelsHigh == display.devicePixelSize.height)
+        #expect(Self.bitmapContainsPixel(
+            in: image,
+            xRange: 0..<image.pixelsWide,
+            yRange: 0..<image.pixelsHigh
+        ) { color in
+            color.redComponent < 0.35
+                && color.greenComponent > 0.65
+                && color.blueComponent < 0.45
+        })
+        #expect(Self.bitmapContainsPixel(
+            in: image,
+            xRange: 0..<image.pixelsWide,
+            yRange: 0..<image.pixelsHigh
+        ) { color in
+            color.redComponent > 0.75
+                && color.greenComponent < 0.35
+                && color.blueComponent < 0.35
         })
     }
 

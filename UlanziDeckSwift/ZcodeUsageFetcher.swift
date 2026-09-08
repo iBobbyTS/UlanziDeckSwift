@@ -111,26 +111,38 @@ nonisolated struct ZcodeUsageFetcher: ZcodeUsageFetching {
             return .networkError("解析额度响应失败")
         }
 
-        guard let weekly = limits.first(where: {
-            ($0["type"] as? String) == "CREDIT_LIMIT"
-                && Self.integer($0["unit"]) == 6
-                && Self.integer($0["number"]) == 1
-        }), let percentage = Self.finitePercentage(weekly["percentage"])
-        else {
+        let requestTime = now()
+        let windowSpecifications: [(window: UsageQuotaWindow, unit: Int, number: Int, seconds: Int)] = [
+            (.fiveHours, 3, 5, 18_000),
+            (.sevenDays, 6, 1, 604_800),
+        ]
+        let quotas = windowSpecifications.compactMap { specification -> CodexUsageQuota? in
+            guard let limit = limits.first(where: {
+                ($0["type"] as? String) == "CREDIT_LIMIT"
+                    && Self.integer($0["unit"]) == specification.unit
+                    && Self.integer($0["number"]) == specification.number
+            }), let percentage = Self.finitePercentage(limit["percentage"])
+            else {
+                return nil
+            }
+
+            let reset = Self.resetTiming(
+                fromUnixMilliseconds: limit["nextResetTime"],
+                now: requestTime
+            )
+            return CodexUsageQuota(
+                window: specification.window,
+                remainingPercent: min(100, max(0, Int((100 - percentage).rounded()))),
+                resetAfterSeconds: reset?.afterSeconds ?? 0,
+                resetAt: reset?.atSeconds,
+                limitWindowSeconds: specification.seconds,
+                usedPercent: percentage
+            )
+        }
+        guard !quotas.isEmpty else {
             return .missingWeeklyQuota
         }
-
-        let reset = Self.resetTiming(
-            fromUnixMilliseconds: weekly["nextResetTime"],
-            now: now()
-        )
-        return .success(CodexUsageQuota(
-            remainingPercent: min(100, max(0, Int((100 - percentage).rounded()))),
-            resetAfterSeconds: reset?.afterSeconds ?? 0,
-            resetAt: reset?.atSeconds,
-            limitWindowSeconds: 604_800,
-            usedPercent: percentage
-        ))
+        return .success(UsageQuotaSnapshot(quotas: quotas))
     }
 
     static func usageURL(from baseURLString: String) -> URL? {
@@ -153,8 +165,8 @@ nonisolated struct ZcodeUsageFetcher: ZcodeUsageFetching {
 
     private static func businessRequestSucceeded(_ object: [String: Any]) -> Bool {
         guard object["success"] as? Bool == true else { return false }
-        if let code = integer(object["code"]) {
-            return code == 200
+        if object["code"] != nil {
+            return integer(object["code"]) == 200
         }
         return true
     }
@@ -166,6 +178,7 @@ nonisolated struct ZcodeUsageFetcher: ZcodeUsageFetching {
     }
 
     private static func integer(_ value: Any?) -> Int? {
+        guard !isJSONBoolean(value) else { return nil }
         if let number = value as? NSNumber { return number.intValue }
         if let string = value as? String { return Int(string) }
         return nil

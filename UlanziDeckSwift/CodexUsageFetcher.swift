@@ -466,6 +466,7 @@ nonisolated struct CodexUsageFetcher: CodexUsageFetching {
         }
 
         return .success(CodexUsageQuota(
+            window: .primary,
             remainingPercent: Self.remainingPercent(from: usedPercent),
             resetAfterSeconds: resetAfterSeconds,
             resetAt: Self.nonnegativeInteger(from: primaryWindow["reset_at"]),
