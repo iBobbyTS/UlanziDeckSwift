@@ -937,9 +937,9 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         buttonRect: NSRect
     ) {
         let percentageHeight = buttonRect.height * 0.19
-        let detailHeight = buttonRect.height * 0.115
-        let detailGap = buttonRect.height * 0.006
-        let windowGap = buttonRect.height * 0.018
+        let detailHeight = percentageHeight
+        let detailGap = buttonRect.height * 0.003
+        let windowGap = buttonRect.height * 0.010
         let nicknameHeight = buttonRect.height * 0.105
         let nicknameGap = buttonRect.height * 0.018
         let nicknameExtraHeight = content.accountNickname == nil ? 0 : nicknameHeight + nicknameGap
@@ -975,8 +975,8 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             drawMultipleMetricPercentage(
                 metric.percentageText,
                 valueColor: mihoyoGameMetricColor(for: metric.percentageColor),
-                maxFontSize: buttonRect.height * 0.185,
-                minFontSize: buttonRect.height * 0.115,
+                maxFontSize: buttonRect.height * 0.21,
+                minFontSize: buttonRect.height * 0.13,
                 rect: NSRect(
                     x: rect.minX,
                     y: cursor - percentageHeight,
@@ -992,8 +992,8 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
                 drawCenteredAutoSizedSingleLineText(
                     detailValueText,
                     weight: .semibold,
-                    maxFontSize: buttonRect.height * 0.115,
-                    minFontSize: buttonRect.height * 0.075,
+                    maxFontSize: buttonRect.height * 0.14,
+                    minFontSize: buttonRect.height * 0.09,
                     color: mihoyoGameMetricColor(for: metric.detailValueColor),
                     rect: NSRect(
                         x: rect.minX,
