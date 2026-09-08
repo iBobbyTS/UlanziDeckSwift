@@ -405,8 +405,9 @@ struct ContentView: View {
                 .font(.caption.weight(item.isCurrent ? .bold : .semibold))
                 .foregroundStyle(item.isCurrent ? Color.white : Color.secondary)
                 .padding(.horizontal, 9)
-                .frame(height: 22)
+                .frame(minWidth: 32, minHeight: 22)
                 .background(item.isCurrent ? Color.accentColor : Color.clear, in: Capsule())
+                .contentShape(Capsule())
         }
             .buttonStyle(.plain)
             .contextMenu {
