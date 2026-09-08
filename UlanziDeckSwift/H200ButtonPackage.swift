@@ -972,12 +972,11 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         }
 
         for (index, metric) in content.metrics.enumerated() {
-            drawCenteredAutoSizedSingleLineText(
+            drawMultipleMetricPercentage(
                 metric.percentageText,
-                weight: .heavy,
+                valueColor: mihoyoGameMetricColor(for: metric.percentageColor),
                 maxFontSize: buttonRect.height * 0.185,
                 minFontSize: buttonRect.height * 0.115,
-                color: mihoyoGameMetricColor(for: metric.percentageColor),
                 rect: NSRect(
                     x: rect.minX,
                     y: cursor - percentageHeight,
@@ -1073,6 +1072,54 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             rect: rect,
             shadow: shadow
         )
+    }
+
+    private func drawMultipleMetricPercentage(
+        _ text: String,
+        valueColor: NSColor,
+        maxFontSize: CGFloat,
+        minFontSize: CGFloat,
+        rect: NSRect,
+        shadow: NSShadow?
+    ) {
+        guard let separator = text.firstIndex(of: " ") else {
+            drawCenteredAutoSizedSingleLineText(
+                text,
+                weight: .heavy,
+                maxFontSize: maxFontSize,
+                minFontSize: minFontSize,
+                color: valueColor,
+                rect: rect,
+                shadow: shadow
+            )
+            return
+        }
+
+        let label = String(text[..<separator])
+        let value = String(text[text.index(after: separator)...])
+        let font = AutoSizedSingleLineText(
+            text: text,
+            weight: .heavy,
+            maxFontSize: maxFontSize,
+            minFontSize: minFontSize
+        ).fittedFont(allowedWidth: rect.width, allowedHeight: rect.height)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        let attributed = NSMutableAttributedString(string: text, attributes: [
+            .font: font,
+            .foregroundColor: NSColor.white,
+            .paragraphStyle: paragraph,
+        ])
+        attributed.addAttribute(
+            .foregroundColor,
+            value: valueColor,
+            range: NSRange(location: label.count + 1, length: value.count)
+        )
+        if let shadow {
+            attributed.addAttribute(.shadow, value: shadow, range: NSRange(location: 0, length: attributed.length))
+        }
+        let lineRect = AutoSizedSingleLineText.verticallyCenteredLineRect(font: font, in: rect)
+        attributed.draw(with: lineRect, options: [.usesLineFragmentOrigin, .usesFontLeading])
     }
 
     private func drawCenteredSingleLineText(
