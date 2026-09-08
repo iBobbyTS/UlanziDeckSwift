@@ -1924,6 +1924,20 @@ struct UlanziDeckSwiftTests {
         #expect(abs(brightColor.greenComponent - brightColor.blueComponent) < 0.01)
     }
 
+    @Test func buttonDimmingUsesSharedDefaultAndZcodeOverride() throws {
+        let defaultVisual = DeckKeyVisualConfiguration()
+        #expect(defaultVisual.dimmingPercent == 38)
+        #expect(defaultVisual.dimsBackground)
+
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        let didAssignCodexUsage = state.assign(.codexUsage, to: 2)
+        #expect(didAssignCodexUsage)
+        #expect(state.configuration(for: 2)?.visual.dimmingPercent == 38)
+        let didAssignZcodeUsage = state.assign(.zcodeUsage, to: 3)
+        #expect(didAssignZcodeUsage)
+        #expect(state.configuration(for: 3)?.visual.dimmingPercent == 20)
+    }
+
     @Test func connectSMBServerFunctionDisplaysNameAndPersistsNormalizedAddress() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(layout: layout)

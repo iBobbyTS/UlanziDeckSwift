@@ -1016,21 +1016,36 @@ extension ContentView {
                 .help(configuration.buttonVisualCanUseBlurredBackground ? "切换背景的高斯模糊版本" : "替换背景或选择带图标的文件后可用")
                 .accessibilityLabel("高斯模糊")
                 .accessibilityValue(visual.usesBlurredBackground ? "已开启" : "已关闭")
-
-                Button {
-                    updateSelectedButtonVisual { updatedVisual in
-                        updatedVisual.dimsBackground.toggle()
-                    }
-                } label: {
-                    Label("变暗", systemImage: visual.dimsBackground ? "circle.lefthalf.filled" : "circle")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(visual.dimsBackground ? .accentColor : .secondary)
-                .help(visual.dimsBackground ? "按钮背景已降低亮度" : "按钮背景使用原始亮度")
-                .accessibilityLabel("降低按钮背景亮度")
-                .accessibilityValue(visual.dimsBackground ? "已开启" : "已关闭")
             }
+
+            HStack(spacing: 8) {
+                Text("亮度")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                Slider(
+                    value: Binding(
+                        get: { Double(visual.dimmingPercent) },
+                        set: { value in
+                            updateSelectedButtonVisual { updatedVisual in
+                                updatedVisual.dimmingPercent = DeckKeyVisualConfiguration.clampedDimmingPercent(Int(value.rounded()))
+                            }
+                        }
+                    ),
+                    in: 0...100
+                )
+                .frame(maxWidth: .infinity)
+                .focusable(false)
+                .focusEffectDisabled()
+                .accessibilityLabel("亮度")
+                .accessibilityValue("\(visual.dimmingPercent)%")
+
+                Text("\(visual.dimmingPercent)%")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(width: 34, alignment: .trailing)
+            }
+            .help("设置按钮背景的亮度")
         }
     }
 }

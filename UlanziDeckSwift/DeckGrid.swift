@@ -128,6 +128,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                         backgroundAssetName: nil,
                         usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
                         dimsBackground: configuration.visual.dimsBackground,
+                        dimmingPercent: configuration.visual.dimmingPercent,
                         hasCustomDisplayName: hasCustomDisplayName,
                         hasCustomBackground: configuration.visual.hasCustomBackground
                     )
@@ -143,6 +144,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                         backgroundAssetName: nil,
                         usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
                         dimsBackground: configuration.visual.dimsBackground,
+                        dimmingPercent: configuration.visual.dimmingPercent,
                         hasCustomDisplayName: hasCustomDisplayName,
                         hasCustomBackground: configuration.visual.hasCustomBackground
                     )
@@ -158,6 +160,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                         backgroundAssetName: nil,
                         usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
                         dimsBackground: configuration.visual.dimsBackground,
+                        dimmingPercent: configuration.visual.dimmingPercent,
                         hasCustomDisplayName: hasCustomDisplayName,
                         hasCustomBackground: configuration.visual.hasCustomBackground
                     )
@@ -173,6 +176,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                         backgroundAssetName: nil,
                         usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
                         dimsBackground: configuration.visual.dimsBackground,
+                        dimmingPercent: configuration.visual.dimmingPercent,
                         hasCustomDisplayName: hasCustomDisplayName,
                         hasCustomBackground: configuration.visual.hasCustomBackground
                     )
@@ -188,6 +192,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                         backgroundAssetName: nil,
                         usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
                         dimsBackground: configuration.visual.dimsBackground,
+                        dimmingPercent: configuration.visual.dimmingPercent,
                         hasCustomDisplayName: hasCustomDisplayName,
                         hasCustomBackground: configuration.visual.hasCustomBackground
                     )
@@ -335,6 +340,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
             backgroundAssetName: nil,
             usesFittedBackgroundImage: buttonBackgroundUsesFittedImage,
             dimsBackground: configuration.visual.dimsBackground,
+            dimmingPercent: configuration.visual.dimmingPercent,
             hasCustomDisplayName: hasCustomDisplayName,
             hasCustomBackground: configuration.visual.hasCustomBackground
         )
@@ -429,6 +435,7 @@ nonisolated struct ButtonVisualContent: Equatable {
     let backgroundAssetName: String?
     let usesFittedBackgroundImage: Bool
     let dimsBackground: Bool
+    let dimmingPercent: Int
     let hasCustomDisplayName: Bool
     let hasCustomBackground: Bool
 }
@@ -439,6 +446,7 @@ nonisolated struct FolderButtonContent: Equatable {
     var displayName: String { visual.displayName }
     var backgroundPNGData: Data? { visual.backgroundPNGData }
     var dimsBackground: Bool { visual.dimsBackground }
+    var dimmingPercent: Int { visual.dimmingPercent }
 }
 
 nonisolated struct FileButtonContent: Equatable {
@@ -447,6 +455,7 @@ nonisolated struct FileButtonContent: Equatable {
     var displayName: String { visual.displayName }
     var backgroundPNGData: Data? { visual.backgroundPNGData }
     var dimsBackground: Bool { visual.dimsBackground }
+    var dimmingPercent: Int { visual.dimmingPercent }
 }
 
 nonisolated struct WebPageButtonContent: Equatable {
@@ -455,6 +464,7 @@ nonisolated struct WebPageButtonContent: Equatable {
     var displayName: String { visual.displayName }
     var backgroundPNGData: Data? { visual.backgroundPNGData }
     var dimsBackground: Bool { visual.dimsBackground }
+    var dimmingPercent: Int { visual.dimmingPercent }
 }
 
 nonisolated struct SMBServerButtonContent: Equatable {
@@ -463,6 +473,7 @@ nonisolated struct SMBServerButtonContent: Equatable {
     var displayName: String { visual.displayName }
     var backgroundPNGData: Data? { visual.backgroundPNGData }
     var dimsBackground: Bool { visual.dimsBackground }
+    var dimmingPercent: Int { visual.dimmingPercent }
 }
 
 nonisolated struct PageFolderButtonContent: Equatable {
@@ -471,6 +482,7 @@ nonisolated struct PageFolderButtonContent: Equatable {
     var displayName: String { visual.displayName }
     var backgroundPNGData: Data? { visual.backgroundPNGData }
     var dimsBackground: Bool { visual.dimsBackground }
+    var dimmingPercent: Int { visual.dimmingPercent }
 }
 
 nonisolated struct PageBackButtonContent: Equatable {
@@ -2424,6 +2436,11 @@ nonisolated struct DeckGridInteractionState: Equatable {
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].clearDefaultButtonBackgroundSnapshot(for: previousFunction)
         configurations[keyID, default: .tallyDefault].function = function
+        if function == .zcodeUsage {
+            configurations[keyID, default: .tallyDefault].visual.dimmingPercent = 20
+        } else if previousFunction == .zcodeUsage {
+            configurations[keyID, default: .tallyDefault].visual.dimmingPercent = DeckKeyVisualConfiguration.defaultDimmingPercent
+        }
         if let dataSource = function.usageDataSource {
             let sourceChanged = configurations[keyID, default: .tallyDefault].codexUsage.dataSource != dataSource
             configurations[keyID, default: .tallyDefault].codexUsage.dataSource = dataSource
@@ -2765,6 +2782,9 @@ nonisolated struct DeckGridInteractionState: Equatable {
         var configuration = DeckKeyConfiguration(function: function)
         if function == .pageFolder {
             configuration.pageFolder = DeckKeyPageFolderConfiguration(pageID: pageID)
+        }
+        if function == .zcodeUsage {
+            configuration.visual.dimmingPercent = 20
         }
         configuration.refreshDefaultButtonBackgroundSnapshot()
         return configuration

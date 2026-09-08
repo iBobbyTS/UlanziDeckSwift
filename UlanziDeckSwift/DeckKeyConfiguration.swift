@@ -424,23 +424,31 @@ nonisolated enum DeckKeySecurityScopedBookmarkOptions {
 }
 
 nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
+    static let defaultDimmingPercent = 38
+
     var name: String
     var backgroundPNGData: Data?
     var blurredBackgroundPNGData: Data?
     var usesBlurredBackground: Bool
-    var dimsBackground: Bool
+    var dimmingPercent: Int
+
+    var dimsBackground: Bool {
+        get { dimmingPercent > 0 }
+        set { dimmingPercent = newValue ? Self.defaultDimmingPercent : 0 }
+    }
 
     init(
         name: String = "",
         backgroundPNGData: Data? = nil,
         blurredBackgroundPNGData: Data? = nil,
         usesBlurredBackground: Bool = false,
-        dimsBackground: Bool = true
+        dimsBackground: Bool = true,
+        dimmingPercent: Int? = nil
     ) {
         self.name = Self.normalizedName(name)
         self.backgroundPNGData = backgroundPNGData
         self.blurredBackgroundPNGData = blurredBackgroundPNGData
-        self.dimsBackground = dimsBackground
+        self.dimmingPercent = Self.clampedDimmingPercent(dimmingPercent ?? (dimsBackground ? Self.defaultDimmingPercent : 0))
         self.usesBlurredBackground = usesBlurredBackground
     }
 
@@ -470,6 +478,7 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
         case blurredBackgroundPNGData
         case usesBlurredBackground
         case dimsBackground
+        case dimmingPercent
     }
 
     init(from decoder: Decoder) throws {
@@ -478,7 +487,13 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
         backgroundPNGData = try container.decodeIfPresent(Data.self, forKey: .backgroundPNGData)
         blurredBackgroundPNGData = try container.decodeIfPresent(Data.self, forKey: .blurredBackgroundPNGData)
         usesBlurredBackground = try container.decodeIfPresent(Bool.self, forKey: .usesBlurredBackground) ?? false
-        dimsBackground = try container.decodeIfPresent(Bool.self, forKey: .dimsBackground) ?? true
+        if let dimmingPercent = try container.decodeIfPresent(Int.self, forKey: .dimmingPercent) {
+            self.dimmingPercent = Self.clampedDimmingPercent(dimmingPercent)
+        } else {
+            self.dimmingPercent = (try container.decodeIfPresent(Bool.self, forKey: .dimsBackground) ?? true)
+                ? Self.defaultDimmingPercent
+                : 0
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -488,10 +503,15 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
         try container.encodeIfPresent(blurredBackgroundPNGData, forKey: .blurredBackgroundPNGData)
         try container.encode(usesBlurredBackground, forKey: .usesBlurredBackground)
         try container.encode(dimsBackground, forKey: .dimsBackground)
+        try container.encode(dimmingPercent, forKey: .dimmingPercent)
     }
 
     static func normalizedName(_ rawValue: String) -> String {
         rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func clampedDimmingPercent(_ value: Int) -> Int {
+        min(100, max(0, value))
     }
 }
 

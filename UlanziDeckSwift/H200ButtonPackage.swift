@@ -502,7 +502,7 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         if let backgroundPNGData = visual.backgroundPNGData,
            let image = NSImage(data: backgroundPNGData) {
             drawFittedBackgroundImage(image, in: rect)
-            drawDimmingIfNeeded(visual.dimsBackground, in: rect)
+            drawDimmingIfNeeded(visual.dimmingPercent, in: rect)
             return
         }
 
@@ -522,18 +522,18 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
                 )
             }
 
-            drawDimmingIfNeeded(visual.dimsBackground, in: rect)
+            drawDimmingIfNeeded(visual.dimmingPercent, in: rect)
             return
         }
 
         Self.buttonBackgroundColor.setFill()
         rect.fill()
-        drawDimmingIfNeeded(visual.dimsBackground, in: rect)
+        drawDimmingIfNeeded(visual.dimmingPercent, in: rect)
     }
 
-    private func drawDimmingIfNeeded(_ enabled: Bool, in rect: NSRect) {
-        if enabled {
-            NSColor(calibratedWhite: 0, alpha: 0.38).setFill()
+    private func drawDimmingIfNeeded(_ percent: Int, in rect: NSRect) {
+        if percent > 0 {
+            NSColor(calibratedWhite: 0, alpha: CGFloat(percent) / 100).setFill()
             rect.fill()
         }
     }
