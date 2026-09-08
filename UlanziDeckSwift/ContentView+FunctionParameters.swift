@@ -1025,10 +1025,10 @@ extension ContentView {
 
                 Slider(
                     value: Binding(
-                        get: { Double(visual.dimmingPercent) },
+                        get: { Double(visual.backgroundOpacityPercent) },
                         set: { value in
                             updateSelectedButtonVisual { updatedVisual in
-                                updatedVisual.dimmingPercent = DeckKeyVisualConfiguration.clampedDimmingPercent(Int(value.rounded()))
+                                updatedVisual.backgroundOpacityPercent = Int(value.rounded())
                             }
                         }
                     ),
@@ -1038,9 +1038,9 @@ extension ContentView {
                 .focusable(false)
                 .focusEffectDisabled()
                 .accessibilityLabel("亮度")
-                .accessibilityValue("\(visual.dimmingPercent)%")
+                .accessibilityValue("\(visual.backgroundOpacityPercent)%")
 
-                Text("\(visual.dimmingPercent)%")
+                Text("\(visual.backgroundOpacityPercent)%")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
                     .frame(width: 34, alignment: .trailing)

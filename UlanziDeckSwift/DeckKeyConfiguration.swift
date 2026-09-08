@@ -437,6 +437,12 @@ nonisolated struct DeckKeyVisualConfiguration: Codable, Equatable {
         set { dimmingPercent = newValue ? Self.defaultDimmingPercent : 0 }
     }
 
+    /// 用户界面显示的背景可见度：0% 不显示背景，100% 显示原图。
+    var backgroundOpacityPercent: Int {
+        get { 100 - dimmingPercent }
+        set { dimmingPercent = Self.clampedDimmingPercent(100 - newValue) }
+    }
+
     init(
         name: String = "",
         backgroundPNGData: Data? = nil,
