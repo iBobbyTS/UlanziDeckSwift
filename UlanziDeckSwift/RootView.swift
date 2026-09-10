@@ -181,18 +181,61 @@ struct RootView: View {
                     maximumContentSize: windowContentMaximumSize
                 )
             }
-            .alert(item: $connectionModel.alert) { alert in
-                Alert(
-                    title: Text(alert.title),
-                    message: Text(alert.message),
-                    primaryButton: .destructive(Text("退出")) {
-                        connectionModel.quit()
-                    },
-                    secondaryButton: .default(Text("重试")) {
-                        connectionModel.retry()
-                    }
-                )
+            .overlay(alignment: .top) {
+                if let alert = connectionModel.alert {
+                    H200ConnectionWarningBanner(
+                        alert: alert,
+                        onRetry: connectionModel.retry,
+                        onQuit: connectionModel.quit
+                    )
+                    .padding(.top, 12)
+                    .padding(.horizontal, 20)
+                }
             }
+    }
+}
+
+private struct H200ConnectionWarningBanner: View {
+    let alert: H200ConnectionAlert
+    let onRetry: () -> Void
+    let onQuit: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.title2)
+                .foregroundStyle(.red)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(alert.title)
+                    .font(.headline)
+
+                Text(alert.message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 8) {
+                    Button("重试", action: onRetry)
+                        .buttonStyle(.borderedProminent)
+
+                    Button("退出", role: .destructive, action: onQuit)
+                        .buttonStyle(.bordered)
+                }
+                .padding(.top, 4)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: 680, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Color.red.opacity(0.35), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.2), radius: 12, y: 4)
+        .accessibilityElement(children: .contain)
     }
 }
 
