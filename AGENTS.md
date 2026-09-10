@@ -64,6 +64,12 @@ xcodebuild test -project UlanziDeckSwift.xcodeproj -scheme UlanziDeckSwift -dest
 - 当前不启用仓库级 git hook 维护性审计提醒；如需启用，先由用户明确 commit 间隔和 baseline 策略。
 - 不创建 `.agents/skills/`，除非用户明确要求为本仓库沉淀项目专用 skill。
 
+## 构建与安装
+
+- Debug 构建产物使用固定路径：`/Users/ibobby/Projects/UlanziDeckSwift/build/Build/Products/Debug/Ulanzi Deck.app`。
+- `/Applications/Ulanzi Deck.app` 必须保持为指向上述真实构建产物的 macOS 快捷方式（Finder alias），不要替换成应用目录。
+- 重新安装时直接更新真实构建产物并重建 `/Applications/Ulanzi Deck.app` 快捷方式，不保留 `previous` 备份。
+
 ## 安全与维护
 
 - 保留用户未要求删除的改动，不执行 `git reset --hard`、`git checkout --` 或破坏性清理。

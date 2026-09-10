@@ -507,21 +507,6 @@ struct ContentView: View {
 
     private var parameterPanel: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("功能参数")
-                    .font(.headline)
-
-                Spacer()
-
-                if let selectedKeyID = interactionState.selectedKeyID {
-                    Text("按键 \(selectedKeyID)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Divider()
-
             if let selectedConfiguration {
                 ScrollView(.vertical) {
                     parameterContent(for: selectedConfiguration)
