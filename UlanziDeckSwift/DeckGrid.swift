@@ -1629,6 +1629,22 @@ nonisolated struct DeckGridInteractionState: Equatable {
     }
 
     @discardableResult
+    mutating func setSub2APIPoolSelectionMode(_ mode: DeckKeySub2APIConfiguration.PoolSelectionMode, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID), configurations[keyID, default: .tallyDefault].function == .sub2API else { return false }
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].sub2API.poolSelectionMode = mode
+        return true
+    }
+
+    @discardableResult
+    mutating func setSub2APIPoolRank(_ rank: Int, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID), configurations[keyID, default: .tallyDefault].function == .sub2API else { return false }
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].sub2API.poolRank = max(1, rank)
+        return true
+    }
+
+    @discardableResult
     mutating func setSub2APIRefreshInterval(_ interval: Int, for keyID: Int) -> Bool {
         guard validKeyIDs.contains(keyID),
               canSetSub2APIRefreshInterval(for: keyID)

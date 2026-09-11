@@ -1106,6 +1106,24 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
+    func setSelectedSub2APIPoolSelectionMode(_ mode: DeckKeySub2APIConfiguration.PoolSelectionMode) {
+        guard let keyID = interactionState.selectedKeyID else { return }
+        if interactionState.setSub2APIPoolSelectionMode(mode, for: keyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: keyID)
+            fetchSub2API(for: keyID)
+        }
+    }
+
+    func setSelectedSub2APIPoolRank(_ rank: Int) {
+        guard let keyID = interactionState.selectedKeyID else { return }
+        if interactionState.setSub2APIPoolRank(rank, for: keyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: keyID)
+            fetchSub2API(for: keyID)
+        }
+    }
+
     func setSelectedSub2APIRefreshInterval(_ interval: Int) {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return
@@ -2310,7 +2328,14 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        guard resolved.config.targetGroupID > 0 else {
+        guard let selectedTargetGroupID = resolved.config.effectiveTargetGroupID else {
+            if resolved.config.poolSelectionMode == .availableConcurrency {
+                let items = resolved.config.groupListState.items
+                let message = items.isEmpty
+                    ? "请先从服务器获取号池"
+                    : "排名 \(resolved.config.poolRank) 超出号池总数 \(items.count)"
+                interactionState.setSub2APILastResult(.networkError(message), for: resolved.slot.keyID)
+            }
             return
         }
 
@@ -2319,7 +2344,7 @@ final class H200ConnectionModel: ObservableObject {
         let pageID = resolved.slot.pageID
         let fetcher = sub2APIFetcher
         let baseURL = resolved.baseURL
-        let targetGroupID = resolved.config.targetGroupID
+        let targetGroupID = selectedTargetGroupID
         let bearerKey = resolved.bearerKey
         let authInfo = resolved.dataSource.authInfo
         let keyID = resolved.slot.keyID
@@ -2368,7 +2393,7 @@ final class H200ConnectionModel: ObservableObject {
                   let latest = self.resolveCurrentSub2APISlot(for: instanceID),
                   latest.slot.pageID == pageID,
                   latest.baseURL == baseURL,
-                  latest.config.targetGroupID == targetGroupID
+                  latest.config.effectiveTargetGroupID == targetGroupID
             else {
                 return
             }
@@ -2388,7 +2413,7 @@ final class H200ConnectionModel: ObservableObject {
                       self.canRunInternalRefresh,
                       let latest = self.resolveCurrentSub2APISlot(for: instanceID),
                       latest.baseURL == baseURL,
-                      latest.config.targetGroupID == targetGroupID,
+                      latest.config.effectiveTargetGroupID == targetGroupID,
                       latest.bearerKey == expectedBearerKey,
                       !self.isSub2APITokenPaused(for: instanceID)
                 else {
@@ -2418,7 +2443,8 @@ final class H200ConnectionModel: ObservableObject {
             guard let consumer = resolveCurrentSub2APISlot(for: instanceID) else {
                 return false
             }
-            return consumer.config.targetGroupID > 0
+            return consumer.config.effectiveTargetGroupID != nil
+                || consumer.config.poolSelectionMode == .availableConcurrency
         }) else {
             return
         }
@@ -2531,9 +2557,24 @@ final class H200ConnectionModel: ObservableObject {
         switch result {
         case let .success(items):
             groupListState = .success(items: items)
-            let targetGroupID = interactionState.sub2APIConfiguration(for: keyID).targetGroupID
-            if let item = items.first(where: { $0.groupID == targetGroupID }) {
+            let configuration = interactionState.sub2APIConfiguration(for: keyID)
+            let selectedItem: Sub2APICapacityItem?
+            if configuration.poolSelectionMode == .availableConcurrency {
+                let sortedItems = items.enumerated().sorted {
+                    if $0.element.availableConcurrency != $1.element.availableConcurrency {
+                        return $0.element.availableConcurrency > $1.element.availableConcurrency
+                    }
+                    return $0.offset < $1.offset
+                }.map(\.element)
+                selectedItem = sortedItems.indices.contains(configuration.poolRank - 1)
+                    ? sortedItems[configuration.poolRank - 1] : nil
+            } else {
+                selectedItem = items.first { $0.groupID == configuration.targetGroupID }
+            }
+            if let item = selectedItem {
                 capacityResult = .success(item: item)
+            } else if configuration.poolSelectionMode == .availableConcurrency {
+                capacityResult = .networkError("排名 \(configuration.poolRank) 超出号池总数 \(items.count)")
             } else {
                 capacityResult = .notFound
             }
@@ -3767,7 +3808,8 @@ final class H200ConnectionModel: ObservableObject {
         for keyID in changedKeyIDs.sorted() {
             if interactionState.configuration(for: keyID)?.function == .sub2API {
                 scheduleSub2APIGroupListRefresh(for: keyID)
-                if interactionState.sub2APIConfiguration(for: keyID).targetGroupID > 0 {
+                if interactionState.sub2APIConfiguration(for: keyID).effectiveTargetGroupID != nil
+                    || interactionState.sub2APIConfiguration(for: keyID).poolSelectionMode == .availableConcurrency {
                     fetchSub2API(for: keyID)
                 }
             } else if interactionState.configuration(for: keyID)?.function == .sub2APIBalance {
@@ -3801,7 +3843,8 @@ final class H200ConnectionModel: ObservableObject {
         let hasConfiguredConsumer = sub2APIConsumerInstanceIDs(
             for: resolved.dataSourceInstanceID
         ).contains { consumerInstanceID in
-            (resolveCurrentSub2APISlot(for: consumerInstanceID)?.config.targetGroupID ?? 0) > 0
+            resolveCurrentSub2APISlot(for: consumerInstanceID)?.config.effectiveTargetGroupID != nil
+                || resolveCurrentSub2APISlot(for: consumerInstanceID)?.config.poolSelectionMode == .availableConcurrency
         }
         guard canRunInternalRefresh,
               !isSub2APITokenPaused(for: instanceID),

@@ -1736,10 +1736,13 @@ nonisolated struct DeckKeyNewAPIModelAvailabilityConfiguration: Codable, Equatab
 }
 
 nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
+    enum PoolSelectionMode: String, Codable, Equatable { case fixed, availableConcurrency }
     var instanceID: String
     var baseURL: String
     var dataSourceInstanceID: String?
     var targetGroupID: Int
+    var poolSelectionMode: PoolSelectionMode
+    var poolRank: Int
     var refreshInterval: Int
     var bearerKey: String
     var credentialID: String?
@@ -1781,6 +1784,8 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         baseURL: String = "",
         dataSourceInstanceID: String? = nil,
         targetGroupID: Int = 0,
+        poolSelectionMode: PoolSelectionMode = .fixed,
+        poolRank: Int = 1,
         refreshInterval: Int = 30,
         bearerKey: String = "",
         credentialID: String? = nil,
@@ -1795,6 +1800,8 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         self.baseURL = baseURL
         self.dataSourceInstanceID = dataSourceInstanceID
         self.targetGroupID = targetGroupID
+        self.poolSelectionMode = poolSelectionMode
+        self.poolRank = max(1, poolRank)
         self.refreshInterval = refreshInterval
         self.bearerKey = bearerKey
         self.credentialID = credentialID ?? (bearerKey.isEmpty ? nil : UUID().uuidString)
@@ -1814,6 +1821,9 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     }
 
     var displayName: String {
+        if poolSelectionMode == .availableConcurrency, let ranked = rankedGroupItem {
+            return ranked.groupName.isEmpty ? "分组 \(ranked.groupID)" : ranked.groupName
+        }
         let trimmedCustomGroupName = customGroupName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedCustomGroupName.isEmpty {
             return trimmedCustomGroupName
@@ -1823,6 +1833,9 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     }
 
     var automaticGroupDisplayName: String {
+        if poolSelectionMode == .availableConcurrency {
+            return rankedGroupItem.map { $0.groupName.isEmpty ? "分组 \($0.groupID)" : $0.groupName } ?? "未获取号池"
+        }
         guard targetGroupID > 0 else {
             return "未配置"
         }
@@ -1864,11 +1877,28 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         return nil
     }
 
+    var rankedGroupItem: Sub2APICapacityItem? {
+        guard case let .success(items) = groupListState, !items.isEmpty else { return nil }
+        let sorted = items.enumerated().sorted {
+            if $0.element.availableConcurrency != $1.element.availableConcurrency {
+                return $0.element.availableConcurrency > $1.element.availableConcurrency
+            }
+            return $0.offset < $1.offset
+        }
+        let index = max(1, poolRank) - 1
+        return sorted.indices.contains(index) ? sorted[index].element : nil
+    }
+
+    var effectiveTargetGroupID: Int? {
+        poolSelectionMode == .fixed ? (targetGroupID > 0 ? targetGroupID : nil) : rankedGroupItem?.groupID
+    }
+
     enum CodingKeys: CodingKey {
         case instanceID
         case baseURL
         case dataSourceInstanceID
         case targetGroupID
+        case poolSelectionMode, poolRank
         case refreshInterval
         case bearerKey
         case credentialID
@@ -1890,6 +1920,8 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         dataSourceInstanceID = decodedDataSourceInstanceID?.isEmpty == false ? decodedDataSourceInstanceID : nil
         targetGroupID = try container.decodeIfPresent(Int.self, forKey: .targetGroupID) ?? 0
+        poolSelectionMode = try container.decodeIfPresent(PoolSelectionMode.self, forKey: .poolSelectionMode) ?? .fixed
+        poolRank = max(1, try container.decodeIfPresent(Int.self, forKey: .poolRank) ?? 1)
         refreshInterval = try container.decodeIfPresent(Int.self, forKey: .refreshInterval) ?? 30
         bearerKey = try container.decodeIfPresent(String.self, forKey: .bearerKey) ?? ""
         credentialID = try container.decodeIfPresent(String.self, forKey: .credentialID)
@@ -1909,6 +1941,8 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         try container.encode(baseURL, forKey: .baseURL)
         try container.encodeIfPresent(dataSourceInstanceID, forKey: .dataSourceInstanceID)
         try container.encode(targetGroupID, forKey: .targetGroupID)
+        try container.encode(poolSelectionMode, forKey: .poolSelectionMode)
+        try container.encode(poolRank, forKey: .poolRank)
         try container.encode(refreshInterval, forKey: .refreshInterval)
         try container.encodeIfPresent(credentialID, forKey: .credentialID)
         try container.encode(customServiceName, forKey: .customServiceName)

@@ -7,6 +7,30 @@ import Testing
 
 @Suite(.serialized)
 struct UlanziDeckSwiftTests {
+    @Test("Sub2API 并发排序稳定且兼容持久化")
+    func sub2APIPoolSelectionSortAndPersistence() throws {
+        func item(_ id: Int, _ available: Int, _ name: String) -> Sub2APICapacityItem {
+            Sub2APICapacityItem(groupID: id, groupName: name, groupPlatform: "", concurrencyUsed: 0, concurrencyMax: available, sessionsUsed: 0, sessionsMax: 0, rpmUsed: 0, rpmMax: 0)
+        }
+        var configuration = DeckKeySub2APIConfiguration(poolSelectionMode: .availableConcurrency, poolRank: 2)
+        configuration.groupListState = .success(items: [item(1, 3, "A"), item(2, 9, "B"), item(3, 3, "C")])
+        configuration.poolRank = 1
+        #expect(configuration.rankedGroupItem?.groupID == 2)
+        configuration.poolRank = 3
+        #expect(configuration.rankedGroupItem?.groupID == 3)
+        configuration.poolRank = 4
+        #expect(configuration.rankedGroupItem == nil)
+        #expect(configuration.effectiveTargetGroupID == nil)
+        configuration.poolRank = 1
+        configuration.groupListState = .idle
+        #expect(configuration.effectiveTargetGroupID == nil)
+        configuration.groupListState = .success(items: [item(1, 3, "A"), item(2, 9, "B"), item(3, 3, "C")])
+        #expect(configuration.displayName == "B")
+        let restored = try JSONDecoder().decode(DeckKeySub2APIConfiguration.self, from: JSONEncoder().encode(configuration))
+        #expect(restored.poolSelectionMode == .availableConcurrency)
+        #expect(restored.poolRank == 1)
+    }
+
     @Test("Shell 命令配置分别保存 shell 和命令，并为空 shell 使用 zsh")
     func shellCommandConfigurationNormalizesShell() throws {
         let configuration = DeckKeyShellCommandConfiguration(shell: "  ", command: "  echo hello  ")

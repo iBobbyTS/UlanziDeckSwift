@@ -491,7 +491,19 @@ extension ContentView {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
 
+                        Picker("号池选择模式", selection: Binding(get: { selectedConfiguration?.sub2API.poolSelectionMode ?? .fixed }, set: onSub2APIPoolSelectionModeChange)) {
+                            Text("固定分组").tag(DeckKeySub2APIConfiguration.PoolSelectionMode.fixed)
+                            Text("按可用并发排序").tag(DeckKeySub2APIConfiguration.PoolSelectionMode.availableConcurrency)
+                        }.pickerStyle(.radioGroup)
+
                         HStack(spacing: 8) {
+                            if selectedConfiguration?.sub2API.poolSelectionMode == .availableConcurrency {
+                                TextField("排名", value: Binding(get: { selectedConfiguration?.sub2API.poolRank ?? 1 }, set: onSub2APIPoolRankChange), format: .number)
+                                    .frame(width: 70)
+                                if let count = selectedConfiguration?.sub2API.groupListState.items.count, count > 0 {
+                                    Text("/ \(count)").foregroundStyle(.secondary)
+                                }
+                            } else {
                             Picker("目标分组", selection: selectedSub2APITargetGroupIDBinding) {
                                 Text("未选择").tag(0)
 
@@ -508,6 +520,7 @@ extension ContentView {
                             .labelsHidden()
                             .pickerStyle(.menu)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            }
 
                             Button("从服务器获取号池") {
                                 onSub2APIGroupListRefresh()
@@ -534,6 +547,7 @@ extension ContentView {
                             placeholder: selectedSub2APIAutomaticGroupName,
                             text: selectedSub2APIGroupNameBinding
                         )
+                        .disabled(selectedConfiguration?.sub2API.poolSelectionMode == .availableConcurrency)
                     }
                 }
                 .frame(maxWidth: 360, alignment: .leading)
@@ -1340,11 +1354,18 @@ extension ContentView {
 
         switch state {
         case .idle:
-            return nil
+            return selectedConfiguration?.sub2API.poolSelectionMode == .availableConcurrency
+                ? "请先从服务器获取号池" : nil
         case .loading:
             return "正在获取号池..."
         case let .success(items):
-            return items.isEmpty ? "服务器没有返回号池" : "已获取 \(items.count) 个号池"
+            if items.isEmpty { return "服务器没有返回号池" }
+            if let configuration = selectedConfiguration?.sub2API,
+               configuration.poolSelectionMode == .availableConcurrency,
+               configuration.poolRank > items.count {
+                return "排名 \(configuration.poolRank) 超出号池总数 \(items.count)"
+            }
+            return "已获取 \(items.count) 个号池"
         case .invalidToken:
             if selectedConfiguration?.sub2API.isInvalidJSON == true {
                 return "认证信息格式错误，请输入从浏览器获取的完整 JSON"
@@ -1409,9 +1430,12 @@ extension ContentView {
     var selectedSub2APIGroupNameBinding: Binding<String> {
         Binding(
             get: {
-                selectedConfiguration?.sub2API.customGroupName ?? ""
+                guard let sub2API = selectedConfiguration?.sub2API else { return "" }
+                return sub2API.poolSelectionMode == .availableConcurrency
+                    ? sub2API.displayName : sub2API.customGroupName
             },
             set: { groupName in
+                guard selectedConfiguration?.sub2API.poolSelectionMode == .fixed else { return }
                 onSub2APIGroupNameChange(groupName)
             }
         )

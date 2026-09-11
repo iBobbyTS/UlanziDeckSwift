@@ -120,6 +120,12 @@ struct RootView: View {
             onSub2APITargetGroupIDChange: { groupID in
                 connectionModel.setSelectedSub2APITargetGroupID(groupID)
             },
+            onSub2APIPoolSelectionModeChange: { mode in
+                connectionModel.setSelectedSub2APIPoolSelectionMode(mode)
+            },
+            onSub2APIPoolRankChange: { rank in
+                connectionModel.setSelectedSub2APIPoolRank(rank)
+            },
             onSub2APIGroupListRefresh: {
                 connectionModel.refreshSelectedSub2APIGroupList()
             },
