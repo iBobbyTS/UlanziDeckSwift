@@ -102,7 +102,7 @@ struct ContentView: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                header(windowSize: geometry.size)
+                header()
                 Divider()
                 workbench
             }
@@ -179,19 +179,11 @@ struct ContentView: View {
         CGFloat(previewLayoutMetrics.gridContentHeight(for: layout))
     }
 
-    private func header(windowSize: CGSize) -> some View {
+    private func header() -> some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Ulanzi Deck H200")
                     .font(.title.bold())
-
-                HStack(spacing: 12) {
-                    Text(layout.name)
-
-                    Text("宽 \(Int(windowSize.width)) 高 \(Int(windowSize.height))")
-                        .font(.caption.monospacedDigit())
-                }
-                .foregroundStyle(.secondary)
             }
 
             Spacer()
