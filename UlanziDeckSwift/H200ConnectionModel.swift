@@ -1096,7 +1096,7 @@ final class H200ConnectionModel: ObservableObject {
                sharedSub2APILeaderInstanceID(
                 for: interactionState.resolvedSub2APIDataSourceInstanceID(for: selectedKeyID)
                ) != nil {
-                applySharedSub2APIResult(.success(items: items), to: selectedKeyID)
+                applySub2APIGroupListResult(.success(items: items), to: selectedKeyID)
                 syncKeyDisplay(keyID: selectedKeyID)
             } else if groupID > 0 {
                 fetchSub2API(for: selectedKeyID)
@@ -1379,12 +1379,30 @@ final class H200ConnectionModel: ObservableObject {
         fetchNewAPIModelAvailability(for: keyID)
     }
 
+    /// 用户点击“从服务器获取号池”。只有这个入口在成功时解锁号池选择按钮。
     func refreshSelectedSub2APIGroupList() {
         guard let selectedKeyID = interactionState.selectedKeyID else {
             return
         }
 
-        fetchSub2APIGroupList(for: selectedKeyID)
+        fetchSub2APIGroupList(for: selectedKeyID, manualUnlock: true)
+    }
+
+    /// 提交号池选择弹窗的“确定”结果：至少选一个，提交后立即按新集合重查。
+    func setSelectedSub2APIPoolSelection(_ poolIDs: Set<Int>) {
+        guard let keyID = interactionState.selectedKeyID else {
+            return
+        }
+
+        guard interactionState.sub2APIConfiguration(for: keyID).selectedPoolIDs != poolIDs else {
+            return
+        }
+
+        if interactionState.setSub2APISelectedPoolIDs(poolIDs, for: keyID) {
+            persistCurrentConfiguration()
+            syncKeyDisplay(keyID: keyID)
+            fetchSub2API(for: keyID)
+        }
     }
 
     func setSelectedMihoyoGameRefreshIntervalMinutes(_ minutes: Int) {
@@ -2328,14 +2346,19 @@ final class H200ConnectionModel: ObservableObject {
             return
         }
 
-        guard let selectedTargetGroupID = resolved.config.effectiveTargetGroupID else {
-            if resolved.config.poolSelectionMode == .availableConcurrency {
-                let items = resolved.config.groupListState.items
-                let message = items.isEmpty
-                    ? "请先从服务器获取号池"
-                    : "排名 \(resolved.config.poolRank) 超出号池总数 \(items.count)"
-                interactionState.setSub2APILastResult(.networkError(message), for: resolved.slot.keyID)
+        if resolved.config.poolSelectionMode == .availableConcurrency {
+            guard resolved.config.isPoolSelectionConfirmed else {
+                interactionState.setSub2APILastResult(
+                    .networkError("请先选择并确定参与排序的号池"),
+                    for: resolved.slot.keyID
+                )
+                return
             }
+            fetchSub2APIRankedPools(for: instanceID)
+            return
+        }
+
+        guard let selectedTargetGroupID = resolved.config.effectiveTargetGroupID else {
             return
         }
 
@@ -2425,7 +2448,106 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
-    private func fetchSharedSub2API(for leaderInstanceID: RuntimeInstanceID) {
+    /// 排序模式的 standalone 容量查询：始终拉取本次完整号池响应，
+    /// 以响应与已提交集合的交集排序并校验排名；越界只报错，不再发单池摘要查询。
+    private func fetchSub2APIRankedPools(for instanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              let resolved = resolveCurrentSub2APISlot(for: instanceID),
+              resolved.config.poolSelectionMode == .availableConcurrency,
+              resolved.config.isPoolSelectionConfirmed,
+              !isSub2APITokenPaused(for: instanceID),
+              !resolved.baseURL.isEmpty,
+              !resolved.bearerKey.isEmpty
+        else {
+            return
+        }
+
+        stopSub2APITimer(for: instanceID, preservesNextFire: false)
+        sub2APIFetchTasks[instanceID]?.cancel()
+        let pageID = resolved.slot.pageID
+        let fetcher = sub2APIFetcher
+        let baseURL = resolved.baseURL
+        let bearerKey = resolved.bearerKey
+        let authInfo = resolved.dataSource.authInfo
+        let keyID = resolved.slot.keyID
+        let poolRank = resolved.config.poolRank
+        let selectedPoolIDs = resolved.config.selectedPoolIDs
+
+        sub2APIFetchTasks[instanceID] = Task { @MainActor [weak self] in
+            var effectiveBearerKey = resolved.dataSource.effectiveAccessToken
+            var expectedBearerKey = bearerKey
+            if effectiveBearerKey.isEmpty {
+                self?.sub2APIFetchTasks[instanceID] = nil
+                self?.interactionState.setSub2APILastResult(
+                    resolved.dataSource.isInvalidJSON
+                        ? .invalidToken : .networkError("认证信息为空"),
+                    for: keyID
+                )
+                return
+            }
+
+            if let authInfo, authInfo.isExpiringSoon {
+                if let newAuthInfo = await self?.refreshSub2APIAuthentication(
+                    baseURL: baseURL,
+                    refreshToken: authInfo.refreshToken,
+                    dataSourceInstanceID: resolved.dataSourceInstanceID
+                ) {
+                    effectiveBearerKey = newAuthInfo.accessToken
+                    if let jsonString = newAuthInfo.jsonString() {
+                        self?.interactionState.setSub2APIBearerKey(
+                            jsonString,
+                            forDataSourceInstanceID: resolved.dataSourceInstanceID
+                        )
+                        expectedBearerKey = jsonString
+                        _ = self?.persistCurrentConfiguration()
+                    }
+                }
+            }
+
+            let result = await fetcher.fetchCapacityGroups(baseURL: baseURL, bearerKey: effectiveBearerKey)
+            guard !Task.isCancelled else { return }
+
+            guard let self,
+                  let latest = self.resolveCurrentSub2APISlot(for: instanceID),
+                  latest.slot.pageID == pageID,
+                  latest.baseURL == baseURL,
+                  latest.config.poolSelectionMode == .availableConcurrency,
+                  latest.config.poolRank == poolRank,
+                  latest.config.selectedPoolIDs == selectedPoolIDs
+            else {
+                return
+            }
+
+            self.sub2APIFetchTasks[instanceID] = nil
+            self.applySub2APIGroupListResult(result, to: latest.slot.keyID)
+            if result.isTokenUnavailable {
+                self.pauseSub2APIForTokenError(instanceID: instanceID)
+            }
+            self.syncKeyDisplay(keyID: latest.slot.keyID) { [weak self] (syncResult: H200DeckSyncResult) in
+                guard case .success = syncResult else {
+                    return
+                }
+
+                guard let self,
+                      self.canRunInternalRefresh,
+                      let latest = self.resolveCurrentSub2APISlot(for: instanceID),
+                      latest.slot.pageID == pageID,
+                      latest.baseURL == baseURL,
+                      latest.bearerKey == expectedBearerKey,
+                      !self.isSub2APITokenPaused(for: instanceID)
+                else {
+                    return
+                }
+
+                self.scheduleNextSub2APIRefresh(for: instanceID)
+            }
+        }
+    }
+
+    private func fetchSharedSub2API(
+        for leaderInstanceID: RuntimeInstanceID,
+        manualUnlockKeyID: Int? = nil
+    ) {
         guard canRunInternalRefresh,
               sub2APIFetchTasks[leaderInstanceID] == nil,
               let resolved = resolveCurrentSub2APISlot(for: leaderInstanceID),
@@ -2524,7 +2646,22 @@ final class H200ConnectionModel: ObservableObject {
                     continue
                 }
                 keyIDs.insert(consumer.slot.keyID)
-                self.applySharedSub2APIResult(result, to: consumer.slot.keyID)
+                var isSuccessfulGroupList = false
+                if case .success = result {
+                    isSuccessfulGroupList = true
+                }
+                let manualFetchUnlocked: Bool?
+                if consumer.slot.keyID == manualUnlockKeyID {
+                    // 只有手动触发获取的按键改变解锁资格，其余共享消费者不参与。
+                    manualFetchUnlocked = isSuccessfulGroupList
+                } else {
+                    manualFetchUnlocked = nil
+                }
+                self.applySub2APIGroupListResult(
+                    result,
+                    to: consumer.slot.keyID,
+                    manualFetchUnlocked: manualFetchUnlocked
+                )
                 if result.isTokenUnavailable {
                     self.pauseSub2APIForTokenError(instanceID: consumerInstanceID)
                 }
@@ -2551,32 +2688,40 @@ final class H200ConnectionModel: ObservableObject {
         }
     }
 
-    private func applySharedSub2APIResult(_ result: Sub2APIGroupListResult, to keyID: Int) {
+    /// 将完整号池响应应用到某个按键：更新号池列表状态、按交集选出容量结果并持久化。
+    /// `manualFetchUnlocked` 仅在手动“从服务器获取号池”的请求结果时传入，用于解锁选择按钮。
+    private func applySub2APIGroupListResult(
+        _ result: Sub2APIGroupListResult,
+        to keyID: Int,
+        manualFetchUnlocked: Bool? = nil
+    ) {
         let groupListState: DeckKeySub2APIGroupListState
         let capacityResult: Sub2APICapacityResult
         switch result {
         case let .success(items):
             groupListState = .success(items: items)
             let configuration = interactionState.sub2APIConfiguration(for: keyID)
-            let selectedItem: Sub2APICapacityItem?
             if configuration.poolSelectionMode == .availableConcurrency {
-                let sortedItems = items.enumerated().sorted {
-                    if $0.element.availableConcurrency != $1.element.availableConcurrency {
-                        return $0.element.availableConcurrency > $1.element.availableConcurrency
-                    }
-                    return $0.offset < $1.offset
-                }.map(\.element)
-                selectedItem = sortedItems.indices.contains(configuration.poolRank - 1)
-                    ? sortedItems[configuration.poolRank - 1] : nil
+                let rankedPools = DeckKeySub2APIConfiguration.rankedPools(
+                    inItems: items,
+                    selectedPoolIDs: configuration.selectedPoolIDs
+                )
+                if !configuration.isPoolSelectionConfirmed {
+                    capacityResult = .networkError("请先选择并确定参与排序的号池")
+                } else if let item = DeckKeySub2APIConfiguration.rankedItem(
+                    inItems: items,
+                    selectedPoolIDs: configuration.selectedPoolIDs,
+                    rank: configuration.poolRank
+                ) {
+                    capacityResult = .success(item: item)
+                } else {
+                    capacityResult = .networkError(
+                        "排名 \(configuration.poolRank) 超出已选号池数 \(rankedPools.count)"
+                    )
+                }
             } else {
-                selectedItem = items.first { $0.groupID == configuration.targetGroupID }
-            }
-            if let item = selectedItem {
-                capacityResult = .success(item: item)
-            } else if configuration.poolSelectionMode == .availableConcurrency {
-                capacityResult = .networkError("排名 \(configuration.poolRank) 超出号池总数 \(items.count)")
-            } else {
-                capacityResult = .notFound
+                capacityResult = items.first { $0.groupID == configuration.targetGroupID }
+                    .map { .success(item: $0) } ?? .notFound
             }
         case .invalidToken:
             groupListState = .invalidToken
@@ -2588,20 +2733,24 @@ final class H200ConnectionModel: ObservableObject {
             groupListState = .networkError(message)
             capacityResult = .networkError(message)
         }
-        interactionState.setSub2APIGroupListState(groupListState, for: keyID)
+        interactionState.setSub2APIGroupListState(
+            groupListState,
+            for: keyID,
+            manualFetchUnlocked: manualFetchUnlocked
+        )
         interactionState.setSub2APILastResult(capacityResult, for: keyID)
         _ = persistCurrentConfiguration()
     }
 
-    private func fetchSub2APIGroupList(for keyID: Int) {
+    private func fetchSub2APIGroupList(for keyID: Int, manualUnlock: Bool = false) {
         guard let instanceID = ensureRuntimeInstance(for: keyID) else {
             return
         }
 
-        fetchSub2APIGroupList(for: instanceID)
+        fetchSub2APIGroupList(for: instanceID, manualUnlock: manualUnlock)
     }
 
-    private func fetchSub2APIGroupList(for instanceID: RuntimeInstanceID) {
+    private func fetchSub2APIGroupList(for instanceID: RuntimeInstanceID, manualUnlock: Bool = false) {
         guard canRunInternalRefresh,
               let resolved = resolveCurrentSub2APISlot(for: instanceID),
               !isSub2APITokenPaused(for: instanceID)
@@ -2612,14 +2761,18 @@ final class H200ConnectionModel: ObservableObject {
         if let leaderInstanceID = sharedSub2APILeaderInstanceID(
             for: resolved.dataSourceInstanceID
         ) {
-            fetchSharedSub2API(for: leaderInstanceID)
+            fetchSharedSub2API(
+                for: leaderInstanceID,
+                manualUnlockKeyID: manualUnlock ? resolved.slot.keyID : nil
+            )
             return
         }
 
         guard !resolved.baseURL.isEmpty, !resolved.bearerKey.isEmpty else {
             interactionState.setSub2APIGroupListState(
                 .networkError("请先填写 Base URL 和 Bearer Key"),
-                for: resolved.slot.keyID
+                for: resolved.slot.keyID,
+                manualFetchUnlocked: manualUnlock ? false : nil
             )
             return
         }
@@ -2641,7 +2794,8 @@ final class H200ConnectionModel: ObservableObject {
                 self?.interactionState.setSub2APIGroupListState(
                     resolved.dataSource.isInvalidJSON
                         ? .invalidToken : .networkError("认证信息为空"),
-                    for: keyID
+                    for: keyID,
+                    manualFetchUnlocked: manualUnlock ? false : nil
                 )
                 return
             }
@@ -2676,9 +2830,11 @@ final class H200ConnectionModel: ObservableObject {
 
             self.sub2APIGroupListTasks[instanceID] = nil
             let groupListState: DeckKeySub2APIGroupListState
+            var isSuccessfulGroupList = false
             switch result {
             case let .success(items):
                 groupListState = .success(items: items)
+                isSuccessfulGroupList = true
             case .invalidToken:
                 groupListState = .invalidToken
             case .tokenExpired:
@@ -2690,7 +2846,11 @@ final class H200ConnectionModel: ObservableObject {
             if result.isTokenUnavailable {
                 self.pauseSub2APIForTokenError(instanceID: instanceID)
             }
-            self.interactionState.setSub2APIGroupListState(groupListState, for: latest.slot.keyID)
+            self.interactionState.setSub2APIGroupListState(
+                groupListState,
+                for: latest.slot.keyID,
+                manualFetchUnlocked: manualUnlock ? isSuccessfulGroupList : nil
+            )
         }
     }
 

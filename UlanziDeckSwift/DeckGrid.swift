@@ -1950,6 +1950,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
     private mutating func clearSub2APIQueryRuntimeState(for keyID: Int) {
         if configurations[keyID, default: .tallyDefault].function == .sub2API {
             configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
+            configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulGroupListItems = []
+            configurations[keyID, default: .tallyDefault].sub2API.isPoolSelectionUnlocked = false
             configurations[keyID, default: .tallyDefault].sub2API.lastResult = nil
             configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulRefreshAt = nil
             configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulSnapshot = nil
@@ -2009,6 +2011,8 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulRefreshAt = nil
         configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulSnapshot = nil
         configurations[keyID, default: .tallyDefault].sub2API.groupListState = .idle
+        configurations[keyID, default: .tallyDefault].sub2API.lastSuccessfulGroupListItems = []
+        configurations[keyID, default: .tallyDefault].sub2API.isPoolSelectionUnlocked = false
         return true
     }
 
@@ -2142,14 +2146,46 @@ nonisolated struct DeckGridInteractionState: Equatable {
     }
 
     @discardableResult
-    mutating func setSub2APIGroupListState(_ state: DeckKeySub2APIGroupListState, for keyID: Int) -> Bool {
+    mutating func setSub2APIGroupListState(
+        _ state: DeckKeySub2APIGroupListState,
+        for keyID: Int,
+        manualFetchUnlocked: Bool? = nil
+    ) -> Bool {
         guard validKeyIDs.contains(keyID),
               configurations[keyID, default: .tallyDefault].function == .sub2API
         else {
             return false
         }
 
-        configurations[keyID, default: .tallyDefault].sub2API.groupListState = state
+        var sub2API = configurations[keyID, default: .tallyDefault].sub2API
+        if case let .success(items) = state {
+            sub2API.lastSuccessfulGroupListItems = items
+            // 刷新成功：保留仍存在的已选号池，新出现的号池默认不选。
+            if let selectedPoolIDs = sub2API.selectedPoolIDs {
+                sub2API.selectedPoolIDs = selectedPoolIDs.intersection(Set(items.map(\.groupID)))
+            }
+        }
+        if let manualFetchUnlocked {
+            // 只有手动“从服务器获取号池”的结果才改变解锁资格；自动/定时刷新传 nil。
+            sub2API.isPoolSelectionUnlocked = manualFetchUnlocked
+        }
+        sub2API.groupListState = state
+        configurations[keyID, default: .tallyDefault].sub2API = sub2API
+        return true
+    }
+
+    @discardableResult
+    mutating func setSub2APISelectedPoolIDs(_ poolIDs: Set<Int>, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .sub2API,
+              !poolIDs.isEmpty
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].sub2API.selectedPoolIDs = poolIDs
+        configurations[keyID, default: .tallyDefault].sub2API.isPoolSelectionConfirmed = true
         return true
     }
 

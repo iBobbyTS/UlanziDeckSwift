@@ -126,6 +126,9 @@ struct RootView: View {
             onSub2APIPoolRankChange: { rank in
                 connectionModel.setSelectedSub2APIPoolRank(rank)
             },
+            onSub2APIPoolSelectionChange: { poolIDs in
+                connectionModel.setSelectedSub2APIPoolSelection(poolIDs)
+            },
             onSub2APIGroupListRefresh: {
                 connectionModel.refreshSelectedSub2APIGroupList()
             },

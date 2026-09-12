@@ -14,6 +14,7 @@ struct UlanziDeckSwiftTests {
         }
         var configuration = DeckKeySub2APIConfiguration(poolSelectionMode: .availableConcurrency, poolRank: 2)
         configuration.groupListState = .success(items: [item(1, 3, "A"), item(2, 9, "B"), item(3, 3, "C")])
+        configuration.isPoolSelectionConfirmed = true
         configuration.poolRank = 1
         #expect(configuration.rankedGroupItem?.groupID == 2)
         configuration.poolRank = 3
@@ -29,6 +30,131 @@ struct UlanziDeckSwiftTests {
         let restored = try JSONDecoder().decode(DeckKeySub2APIConfiguration.self, from: JSONEncoder().encode(configuration))
         #expect(restored.poolSelectionMode == .availableConcurrency)
         #expect(restored.poolRank == 1)
+    }
+
+    @Test("Sub2API 已选号池集合约束排序边界并随配置持久化")
+    func sub2APISelectedPoolIDsConstrainRankingAndPersist() throws {
+        func item(_ id: Int, _ available: Int, _ name: String) -> Sub2APICapacityItem {
+            Sub2APICapacityItem(groupID: id, groupName: name, groupPlatform: "", concurrencyUsed: 0, concurrencyMax: available, sessionsUsed: 0, sessionsMax: 0, rpmUsed: 0, rpmMax: 0)
+        }
+
+        // [A(9), B(9), C(3)]，已提交 {A, B}：排名只在交集内生效，并列保持服务端顺序
+        var configuration = DeckKeySub2APIConfiguration(
+            poolSelectionMode: .availableConcurrency,
+            poolRank: 1,
+            selectedPoolIDs: [1, 2]
+        )
+        configuration.groupListState = .success(items: [item(1, 9, "A"), item(2, 9, "B"), item(3, 3, "C")])
+        #expect(configuration.rankedPoolItemCount == 2)
+        #expect(configuration.rankedGroupItem?.groupID == 1)
+        configuration.poolRank = 2
+        #expect(configuration.rankedGroupItem?.groupID == 2)
+        configuration.poolRank = 3
+        #expect(configuration.rankedGroupItem == nil)
+
+        // C 消失后 rank=2 仍指向 B
+        configuration.groupListState = .success(items: [item(1, 9, "A"), item(2, 9, "B")])
+        #expect(configuration.rankedGroupItem?.groupID == 2)
+
+        // 缓存含 A/B/C，但本次完整响应仅 A/B 时 rank=3 越界
+        #expect(DeckKeySub2APIConfiguration.rankedItem(
+            inItems: [item(1, 9, "A"), item(2, 9, "B")],
+            selectedPoolIDs: nil,
+            rank: 3
+        ) == nil)
+
+        // 已提交集合持久化，重启后继续生效
+        configuration.poolRank = 1
+        let data = try JSONEncoder().encode(configuration)
+        let restored = try JSONDecoder().decode(DeckKeySub2APIConfiguration.self, from: data)
+        #expect(restored.selectedPoolIDs == [1, 2])
+        #expect(restored.rankedPoolItemCount == 0)
+        configuration.groupListState = .success(items: [item(1, 9, "A"), item(2, 9, "B")])
+        let restoredWithList = try JSONDecoder().decode(
+            DeckKeySub2APIConfiguration.self,
+            from: JSONEncoder().encode(configuration)
+        )
+        #expect(restoredWithList.rankedGroupItem?.groupID == 1)
+        #expect(restoredWithList.isPoolSelectionUnlocked == false)
+
+        // 旧配置缺集合字段：nil 按全选兼容
+        let legacyJSON = #"{"instanceID":"legacy","baseURL":"","targetGroupID":0,"poolSelectionMode":"availableConcurrency","poolRank":2,"refreshInterval":30,"bearerKey":"","customServiceName":"","customGroupName":""}"#
+        var legacy = try JSONDecoder().decode(
+            DeckKeySub2APIConfiguration.self,
+            from: Data(legacyJSON.utf8)
+        )
+        #expect(legacy.selectedPoolIDs == nil)
+        #expect(legacy.isPoolSelectionConfirmed == false)
+        legacy.groupListState = .success(items: [item(1, 9, "A"), item(2, 9, "B"), item(3, 3, "C")])
+        #expect(legacy.rankedPoolItemCount == 3)
+        #expect(legacy.rankedGroupItem?.groupID == 2)
+    }
+
+    @MainActor
+    @Test func sub2APIGroupListStateMergesSelectionAndRetainsLastSuccessOnFailure() {
+        let itemA = Self.sub2APICapacityItem(groupID: 1, groupName: "A", availableConcurrency: 9)
+        let itemB = Self.sub2APICapacityItem(groupID: 2, groupName: "B", availableConcurrency: 9)
+        let itemC = Self.sub2APICapacityItem(groupID: 3, groupName: "C", availableConcurrency: 3)
+        let itemD = Self.sub2APICapacityItem(groupID: 4, groupName: "D", availableConcurrency: 5)
+
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        let assigned = state.assign(.sub2API, to: 3)
+        #expect(assigned)
+        let modeChanged = state.setSub2APIPoolSelectionMode(.availableConcurrency, for: 3)
+        #expect(modeChanged)
+        // 空集合没有合法提交入口
+        let emptySelectionApplied = state.setSub2APISelectedPoolIDs([], for: 3)
+        #expect(emptySelectionApplied == false)
+
+        // 手动获取成功解锁选择按钮，但草稿全选不会自动提交，nil 保持全选兼容
+        let manualSuccessApplied = state.setSub2APIGroupListState(
+            .success(items: [itemA, itemB, itemC]),
+            for: 3,
+            manualFetchUnlocked: true
+        )
+        #expect(manualSuccessApplied)
+        var configuration = state.sub2APIConfiguration(for: 3)
+        #expect(configuration.isPoolSelectionUnlocked == true)
+        #expect(configuration.selectedPoolIDs == nil)
+        #expect(configuration.rankedPoolItemCount == 3)
+
+        // 确定：提交 {A, B}
+        let selectionCommitted = state.setSub2APISelectedPoolIDs([1, 2], for: 3)
+        #expect(selectionCommitted)
+
+        // 刷新成功返回 [A, B, D]：保留仍存在的已选号池，新号池 D 默认不选
+        let refreshApplied = state.setSub2APIGroupListState(.success(items: [itemA, itemB, itemD]), for: 3)
+        #expect(refreshApplied)
+        configuration = state.sub2APIConfiguration(for: 3)
+        #expect(configuration.selectedPoolIDs == [1, 2])
+        #expect(configuration.rankedPoolItemCount == 2)
+
+        // 刷新失败：保留上一次成功列表与已提交选择；自动结果不改变解锁资格
+        let autoFailureApplied = state.setSub2APIGroupListState(.networkError("请求超时"), for: 3)
+        #expect(autoFailureApplied)
+        configuration = state.sub2APIConfiguration(for: 3)
+        #expect(configuration.groupListState == .networkError("请求超时"))
+        #expect(configuration.effectiveGroupListItems == [itemA, itemB, itemD])
+        #expect(configuration.selectedPoolIDs == [1, 2])
+        #expect(configuration.rankedGroupItem?.groupID == 1)
+        #expect(configuration.isPoolSelectionUnlocked == true)
+
+        // 手动获取失败：选择按钮重新禁用，直到再次成功
+        let manualFailureApplied = state.setSub2APIGroupListState(
+            .networkError("仍然超时"),
+            for: 3,
+            manualFetchUnlocked: false
+        )
+        #expect(manualFailureApplied)
+        #expect(state.sub2APIConfiguration(for: 3).isPoolSelectionUnlocked == false)
+
+        // 已选号池全部从服务器消失：交集为空，排名不再有目标
+        let vanishApplied = state.setSub2APIGroupListState(.success(items: [itemD]), for: 3)
+        #expect(vanishApplied)
+        configuration = state.sub2APIConfiguration(for: 3)
+        #expect(configuration.selectedPoolIDs == [])
+        #expect(configuration.rankedPoolItemCount == 0)
+        #expect(configuration.rankedGroupItem == nil)
     }
 
     @Test("Shell 命令配置分别保存 shell 和命令，并为空 shell 使用 zsh")
@@ -4913,6 +5039,110 @@ struct UlanziDeckSwiftTests {
         #expect(restored.sub2API.targetGroupID == 1215)
         #expect(restored.sub2API.groupListState == .idle)
         #expect(restored.sub2API.lastResult != nil)
+    }
+
+    @MainActor
+    @Test func sub2APIRankedQueryUsesCurrentResponseIntersectionAndBlocksOutOfRangeRank() async throws {
+        let itemA = Self.sub2APICapacityItem(groupID: 1, groupName: "A", availableConcurrency: 9)
+        let itemB = Self.sub2APICapacityItem(groupID: 2, groupName: "B", availableConcurrency: 9)
+        let itemC = Self.sub2APICapacityItem(groupID: 3, groupName: "C", availableConcurrency: 3)
+        // 队列依次服务：启动排序查询（缓存列表 A/B/C）、rank=2 查询、rank=3 查询。
+        // 后两次完整响应只含 A/B，rank 边界必须以本次响应为准，而不是缓存总数。
+        let fetcher = FakeSub2APIFetcher(
+            groupListResults: [
+                .success(items: [itemA, itemB, itemC]),
+                .success(items: [itemA, itemB]),
+                .success(items: [itemA, itemB]),
+            ]
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        loadedState.setSub2APIPoolSelectionMode(.availableConcurrency, for: 3)
+        loadedState.setSub2APISelectedPoolIDs([1, 2, 3], for: 3)
+        loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            sub2APIFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            model.interactionState.sub2APIConfiguration(for: 3).lastResult == .success(item: itemA)
+        }
+
+        model.selectKey(keyID: 3)
+        model.setSelectedSub2APIPoolRank(2)
+        try await Self.waitUntil {
+            model.interactionState.sub2APIConfiguration(for: 3).lastResult == .success(item: itemB)
+        }
+
+        model.setSelectedSub2APIPoolRank(3)
+        try await Self.waitUntil {
+            model.interactionState.sub2APIConfiguration(for: 3).lastResult
+                == .networkError("排名 3 超出已选号池数 2")
+        }
+
+        // 排序模式只消耗完整号池响应，排名越界时不发起单池摘要查询
+        #expect(fetcher.requests.isEmpty)
+        #expect(fetcher.groupListRequests.count == 3)
+    }
+
+    @MainActor
+    @Test func sub2APIPoolSelectionUnlockRequiresManualFetchSuccess() async throws {
+        let itemA = Self.sub2APICapacityItem(groupID: 1, groupName: "A", availableConcurrency: 9)
+        let itemB = Self.sub2APICapacityItem(groupID: 2, groupName: "B", availableConcurrency: 9)
+        let itemC = Self.sub2APICapacityItem(groupID: 3, groupName: "C", availableConcurrency: 3)
+        // 队列依次服务：启动自动排序查询、手动获取成功、手动获取失败。
+        let fetcher = FakeSub2APIFetcher(
+            groupListResults: [
+                .success(items: [itemA, itemB, itemC]),
+                .success(items: [itemA, itemB, itemC]),
+                .networkError("网络中断"),
+            ]
+        )
+        let layout = DeckGridLayout.h200Prototype
+        var loadedState = DeckGridInteractionState(layout: layout)
+        loadedState.assign(.sub2API, to: 3)
+        loadedState.setSub2APIBaseURL("api.example.com", for: 3)
+        loadedState.setSub2APIPoolSelectionMode(.availableConcurrency, for: 3)
+        loadedState.setSub2APISelectedPoolIDs([1, 2], for: 3)
+        loadedState.setSub2APIBearerKey(Self.sub2APIAuthJSON(accessToken: "token"), for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            sub2APIFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        // 启动/自动刷新成功只更新数据，不解锁号池选择按钮
+        try await Self.waitUntil {
+            model.interactionState.sub2APIConfiguration(for: 3).lastResult == .success(item: itemA)
+        }
+        #expect(model.interactionState.sub2APIConfiguration(for: 3).isPoolSelectionUnlocked == false)
+
+        model.selectKey(keyID: 3)
+        model.refreshSelectedSub2APIGroupList()
+        try await Self.waitUntil {
+            model.interactionState.sub2APIConfiguration(for: 3).isPoolSelectionUnlocked == true
+        }
+
+        model.refreshSelectedSub2APIGroupList()
+        try await Self.waitUntil {
+            model.interactionState.sub2APIConfiguration(for: 3).groupListState == .networkError("网络中断")
+        }
+        // 手动获取失败：重新锁定按钮，但保留上次成功列表、已提交选择与排序结果
+        let configuration = model.interactionState.sub2APIConfiguration(for: 3)
+        #expect(configuration.isPoolSelectionUnlocked == false)
+        #expect(configuration.effectiveGroupListItems == [itemA, itemB, itemC])
+        #expect(configuration.selectedPoolIDs == [1, 2])
+        #expect(configuration.rankedGroupItem?.groupID == 1)
+        #expect(model.interactionState.configuration(for: 3)?.sub2API.lastResult == .success(item: itemA))
+        #expect(fetcher.groupListRequests.count == 3)
     }
 
     @MainActor

@@ -52,6 +52,142 @@ private final class ButtonBackgroundSelectionAccessory: NSObject {
     }
 }
 
+/// 号池选择弹窗的复选框列表。checkbox 状态就是弹窗草稿，
+/// 只有外层在点击“确定”后才把草稿提交给配置。
+private final class Sub2APIPoolSelectionAccessory: NSObject {
+    let view: NSView
+
+    private let selectAllButton = NSButton(checkboxWithTitle: "全选", target: nil, action: nil)
+    private let poolCheckboxes: [(poolID: Int, button: NSButton)]
+    private var onSelectionChange: ((Set<Int>) -> Void)?
+
+    var selectedPoolIDs: Set<Int> {
+        Set(poolCheckboxes.filter { $0.button.state == .on }.map(\.poolID))
+    }
+
+    init(items: [Sub2APICapacityItem], selectedPoolIDs initialSelection: Set<Int>?) {
+        let listStack = NSStackView()
+        listStack.orientation = .vertical
+        listStack.alignment = .leading
+        listStack.spacing = 4
+        listStack.edgeInsets = NSEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+
+        // 草稿初值：已提交集合与当前列表的交集；未提交过集合时默认全选。
+        let allIDs = Set(items.map(\.groupID))
+        let initialChecked = initialSelection?.intersection(allIDs) ?? allIDs
+
+        var checkboxes: [(poolID: Int, button: NSButton)] = []
+        for item in items {
+            let title = item.groupName.isEmpty ? "分组 \(item.groupID)" : item.groupName
+            let button = NSButton(checkboxWithTitle: title, target: nil, action: nil)
+            button.state = initialChecked.contains(item.groupID) ? .on : .off
+            checkboxes.append((item.groupID, button))
+            listStack.addArrangedSubview(button)
+        }
+        poolCheckboxes = checkboxes
+
+        selectAllButton.allowsMixedState = true
+
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.drawsBackground = false
+        scrollView.borderType = .bezelBorder
+        let rowHeight = poolCheckboxes.first?.button.intrinsicContentSize.height ?? 20
+        let listHeight = CGFloat(poolCheckboxes.count) * (rowHeight + 4) + 12
+        let visibleListHeight = min(220, max(rowHeight + 12, listHeight))
+        // NSStackView 会忽略 arrangedSubview 的 frame；必须提供约束，否则
+        // NSScrollView 会被压缩到 0 高，弹窗中只能看到“全选”复选框。
+        scrollView.heightAnchor.constraint(equalToConstant: visibleListHeight).isActive = true
+        scrollView.widthAnchor.constraint(equalToConstant: 320).isActive = true
+        listStack.frame = NSRect(x: 0, y: 0, width: 304, height: listHeight)
+        scrollView.documentView = listStack
+
+        let container = Sub2APISelectionStackView(
+            intrinsicSize: NSSize(
+                width: 320,
+                height: visibleListHeight + rowHeight + 12
+            )
+        )
+        container.orientation = .vertical
+        container.alignment = .leading
+        container.spacing = 8
+        container.addArrangedSubview(selectAllButton)
+        container.addArrangedSubview(scrollView)
+        // NSAlert 对 accessory view 不会总是按内部约束计算高度；显式提供
+        // 根视图尺寸，避免列表在视觉上被裁剪（AX 树虽仍能看到控件）。
+        container.frame = NSRect(
+            x: 0,
+            y: 0,
+            width: 320,
+            height: visibleListHeight + rowHeight + container.spacing + 8
+        )
+        view = container
+
+        super.init()
+
+        selectAllButton.target = self
+        selectAllButton.action = #selector(selectAllChanged(_:))
+        for checkbox in poolCheckboxes {
+            checkbox.button.target = self
+            checkbox.button.action = #selector(poolSelectionChanged(_:))
+        }
+        syncSelectAllState()
+    }
+
+    func setConfirmAvailabilityUpdater(_ updater: @escaping (Set<Int>) -> Void) {
+        onSelectionChange = updater
+        updater(selectedPoolIDs)
+    }
+
+    @objc private func poolSelectionChanged(_ sender: NSButton) {
+        syncSelectAllState()
+        onSelectionChange?(selectedPoolIDs)
+    }
+
+    @objc private func selectAllChanged(_ sender: NSButton) {
+        // 不依赖 NSButton 的混合状态点击循环，统一按当前列表是否全选决定结果。
+        let shouldSelectAll = !poolCheckboxes.allSatisfy { $0.button.state == .on }
+        let state: NSControl.StateValue = shouldSelectAll ? .on : .off
+        for checkbox in poolCheckboxes {
+            checkbox.button.state = state
+        }
+        syncSelectAllState()
+        onSelectionChange?(selectedPoolIDs)
+    }
+
+    private func syncSelectAllState() {
+        let checkedCount = poolCheckboxes.filter { $0.button.state == .on }.count
+        if checkedCount == 0 {
+            selectAllButton.state = .off
+        } else if checkedCount == poolCheckboxes.count {
+            selectAllButton.state = .on
+        } else {
+            selectAllButton.state = .mixed
+        }
+    }
+}
+
+/// NSAlert 的 accessory view 依赖 intrinsicContentSize；普通 NSStackView
+/// 对包含 NSScrollView 的内容通常返回无效高度，导致列表被裁剪。
+private final class Sub2APISelectionStackView: NSStackView {
+    private let preferredSize: NSSize
+
+    init(intrinsicSize: NSSize) {
+        preferredSize = intrinsicSize
+        super.init(frame: NSRect(origin: .zero, size: intrinsicSize))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        preferredSize
+    }
+}
+
 extension ContentView {
     var selectedDailyReminder: DeckKeyDailyReminderConfiguration? {
         guard let id = interactionState.selectedKeyID else { return nil }
@@ -500,7 +636,7 @@ extension ContentView {
                             if selectedConfiguration?.sub2API.poolSelectionMode == .availableConcurrency {
                                 TextField("排名", value: Binding(get: { selectedConfiguration?.sub2API.poolRank ?? 1 }, set: onSub2APIPoolRankChange), format: .number)
                                     .frame(width: 70)
-                                if let count = selectedConfiguration?.sub2API.groupListState.items.count, count > 0 {
+                                if let count = selectedConfiguration?.sub2API.rankedPoolItemCount, count > 0 {
                                     Text("/ \(count)").foregroundStyle(.secondary)
                                 }
                             } else {
@@ -526,6 +662,13 @@ extension ContentView {
                                 onSub2APIGroupListRefresh()
                             }
                             .disabled(!canRefreshSelectedSub2APIGroupList)
+
+                            if selectedConfiguration?.sub2API.poolSelectionMode == .availableConcurrency {
+                                Button("选择号池") {
+                                    showSub2APIPoolSelectionDialog()
+                                }
+                                .disabled(!canSelectSub2APIPools)
+                            }
                         }
 
                         if let statusText = selectedSub2APIGroupListStatusText {
@@ -1347,6 +1490,18 @@ extension ContentView {
         return false
     }
 
+    /// 号池选择按钮只在上次手动“从服务器获取号池”成功且仍有可用列表时可点击；
+    /// 自动/定时刷新成功不解锁，刷新失败后重新禁用。
+    var canSelectSub2APIPools: Bool {
+        guard let sub2API = selectedConfiguration?.sub2API,
+              sub2API.poolSelectionMode == .availableConcurrency
+        else {
+            return false
+        }
+
+        return sub2API.isPoolSelectionUnlocked && !sub2API.effectiveGroupListItems.isEmpty
+    }
+
     var selectedSub2APIGroupListStatusText: String? {
         guard let state = selectedConfiguration?.sub2API.groupListState else {
             return nil
@@ -1361,9 +1516,11 @@ extension ContentView {
         case let .success(items):
             if items.isEmpty { return "服务器没有返回号池" }
             if let configuration = selectedConfiguration?.sub2API,
-               configuration.poolSelectionMode == .availableConcurrency,
-               configuration.poolRank > items.count {
-                return "排名 \(configuration.poolRank) 超出号池总数 \(items.count)"
+               configuration.poolSelectionMode == .availableConcurrency {
+                let rankedCount = configuration.rankedPoolItemCount
+                if configuration.poolRank > rankedCount {
+                    return "排名 \(configuration.poolRank) 超出已选号池数 \(rankedCount)"
+                }
             }
             return "已获取 \(items.count) 个号池"
         case .invalidToken:
@@ -1450,6 +1607,46 @@ extension ContentView {
             TextField(placeholder, text: text, prompt: Text(placeholder))
                 .textFieldStyle(.roundedBorder)
         }
+    }
+
+    /// 号池选择弹窗：全选 + 号池复选框 + 确定/取消。复选框状态是草稿，
+    /// 点“取消”直接丢弃；点“确定”且至少选中一个时才提交集合并使排序生效。
+    func showSub2APIPoolSelectionDialog() {
+        guard let sub2API = selectedConfiguration?.sub2API,
+              sub2API.poolSelectionMode == .availableConcurrency
+        else {
+            return
+        }
+
+        let items = sub2API.effectiveGroupListItems
+        guard !items.isEmpty else {
+            return
+        }
+
+        let accessory = Sub2APIPoolSelectionAccessory(
+            items: items,
+            selectedPoolIDs: sub2API.selectedPoolIDs
+        )
+
+        let alert = NSAlert()
+        alert.messageText = "选择号池"
+        alert.informativeText = "只有选中的号池参与排序；刷新后新出现的号池默认不选。"
+        alert.alertStyle = .informational
+        alert.accessoryView = accessory.view
+        let confirmButton = alert.addButton(withTitle: "确定")
+        let cancelButton = alert.addButton(withTitle: "取消")
+        cancelButton.keyEquivalent = "\u{1b}"
+        accessory.setConfirmAvailabilityUpdater { selectedPoolIDs in
+            confirmButton.isEnabled = !selectedPoolIDs.isEmpty
+        }
+
+        guard alert.runModal() == .alertFirstButtonReturn,
+              !accessory.selectedPoolIDs.isEmpty
+        else {
+            return
+        }
+
+        onSub2APIPoolSelectionChange(accessory.selectedPoolIDs)
     }
 
     func copySub2APIAuthScript() {

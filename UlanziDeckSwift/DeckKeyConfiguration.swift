@@ -1743,6 +1743,10 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     var targetGroupID: Int
     var poolSelectionMode: PoolSelectionMode
     var poolRank: Int
+    /// 已提交的参与排序号池 ID 集合。nil 表示尚未提交过选择（含旧配置缺字段），
+    /// 排序按全选兼容处理；空集合没有合法入口，提交时必须至少选择一个号池。
+    var selectedPoolIDs: Set<Int>?
+    var isPoolSelectionConfirmed: Bool
     var refreshInterval: Int
     var bearerKey: String
     var credentialID: String?
@@ -1779,6 +1783,13 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
     /// 从服务端获取的号池列表。不参与持久化，配置里仍只保存目标分组 ID。
     var groupListState: DeckKeySub2APIGroupListState = .idle
 
+    /// 最近一次成功获取的号池列表。刷新失败时保留它供排序继续使用，不参与持久化。
+    var lastSuccessfulGroupListItems: [Sub2APICapacityItem] = []
+
+    /// 号池选择按钮是否解锁。只有用户手动点击“从服务器获取号池”且成功才为 true，
+    /// 自动/定时刷新不改变；不参与持久化。
+    var isPoolSelectionUnlocked: Bool = false
+
     init(
         instanceID: String = UUID().uuidString,
         baseURL: String = "",
@@ -1786,6 +1797,8 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         targetGroupID: Int = 0,
         poolSelectionMode: PoolSelectionMode = .fixed,
         poolRank: Int = 1,
+        selectedPoolIDs: Set<Int>? = nil,
+        isPoolSelectionConfirmed: Bool? = nil,
         refreshInterval: Int = 30,
         bearerKey: String = "",
         credentialID: String? = nil,
@@ -1802,6 +1815,8 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         self.targetGroupID = targetGroupID
         self.poolSelectionMode = poolSelectionMode
         self.poolRank = max(1, poolRank)
+        self.selectedPoolIDs = selectedPoolIDs
+        self.isPoolSelectionConfirmed = isPoolSelectionConfirmed ?? (selectedPoolIDs != nil)
         self.refreshInterval = refreshInterval
         self.bearerKey = bearerKey
         self.credentialID = credentialID ?? (bearerKey.isEmpty ? nil : UUID().uuidString)
@@ -1877,16 +1892,61 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         return nil
     }
 
-    var rankedGroupItem: Sub2APICapacityItem? {
-        guard case let .success(items) = groupListState, !items.isEmpty else { return nil }
-        let sorted = items.enumerated().sorted {
+    /// 当前可用于排序和选择弹窗的号池列表：成功状态用本次响应，
+    /// 刷新失败后保留最近一次成功响应。
+    var effectiveGroupListItems: [Sub2APICapacityItem] {
+        if case let .success(items) = groupListState {
+            return items
+        }
+        return lastSuccessfulGroupListItems
+    }
+
+    /// 参与排序的号池：完整响应与已提交集合的交集，保持服务端顺序；
+    /// 未提交过集合时按全选兼容。
+    var rankedPoolItems: [Sub2APICapacityItem] {
+        Self.rankedPools(inItems: effectiveGroupListItems, selectedPoolIDs: selectedPoolIDs)
+    }
+
+    var rankedPoolItemCount: Int {
+        rankedPoolItems.count
+    }
+
+    /// 以传入的完整号池响应为边界，返回参与排序的号池（保持服务端顺序）。
+    /// `selectedPoolIDs` 为 nil 时按全选兼容；交集为空时返回空数组。
+    static func rankedPools(
+        inItems items: [Sub2APICapacityItem],
+        selectedPoolIDs: Set<Int>?
+    ) -> [Sub2APICapacityItem] {
+        guard let selectedPoolIDs else {
+            return items
+        }
+        return items.filter { selectedPoolIDs.contains($0.groupID) }
+    }
+
+    /// 在完整号池响应内按可用并发降序排序（并列保持服务端顺序）后取第 rank 名。
+    /// rank 超出交集数量时返回 nil，调用方不得再发起后续查询。
+    static func rankedItem(
+        inItems items: [Sub2APICapacityItem],
+        selectedPoolIDs: Set<Int>?,
+        rank: Int
+    ) -> Sub2APICapacityItem? {
+        let candidates = rankedPools(inItems: items, selectedPoolIDs: selectedPoolIDs)
+        let sorted = candidates.enumerated().sorted {
             if $0.element.availableConcurrency != $1.element.availableConcurrency {
                 return $0.element.availableConcurrency > $1.element.availableConcurrency
             }
             return $0.offset < $1.offset
         }
-        let index = max(1, poolRank) - 1
+        let index = max(1, rank) - 1
         return sorted.indices.contains(index) ? sorted[index].element : nil
+    }
+
+    var rankedGroupItem: Sub2APICapacityItem? {
+        Self.rankedItem(
+            inItems: effectiveGroupListItems,
+            selectedPoolIDs: selectedPoolIDs,
+            rank: poolRank
+        )
     }
 
     var effectiveTargetGroupID: Int? {
@@ -1898,7 +1958,7 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         case baseURL
         case dataSourceInstanceID
         case targetGroupID
-        case poolSelectionMode, poolRank
+        case poolSelectionMode, poolRank, selectedPoolIDs, isPoolSelectionConfirmed
         case refreshInterval
         case bearerKey
         case credentialID
@@ -1922,6 +1982,9 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         targetGroupID = try container.decodeIfPresent(Int.self, forKey: .targetGroupID) ?? 0
         poolSelectionMode = try container.decodeIfPresent(PoolSelectionMode.self, forKey: .poolSelectionMode) ?? .fixed
         poolRank = max(1, try container.decodeIfPresent(Int.self, forKey: .poolRank) ?? 1)
+        selectedPoolIDs = try container.decodeIfPresent(Set<Int>.self, forKey: .selectedPoolIDs)
+        isPoolSelectionConfirmed = try container.decodeIfPresent(Bool.self, forKey: .isPoolSelectionConfirmed)
+            ?? (selectedPoolIDs != nil)
         refreshInterval = try container.decodeIfPresent(Int.self, forKey: .refreshInterval) ?? 30
         bearerKey = try container.decodeIfPresent(String.self, forKey: .bearerKey) ?? ""
         credentialID = try container.decodeIfPresent(String.self, forKey: .credentialID)
@@ -1943,6 +2006,8 @@ nonisolated struct DeckKeySub2APIConfiguration: Codable, Equatable {
         try container.encode(targetGroupID, forKey: .targetGroupID)
         try container.encode(poolSelectionMode, forKey: .poolSelectionMode)
         try container.encode(poolRank, forKey: .poolRank)
+        try container.encodeIfPresent(selectedPoolIDs, forKey: .selectedPoolIDs)
+        try container.encode(isPoolSelectionConfirmed, forKey: .isPoolSelectionConfirmed)
         try container.encode(refreshInterval, forKey: .refreshInterval)
         try container.encodeIfPresent(credentialID, forKey: .credentialID)
         try container.encode(customServiceName, forKey: .customServiceName)

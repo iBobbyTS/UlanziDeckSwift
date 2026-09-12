@@ -74,6 +74,7 @@ struct ContentView: View {
     let onSub2APITargetGroupIDChange: (Int) -> Void
     let onSub2APIPoolSelectionModeChange: (DeckKeySub2APIConfiguration.PoolSelectionMode) -> Void
     let onSub2APIPoolRankChange: (Int) -> Void
+    let onSub2APIPoolSelectionChange: (Set<Int>) -> Void
     let onSub2APIGroupListRefresh: () -> Void
     let onSub2APIRefreshIntervalChange: (Int) -> Void
     let onSub2APIBearerKeyChange: (String) -> Void
@@ -961,6 +962,7 @@ struct MihoyoQRCodeView: View {
         onSub2APITargetGroupIDChange: { _ in },
         onSub2APIPoolSelectionModeChange: { _ in },
         onSub2APIPoolRankChange: { _ in },
+        onSub2APIPoolSelectionChange: { _ in },
         onSub2APIGroupListRefresh: {},
         onSub2APIRefreshIntervalChange: { _ in },
         onSub2APIBearerKeyChange: { _ in },
