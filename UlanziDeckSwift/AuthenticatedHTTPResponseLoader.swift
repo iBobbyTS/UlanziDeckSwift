@@ -31,6 +31,10 @@ nonisolated enum AuthenticatedHTTPResponseLoader {
         urlSession: URLSession,
         maximumBytes: Int = defaultMaximumBytes
     ) async throws -> Data {
+        var request = request
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+
         guard let expectedURL = request.url else {
             throw AuthenticatedHTTPResponseError.unexpectedOrigin
         }

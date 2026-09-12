@@ -82,6 +82,8 @@ nonisolated struct ZcodeUsageFetcher: ZcodeUsageFetching {
 
         var request = URLRequest(url: requestURL)
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.timeoutInterval = timeoutSeconds
         request.setValue(apiKey, forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")

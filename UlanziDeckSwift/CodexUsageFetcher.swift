@@ -430,6 +430,8 @@ nonisolated struct CodexUsageFetcher: CodexUsageFetching {
 
         var request = URLRequest(url: Self.usageURL)
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
         request.timeoutInterval = timeoutSeconds
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("codex-cli", forHTTPHeaderField: "User-Agent")
