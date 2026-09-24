@@ -407,6 +407,15 @@ struct ContentView: View {
         items.map(RootPageSelectorElement.page) + [.addition]
     }
 
+    nonisolated static func shouldAcceptKeyDrop(
+        sourcePageID: String,
+        sourceKeyID: Int,
+        targetPageID: String,
+        targetKeyID: Int
+    ) -> Bool {
+        sourcePageID != targetPageID || sourceKeyID != targetKeyID
+    }
+
     private func confirmCurrentRootPageDeletion() {
         guard interactionState.canDeleteCurrentRootPage else {
             return
@@ -822,14 +831,23 @@ private struct SquareKeyDragSwapModifier: ViewModifier {
                         guard let value = object as? NSString,
                               let parts = Optional((value as String).split(separator: "|", maxSplits: 1)),
                               parts.count == 2,
-                              let sourceKeyID = Int(parts[1]),
-                              sourceKeyID != keyID
+                              let sourceKeyID = Int(parts[1])
                         else {
                             return
                         }
 
+                        let sourcePageID = String(parts[0])
+                        guard ContentView.shouldAcceptKeyDrop(
+                            sourcePageID: sourcePageID,
+                            sourceKeyID: sourceKeyID,
+                            targetPageID: pageID,
+                            targetKeyID: keyID
+                        ) else {
+                            return
+                        }
+
                         DispatchQueue.main.async {
-                            swapAction(String(parts[0]), sourceKeyID, keyID)
+                            swapAction(sourcePageID, sourceKeyID, keyID)
                         }
                     }
                     return true

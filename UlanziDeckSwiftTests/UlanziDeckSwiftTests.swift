@@ -926,6 +926,28 @@ struct UlanziDeckSwiftTests {
         ])
     }
 
+    @Test("跨页同编号按键拖放不会被误判为原位拖放")
+    func crossPageSameNumberedKeyDropIsAccepted() {
+        #expect(ContentView.shouldAcceptKeyDrop(
+            sourcePageID: "root",
+            sourceKeyID: 5,
+            targetPageID: "root-2",
+            targetKeyID: 5
+        ))
+        #expect(!ContentView.shouldAcceptKeyDrop(
+            sourcePageID: "root",
+            sourceKeyID: 5,
+            targetPageID: "root",
+            targetKeyID: 5
+        ))
+        #expect(ContentView.shouldAcceptKeyDrop(
+            sourcePageID: "root",
+            sourceKeyID: 5,
+            targetPageID: "root",
+            targetKeyID: 4
+        ))
+    }
+
     @Test func h200PrototypeLayoutContainsFourteenNumberedKeys() {
         let layout = DeckGridLayout.h200Prototype
 
