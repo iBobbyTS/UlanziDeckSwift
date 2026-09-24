@@ -174,6 +174,21 @@ struct RootView: View {
             onNewAPIGroupNameChange: { groupName in
                 connectionModel.setSelectedNewAPIGroupName(groupName)
             },
+            onNewAPIBalanceBaseURLChange: { baseURL in
+                connectionModel.setSelectedNewAPIBalanceBaseURL(baseURL)
+            },
+            onNewAPIBalanceAPIKeyChange: { apiKey in
+                connectionModel.setSelectedNewAPIBalanceAPIKey(apiKey)
+            },
+            onNewAPIBalanceRefreshIntervalChange: { interval in
+                connectionModel.setSelectedNewAPIBalanceRefreshInterval(interval)
+            },
+            onNewAPIBalanceServiceNameChange: { serviceName in
+                connectionModel.setSelectedNewAPIBalanceServiceName(serviceName)
+            },
+            onNewAPIBalanceUnitChange: { unit in
+                connectionModel.setSelectedNewAPIBalanceUnit(unit)
+            },
             onMihoyoQRCodeLoginRequest: {
                 connectionModel.beginMihoyoQRCodeLogin()
             },

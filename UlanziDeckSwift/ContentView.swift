@@ -90,6 +90,11 @@ struct ContentView: View {
     let onNewAPIGroupListRefresh: () -> Void
     let onNewAPIServiceNameChange: (String) -> Void
     let onNewAPIGroupNameChange: (String) -> Void
+    let onNewAPIBalanceBaseURLChange: (String) -> Void
+    let onNewAPIBalanceAPIKeyChange: (String) -> Void
+    let onNewAPIBalanceRefreshIntervalChange: (Int) -> Void
+    let onNewAPIBalanceServiceNameChange: (String) -> Void
+    let onNewAPIBalanceUnitChange: (String) -> Void
     let onMihoyoQRCodeLoginRequest: () -> Void
     let onMihoyoGameRefreshIntervalChange: (Int) -> Void
     let onMihoyoGameStatusRefresh: () -> Void
@@ -978,6 +983,11 @@ struct MihoyoQRCodeView: View {
         onNewAPIGroupListRefresh: {},
         onNewAPIServiceNameChange: { _ in },
         onNewAPIGroupNameChange: { _ in },
+        onNewAPIBalanceBaseURLChange: { _ in },
+        onNewAPIBalanceAPIKeyChange: { _ in },
+        onNewAPIBalanceRefreshIntervalChange: { _ in },
+        onNewAPIBalanceServiceNameChange: { _ in },
+        onNewAPIBalanceUnitChange: { _ in },
         onMihoyoQRCodeLoginRequest: {},
         onMihoyoGameRefreshIntervalChange: { _ in },
         onMihoyoGameStatusRefresh: {}

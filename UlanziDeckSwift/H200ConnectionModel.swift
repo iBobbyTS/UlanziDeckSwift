@@ -107,6 +107,7 @@ final class H200ConnectionModel: ObservableObject {
     private let smbServerConnector: SMBServerConnecting
     private let sub2APIFetcher: Sub2APIFetching
     private let newAPIFetcher: NewAPIFetching
+    private let newAPIBalanceFetcher: NewAPIBalanceFetching
     private let codexUsageFetcher: CodexUsageFetching
     private let zcodeUsageFetcher: ZcodeUsageFetching
     private let mihoyoGameService: MihoyoGameServicing
@@ -155,6 +156,11 @@ final class H200ConnectionModel: ObservableObject {
     private var newAPIRequestIDs: [RuntimeInstanceID: UUID] = [:]
     private var newAPIGroupListTasks: [String: Task<Void, Never>] = [:]
     private var newAPIGroupListRequestIDs: [String: UUID] = [:]
+    private var newAPIBalanceTimers: [RuntimeInstanceID: Timer] = [:]
+    private var newAPIBalanceNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
+    private var newAPIBalanceFetchTasks: [RuntimeInstanceID: Task<Void, Never>] = [:]
+    private var newAPIBalanceRequestIDs: [RuntimeInstanceID: UUID] = [:]
+    private var newAPIBalanceUnauthorizedPausedInstances: Set<RuntimeInstanceID> = []
     private var sub2APIAuthRefreshTasks: [String: Task<Sub2APIAuthInfo?, Never>] = [:]
     private var codexUsageTimers: [RuntimeInstanceID: Timer] = [:]
     private var codexUsageNextFireNanoseconds: [RuntimeInstanceID: UInt64] = [:]
@@ -199,6 +205,7 @@ final class H200ConnectionModel: ObservableObject {
         smbServerConnector: SMBServerConnecting? = nil,
         sub2APIFetcher: Sub2APIFetching = Sub2APIFetcher(),
         newAPIFetcher: NewAPIFetching = NewAPIFetcher(),
+        newAPIBalanceFetcher: NewAPIBalanceFetching = NewAPIBalanceFetcher(),
         codexUsageFetcher: CodexUsageFetching = CodexUsageFetcher(),
         zcodeUsageFetcher: ZcodeUsageFetching = ZcodeUsageFetcher(),
         mihoyoGameService: MihoyoGameServicing = MihoyoGameClient(),
@@ -224,6 +231,7 @@ final class H200ConnectionModel: ObservableObject {
         self.smbServerConnector = smbServerConnector ?? SMBServerConnector()
         self.sub2APIFetcher = sub2APIFetcher
         self.newAPIFetcher = newAPIFetcher
+        self.newAPIBalanceFetcher = newAPIBalanceFetcher
         self.codexUsageFetcher = codexUsageFetcher
         self.zcodeUsageFetcher = zcodeUsageFetcher
         self.mihoyoGameService = mihoyoGameService
@@ -307,6 +315,9 @@ final class H200ConnectionModel: ObservableObject {
         for timer in newAPITimers.values { timer.invalidate() }
         for task in newAPIFetchTasks.values { task.cancel() }
         for task in newAPIGroupListTasks.values { task.cancel() }
+        for timer in newAPIBalanceTimers.values { timer.invalidate() }
+        for task in newAPIBalanceFetchTasks.values { task.cancel() }
+        newAPIBalanceRequestIDs.removeAll()
         for task in sub2APIAuthRefreshTasks.values { task.cancel() }
         for timer in codexUsageTimers.values {
             timer.invalidate()
@@ -659,6 +670,8 @@ final class H200ConnectionModel: ObservableObject {
             fetchSub2APIDailyCost(for: keyID)
         case .refreshNewAPIModelAvailability:
             fetchNewAPIModelAvailability(for: keyID)
+        case .refreshNewAPIBalance:
+            fetchNewAPIBalance(for: keyID)
         case .refreshCodexUsage:
             fetchCodexUsage(for: keyID)
         case .refreshMihoyoGame:
@@ -721,6 +734,10 @@ final class H200ConnectionModel: ObservableObject {
             if function == .newAPIModelAvailability {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
                 fetchNewAPIModelAvailability(for: selectedKeyID)
+            }
+            if function == .newAPIBalance {
+                _ = ensureRuntimeInstance(for: selectedKeyID)
+                fetchNewAPIBalance(for: selectedKeyID)
             }
             if function.isUsage {
                 _ = ensureRuntimeInstance(for: selectedKeyID)
@@ -1323,6 +1340,67 @@ final class H200ConnectionModel: ObservableObject {
         syncKeyDisplay(keyID: selectedKeyID)
     }
 
+    func setSelectedNewAPIBalanceBaseURL(_ baseURL: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.setNewAPIBalanceBaseURL(baseURL, for: selectedKeyID)
+        else { return }
+        persistCurrentConfiguration()
+        restartNewAPIBalanceRuntime(for: selectedKeyID)
+        syncKeyDisplay(keyID: selectedKeyID)
+    }
+
+    func setSelectedNewAPIBalanceAPIKey(_ apiKey: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID else { return }
+        let previousCredential = interactionState.newAPIBalanceConfiguration(for: selectedKeyID)
+        guard previousCredential.apiKey != apiKey,
+              interactionState.setNewAPIBalanceAPIKey(apiKey, for: selectedKeyID)
+        else { return }
+
+        let saveResult = persistCurrentConfiguration()
+        if case let .credentialFailure(message) = saveResult {
+            _ = interactionState.restoreNewAPIBalanceCredential(
+                apiKey: previousCredential.apiKey,
+                credentialID: previousCredential.credentialID,
+                for: selectedKeyID
+            )
+            _ = persistCurrentConfiguration()
+            _ = interactionState.setNewAPIBalanceLastResult(.networkError(message), for: selectedKeyID)
+            syncKeyDisplay(keyID: selectedKeyID)
+            return
+        }
+        restartNewAPIBalanceRuntime(for: selectedKeyID)
+        syncKeyDisplay(keyID: selectedKeyID)
+    }
+
+    func setSelectedNewAPIBalanceRefreshInterval(_ interval: Int) {
+        guard let selectedKeyID = interactionState.selectedKeyID else { return }
+        let clampedInterval = max(5, interval)
+        guard interactionState.newAPIBalanceConfiguration(for: selectedKeyID).refreshInterval != clampedInterval,
+              interactionState.setNewAPIBalanceRefreshInterval(clampedInterval, for: selectedKeyID)
+        else { return }
+
+        persistCurrentConfiguration()
+        guard let instanceID = ensureRuntimeInstance(for: selectedKeyID) else { return }
+        stopNewAPIBalanceTimer(for: instanceID, preservesNextFire: false)
+        scheduleNextNewAPIBalanceRefresh(for: instanceID)
+    }
+
+    func setSelectedNewAPIBalanceServiceName(_ serviceName: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.setNewAPIBalanceServiceName(serviceName, for: selectedKeyID)
+        else { return }
+        persistCurrentConfiguration()
+        syncKeyDisplay(keyID: selectedKeyID)
+    }
+
+    func setSelectedNewAPIBalanceUnit(_ unit: String) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.setNewAPIBalanceUnit(unit, for: selectedKeyID)
+        else { return }
+        persistCurrentConfiguration()
+        syncKeyDisplay(keyID: selectedKeyID)
+    }
+
     func refreshSelectedNewAPIGroupList() {
         guard let selectedKeyID = interactionState.selectedKeyID,
               interactionState.configuration(for: selectedKeyID)?.function == .newAPIModelAvailability
@@ -1891,6 +1969,8 @@ final class H200ConnectionModel: ObservableObject {
             _ = interactionState.clearSub2APIDailyCostRuntimeState(for: slot.keyID)
         case .newAPIModelAvailability:
             _ = interactionState.clearNewAPIRuntimeState(for: slot.keyID)
+        case .newAPIBalance:
+            _ = interactionState.clearNewAPIBalanceRuntimeState(for: slot.keyID)
         case .codexUsage:
             _ = interactionState.clearCodexUsageRuntimeState(for: slot.keyID)
         case .mihoyoGame:
@@ -1942,6 +2022,14 @@ final class H200ConnectionModel: ObservableObject {
         newAPIFetchTasks[instanceID]?.cancel()
         newAPIFetchTasks[instanceID] = nil
         newAPIRequestIDs[instanceID] = nil
+
+        newAPIBalanceTimers[instanceID]?.invalidate()
+        newAPIBalanceTimers[instanceID] = nil
+        newAPIBalanceNextFireNanoseconds[instanceID] = nil
+        newAPIBalanceFetchTasks[instanceID]?.cancel()
+        newAPIBalanceFetchTasks[instanceID] = nil
+        newAPIBalanceRequestIDs[instanceID] = nil
+        newAPIBalanceUnauthorizedPausedInstances.remove(instanceID)
 
         codexUsageTimers[instanceID]?.invalidate()
         codexUsageTimers[instanceID] = nil
@@ -2034,6 +2122,11 @@ final class H200ConnectionModel: ObservableObject {
         newAPIFetchTasks[instanceID] = nil
         newAPIRequestIDs[instanceID] = nil
 
+        newAPIBalanceTimers[instanceID]?.invalidate()
+        newAPIBalanceTimers[instanceID] = nil
+        newAPIBalanceFetchTasks[instanceID]?.cancel()
+        newAPIBalanceFetchTasks[instanceID] = nil
+
         codexUsageTimers[instanceID]?.invalidate()
         codexUsageTimers[instanceID] = nil
         codexUsageFetchTasks[instanceID]?.cancel()
@@ -2082,6 +2175,8 @@ final class H200ConnectionModel: ObservableObject {
             resumeSub2APIDailyCostRuntime(instanceID)
         case .newAPIModelAvailability:
             resumeNewAPIRuntime(instanceID)
+        case .newAPIBalance:
+            resumeNewAPIBalanceRuntime(instanceID)
         case .codexUsage:
             resumeCodexUsageRuntime(instanceID)
         case .mihoyoGame:
@@ -3536,6 +3631,145 @@ final class H200ConnectionModel: ObservableObject {
         scheduleNextSub2APIBalanceRefresh(for: leader)
     }
 
+    // MARK: - New API 余额运行时
+
+    /// 每个 New API 余额按键独立请求；请求以 UUID generation 隔离，
+    /// 配置变更或手动刷新后到达的 late result 不得覆盖最新状态。
+    private func resolveCurrentNewAPIBalanceSlot(
+        for instanceID: RuntimeInstanceID
+    ) -> (slot: RuntimeSlotID, config: DeckKeyNewAPIBalanceConfiguration)? {
+        guard let slot = runtimeSlotsByInstance[instanceID],
+              slot.pageID == interactionState.currentPageID,
+              interactionState.configuration(for: slot.keyID)?.displayMode == .function,
+              interactionState.configuration(for: slot.keyID)?.function == .newAPIBalance
+        else { return nil }
+
+        return (slot, interactionState.newAPIBalanceConfiguration(for: slot.keyID))
+    }
+
+    private func fetchNewAPIBalance(for keyID: Int) {
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else { return }
+        fetchNewAPIBalance(for: instanceID)
+    }
+
+    private func fetchNewAPIBalance(for instanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              let resolved = resolveCurrentNewAPIBalanceSlot(for: instanceID),
+              !newAPIBalanceUnauthorizedPausedInstances.contains(instanceID),
+              resolved.config.isConfigurationComplete
+        else { return }
+
+        stopNewAPIBalanceTimer(for: instanceID, preservesNextFire: false)
+        newAPIBalanceFetchTasks[instanceID]?.cancel()
+        let requestID = UUID()
+        newAPIBalanceRequestIDs[instanceID] = requestID
+        let baseURL = resolved.config.normalizedBaseURL
+        let apiKey = resolved.config.normalizedAPIKey
+        let fetcher = newAPIBalanceFetcher
+        newAPIBalanceFetchTasks[instanceID] = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await fetcher.fetchBalance(baseURL: baseURL, apiKey: apiKey)
+            guard !Task.isCancelled,
+                  self.newAPIBalanceRequestIDs[instanceID] == requestID,
+                  let latest = self.resolveCurrentNewAPIBalanceSlot(for: instanceID),
+                  latest.config.normalizedBaseURL == baseURL,
+                  latest.config.normalizedAPIKey == apiKey
+            else { return }
+
+            let latestKeyID = latest.slot.keyID
+            _ = self.interactionState.setNewAPIBalanceLastResult(result, for: latestKeyID)
+            _ = self.persistCurrentConfiguration()
+            self.newAPIBalanceFetchTasks[instanceID] = nil
+            self.newAPIBalanceRequestIDs[instanceID] = nil
+            self.syncKeyDisplay(keyID: latestKeyID)
+            if result.isCredentialUnavailable {
+                self.newAPIBalanceUnauthorizedPausedInstances.insert(instanceID)
+            } else {
+                self.scheduleNextNewAPIBalanceRefresh(for: instanceID)
+            }
+        }
+    }
+
+    /// 配置（Base URL / API Key）变更后的重启入口；凭据变化会解除未授权暂停。
+    private func restartNewAPIBalanceRuntime(for keyID: Int) {
+        guard interactionState.configuration(for: keyID)?.function == .newAPIBalance else { return }
+        guard let instanceID = ensureRuntimeInstance(for: keyID) else { return }
+        newAPIBalanceUnauthorizedPausedInstances.remove(instanceID)
+        stopNewAPIBalanceTimer(for: instanceID, preservesNextFire: false)
+        newAPIBalanceFetchTasks[instanceID]?.cancel()
+        newAPIBalanceFetchTasks[instanceID] = nil
+        newAPIBalanceRequestIDs[instanceID] = nil
+        fetchNewAPIBalance(for: keyID)
+    }
+
+    private func resumeNewAPIBalanceRuntime(_ instanceID: RuntimeInstanceID) {
+        guard let resolved = resolveCurrentNewAPIBalanceSlot(for: instanceID),
+              !newAPIBalanceUnauthorizedPausedInstances.contains(instanceID),
+              resolved.config.isConfigurationComplete
+        else { return }
+        let interval = TimeInterval(resolved.config.refreshInterval) * sub2APIRefreshSecondDuration
+        switch DeckRefreshResumeDecision.resolve(
+            lastSuccessfulRefreshAt: resolved.config.lastSuccessfulRefreshAt,
+            hasSnapshot: resolved.config.lastSuccessfulSnapshot != nil,
+            interval: interval,
+            now: Date()
+        ) {
+        case .refreshNow:
+            fetchNewAPIBalance(for: instanceID)
+        case let .wait(remaining):
+            let fireAt = newAPIBalanceNextFireNanoseconds[instanceID]
+                ?? nowNanoseconds + UInt64(remaining * 1_000_000_000)
+            scheduleNewAPIBalanceRefresh(for: instanceID, fireAt: fireAt)
+        }
+    }
+
+    private func scheduleNextNewAPIBalanceRefresh(for instanceID: RuntimeInstanceID) {
+        guard canRunInternalRefresh,
+              let resolved = resolveCurrentNewAPIBalanceSlot(for: instanceID),
+              !newAPIBalanceUnauthorizedPausedInstances.contains(instanceID),
+              resolved.config.isConfigurationComplete,
+              resolved.config.refreshInterval >= 5
+        else { return }
+        let interval = UInt64(
+            TimeInterval(resolved.config.refreshInterval) * sub2APIRefreshSecondDuration * 1_000_000_000
+        )
+        scheduleNewAPIBalanceRefresh(for: instanceID, fireAt: nowNanoseconds + interval)
+    }
+
+    private func scheduleNewAPIBalanceRefresh(
+        for instanceID: RuntimeInstanceID,
+        fireAt fireNanoseconds: UInt64
+    ) {
+        stopNewAPIBalanceTimer(for: instanceID, preservesNextFire: true)
+        guard canRunInternalRefresh,
+              resolveCurrentNewAPIBalanceSlot(for: instanceID) != nil,
+              !newAPIBalanceUnauthorizedPausedInstances.contains(instanceID)
+        else { return }
+        newAPIBalanceNextFireNanoseconds[instanceID] = fireNanoseconds
+        guard fireNanoseconds > nowNanoseconds else {
+            newAPIBalanceNextFireNanoseconds[instanceID] = nil
+            fetchNewAPIBalance(for: instanceID)
+            return
+        }
+        let interval = TimeInterval(fireNanoseconds - nowNanoseconds) / 1_000_000_000
+        newAPIBalanceTimers[instanceID] = Timer.scheduledTimer(withTimeInterval: interval, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.newAPIBalanceTimers[instanceID] = nil
+                self?.newAPIBalanceNextFireNanoseconds[instanceID] = nil
+                self?.fetchNewAPIBalance(for: instanceID)
+            }
+        }
+    }
+
+    private func stopNewAPIBalanceTimer(
+        for instanceID: RuntimeInstanceID,
+        preservesNextFire: Bool
+    ) {
+        newAPIBalanceTimers[instanceID]?.invalidate()
+        newAPIBalanceTimers[instanceID] = nil
+        if !preservesNextFire { newAPIBalanceNextFireNanoseconds[instanceID] = nil }
+    }
+
     private func resolveCurrentSub2APIDailyCostSlot(
         for instanceID: RuntimeInstanceID
     ) -> (
@@ -4416,6 +4650,17 @@ private extension Sub2APIDailyCostResult {
     var isTokenUnavailable: Bool {
         switch self {
         case .invalidToken, .tokenExpired:
+            return true
+        case .success, .networkError:
+            return false
+        }
+    }
+}
+
+private extension NewAPIBalanceResult {
+    var isCredentialUnavailable: Bool {
+        switch self {
+        case .unauthorized:
             return true
         case .success, .networkError:
             return false

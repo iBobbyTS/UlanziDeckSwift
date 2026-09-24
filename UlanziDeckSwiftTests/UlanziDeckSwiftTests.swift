@@ -235,10 +235,10 @@ struct UlanziDeckSwiftTests {
         #expect(response.data?.groups.first?.series.first?.successRate == 100)
     }
 
-    @Test("New API 卡片仅包含模型可用率")
-    func newAPISidebarSectionContainsOnlyModelAvailability() {
+    @Test("New API 卡片包含模型可用率与余额查询")
+    func newAPISidebarSectionContainsModelAvailabilityAndBalance() {
         let section = ContentView.functionSections.first { $0.title == "New API" }
-        #expect(section?.functions == [.newAPIModelAvailability])
+        #expect(section?.functions == [.newAPIModelAvailability, .newAPIBalance])
     }
 
     @Test("New API 模型可用率 URL 固定请求 24 小时且编码模型名")
@@ -296,6 +296,230 @@ struct UlanziDeckSwiftTests {
         #expect(restored.aggregationBin == .fiveMinutes)
         #expect(payload.contains(#""aggregationBin":"5min""#))
         #expect(!payload.contains("refreshInterval"))
+    }
+
+    // MARK: - New API 余额
+
+    @Test("New API 余额 billing 端点 URL 位于 v1/dashboard/billing 下")
+    func newAPIBalanceURLsAppendBillingPaths() throws {
+        let base = try NewAPIBaseURL("https://api.mooko.ai")
+
+        #expect(base.billingSubscriptionURL.absoluteString == "https://api.mooko.ai/v1/dashboard/billing/subscription")
+        #expect(base.billingUsageURL.absoluteString == "https://api.mooko.ai/v1/dashboard/billing/usage")
+    }
+
+    @Test("New API 余额请求两个 billing 端点并按 hard_limit_usd - total_usage / 100 归一化")
+    func newAPIBalanceFetcherComputesRemainingFromBothBillingEndpoints() async throws {
+        let subscriptionURL = try #require(URL(string: "https://api.example.com/v1/dashboard/billing/subscription"))
+        let usageURL = try #require(URL(string: "https://api.example.com/v1/dashboard/billing/usage"))
+        WebPageMetadataURLProtocol.setStubs([
+            subscriptionURL: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"hard_limit_usd":10}"#.utf8)
+            ),
+            usageURL: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"total_usage":125}"#.utf8)
+            ),
+        ])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let fetcher = NewAPIBalanceFetcher(urlSession: URLSession(configuration: configuration))
+
+        let result = await fetcher.fetchBalance(baseURL: "api.example.com", apiKey: "sk-test")
+
+        #expect(result == .success(remaining: 8.75))
+        let requestedURLs = WebPageMetadataURLProtocol.receivedRequests.compactMap(\.url?.absoluteString)
+        #expect(requestedURLs.contains("https://api.example.com/v1/dashboard/billing/subscription"))
+        #expect(requestedURLs.contains("https://api.example.com/v1/dashboard/billing/usage"))
+        #expect(WebPageMetadataURLProtocol.receivedRequests.allSatisfy {
+            $0.value(forHTTPHeaderField: "Authorization") == "Bearer sk-test"
+        })
+    }
+
+    @Test("New API 余额任一端点失败或字段无效时不产出快照")
+    func newAPIBalanceFetcherFailsAtomicallyWhenEitherEndpointFails() async throws {
+        let validSubscription = try #require(URL(string: "https://ok.example.com/v1/dashboard/billing/subscription"))
+        let validUsage = try #require(URL(string: "https://ok.example.com/v1/dashboard/billing/usage"))
+        let usageHTTPError = try #require(URL(string: "https://usage-error.example.com/v1/dashboard/billing/usage"))
+        let missingField = try #require(URL(string: "https://missing.example.com/v1/dashboard/billing/usage"))
+        let boolField = try #require(URL(string: "https://boolean.example.com/v1/dashboard/billing/subscription"))
+        let nonFiniteField = try #require(URL(string: "https://nonfinite.example.com/v1/dashboard/billing/usage"))
+        let unauthorized = try #require(URL(string: "https://unauthorized.example.com/v1/dashboard/billing/subscription"))
+        WebPageMetadataURLProtocol.setStubs([
+            validSubscription: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"hard_limit_usd":10}"#.utf8)
+            ),
+            validUsage: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"total_usage":125}"#.utf8)
+            ),
+            usageHTTPError: .init(
+                statusCode: 500,
+                mimeType: "application/json",
+                data: Data()
+            ),
+            missingField: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"other":1}"#.utf8)
+            ),
+            boolField: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"hard_limit_usd":true}"#.utf8)
+            ),
+            nonFiniteField: .init(
+                statusCode: 200,
+                mimeType: "application/json",
+                data: Data(#"{"total_usage":1e999}"#.utf8)
+            ),
+            unauthorized: .init(
+                statusCode: 401,
+                mimeType: "application/json",
+                data: Data()
+            ),
+        ])
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let fetcher = NewAPIBalanceFetcher(urlSession: URLSession(configuration: configuration))
+
+        let success = await fetcher.fetchBalance(baseURL: "ok.example.com", apiKey: "sk-test")
+        let usageFailed = await fetcher.fetchBalance(baseURL: "usage-error.example.com", apiKey: "sk-test")
+        let missingFailed = await fetcher.fetchBalance(baseURL: "missing.example.com", apiKey: "sk-test")
+        let boolFailed = await fetcher.fetchBalance(baseURL: "boolean.example.com", apiKey: "sk-test")
+        let nonFiniteFailed = await fetcher.fetchBalance(baseURL: "nonfinite.example.com", apiKey: "sk-test")
+        let unauthorizedResult = await fetcher.fetchBalance(baseURL: "unauthorized.example.com", apiKey: "sk-test")
+        let invalidBase = await fetcher.fetchBalance(baseURL: "http://insecure.example.com", apiKey: "sk-test")
+
+        #expect(success == .success(remaining: 8.75))
+        guard case .networkError = usageFailed else {
+            Issue.record("usage HTTP 错误应返回 networkError，实际 \(usageFailed)")
+            return
+        }
+        guard case .networkError = missingFailed else {
+            Issue.record("缺失字段应返回 networkError，实际 \(missingFailed)")
+            return
+        }
+        guard case .networkError = boolFailed else {
+            Issue.record("布尔字段应返回 networkError，实际 \(boolFailed)")
+            return
+        }
+        guard case .networkError = nonFiniteFailed else {
+            Issue.record("非有限数值应返回 networkError，实际 \(nonFiniteFailed)")
+            return
+        }
+        #expect(unauthorizedResult == .unauthorized)
+        guard case .networkError = invalidBase else {
+            Issue.record("无效 Base URL 应返回 networkError，实际 \(invalidBase)")
+            return
+        }
+        #expect(!WebPageMetadataURLProtocol.receivedRequests.contains {
+            $0.url?.host == "insecure.example.com"
+        })
+    }
+
+    @Test("New API 余额显示格式沿用 Sub2API：整数 0 位，其他 2 位，负值不 clamp")
+    func newAPIBalanceResultDisplayValueMatchesSub2APIFormatting() {
+        #expect(NewAPIBalanceResult.success(remaining: 8.75).displayValue == "8.75")
+        #expect(NewAPIBalanceResult.success(remaining: 8.756).displayValue == "8.76")
+        #expect(NewAPIBalanceResult.success(remaining: -2.5).displayValue == "-2.50")
+        #expect(NewAPIBalanceResult.success(remaining: 12).displayValue == "12")
+        #expect(NewAPIBalanceResult.unauthorized.displayValue == nil)
+        #expect(NewAPIBalanceResult.networkError("离线").displayValue == nil)
+    }
+
+    @Test("New API 余额配置 Codable 不输出也不接受 API Key 明文且快照可往返")
+    func newAPIBalanceConfigurationEncodesWithoutPlaintextAPIKey() throws {
+        var configuration = DeckKeyNewAPIBalanceConfiguration(
+            baseURL: "https://api.example.com",
+            apiKey: "sk-secret"
+        )
+        #expect(configuration.isConfigurationComplete)
+        configuration.unit = "$"
+        configuration.refreshInterval = 60
+
+        let encoded = try JSONEncoder().encode(configuration)
+        let payload = try #require(String(data: encoded, encoding: .utf8))
+        #expect(!payload.contains("apiKey"))
+        #expect(!payload.contains("sk-secret"))
+        #expect(payload.contains("credentialID"))
+
+        let restored = try JSONDecoder().decode(DeckKeyNewAPIBalanceConfiguration.self, from: encoded)
+        #expect(restored.apiKey.isEmpty)
+        #expect(restored.baseURL == "https://api.example.com")
+        #expect(restored.unit == "$")
+        #expect(restored.refreshInterval == 60)
+        #expect(restored.credentialID == configuration.credentialID)
+
+        // 正常 Codable 不接受注入的明文：payload 携带 apiKey 时解码后也不得保留。
+        let legacyPayload = Data(#"{"instanceID":"legacy","baseURL":"https://api.example.com","apiKey":"sk-legacy"}"#.utf8)
+        let legacy = try JSONDecoder().decode(DeckKeyNewAPIBalanceConfiguration.self, from: legacyPayload)
+        #expect(legacy.apiKey.isEmpty)
+        #expect(legacy.credentialID == nil)
+        #expect(legacy.instanceID == "legacy")
+        #expect(legacy.refreshInterval == 30)
+
+        let snapshotPayload = try JSONEncoder().encode(DeckKeyNewAPIBalanceConfiguration(
+            baseURL: "https://api.example.com",
+            lastResult: .success(remaining: 8.75),
+            lastSuccessfulSnapshot: .success(remaining: 8.75)
+        ))
+        let withSnapshot = try JSONDecoder().decode(DeckKeyNewAPIBalanceConfiguration.self, from: snapshotPayload)
+        #expect(withSnapshot.lastResult == .success(remaining: 8.75))
+        #expect(withSnapshot.lastSuccessfulSnapshot == .success(remaining: 8.75))
+
+        let failureSnapshotPayload = try JSONEncoder().encode(DeckKeyNewAPIBalanceConfiguration(
+            baseURL: "https://api.example.com",
+            lastSuccessfulSnapshot: .networkError("离线")
+        ))
+        let failureSnapshot = try JSONDecoder().decode(DeckKeyNewAPIBalanceConfiguration.self, from: failureSnapshotPayload)
+        #expect(failureSnapshot.lastSuccessfulSnapshot == nil)
+        #expect(failureSnapshot.lastResult == nil)
+    }
+
+    @Test("New API 余额服务名回退到 Base URL 主机名")
+    func newAPIBalanceServiceDisplayNameFallsBackToBaseURLHost() throws {
+        var configuration = DeckKeyNewAPIBalanceConfiguration(baseURL: "https://api.mooko.ai")
+        #expect(configuration.serviceDisplayName == "api.mooko.ai")
+
+        configuration.customServiceName = "  主站  "
+        #expect(configuration.serviceDisplayName == "主站")
+
+        var empty = DeckKeyNewAPIBalanceConfiguration()
+        #expect(empty.serviceDisplayName == "New API")
+        #expect(empty.isConfigurationComplete == false)
+
+        empty.baseURL = "api.mooko.ai"
+        #expect(empty.isConfigurationComplete == false)
+        empty.apiKey = "sk-test"
+        #expect(empty.isConfigurationComplete == true)
+    }
+
+    @Test("New API 余额按键主值拼接单位且副标题为服务名加余额")
+    func newAPIBalanceDisplayShowsUnitAndRemaining() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.newAPIBalance, to: 3)
+        state.setNewAPIBalanceBaseURL("api.example.com", for: 3)
+        state.setNewAPIBalanceServiceName("主站", for: 3)
+        state.setNewAPIBalanceUnit("$", for: 3)
+        state.setNewAPIBalanceLastResult(.success(remaining: 8.756), for: 3)
+
+        let display = try #require(state.displays(for: .h200Prototype).first(where: { $0.id == 3 }))
+        #expect(display.sub2APIButtonContent?.serviceName == "主站")
+        #expect(display.sub2APIButtonContent?.groupName == "余额")
+        #expect(display.sub2APIButtonContent?.availableConcurrencyText == "$8.76")
+        #expect(display.subtitle == "主站 余额")
+
+        state.setNewAPIBalanceLastResult(.networkError("离线"), for: 3)
+        let failedDisplay = try #require(state.displays(for: .h200Prototype).first(where: { $0.id == 3 }))
+        #expect(failedDisplay.sub2APIButtonContent?.availableConcurrencyText == "失败")
+        #expect(failedDisplay.subtitle == "主站 余额")
     }
 
     @Test("New API 切换聚合 Bin 清除旧粒度快照")
@@ -3729,7 +3953,7 @@ struct UlanziDeckSwiftTests {
 
         restored.assign(.sub2APIBalance, to: 3)
         #expect(store.saveInteractionState(restored, for: .h200Prototype) == .success)
-        let reloaded = try #require(store.loadInteractionState(for: .h200Prototype))
+        var reloaded = try #require(store.loadInteractionState(for: .h200Prototype))
         #expect(reloaded.configuration(for: 3)?.function == .sub2APIBalance)
         #expect(reloaded.sub2APIBalanceConfiguration(for: 3).bearerKey == bearerKey)
         #expect(reloaded.sub2APIBalanceConfiguration(for: 3).credentialID == credentialID)
@@ -4821,6 +5045,417 @@ struct UlanziDeckSwiftTests {
                 && model.interactionState.sub2APIBalanceConfiguration(for: 3).lastResult
                     == .success(remaining: 4)
         }
+    }
+
+    // MARK: - New API 余额运行时
+
+    @Test("New API 余额 API Key 存入独立 Keychain 集合且删除按键后清理孤儿")
+    func newAPIBalanceCredentialRoundTripAndOrphanCleanupInRealStore() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let newAPICredentials = FakeSub2APICredentialStore()
+        let sub2APICredentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: "deckConfiguration",
+            credentialStore: sub2APICredentials,
+            newAPICredentialStore: newAPICredentials
+        )
+
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.newAPIBalance, to: 3)
+        state.setNewAPIBalanceBaseURL("https://api.example.com", for: 3)
+        state.setNewAPIBalanceAPIKey("sk-balance-key", for: 3)
+        let credentialID = try #require(state.newAPIBalanceConfiguration(for: 3).credentialID)
+        #expect(store.saveInteractionState(state, for: .h200Prototype) == .success)
+
+        let storedPayload = try #require(String(
+            data: defaults.data(forKey: "deckConfiguration") ?? Data(),
+            encoding: .utf8
+        ))
+        #expect(!storedPayload.contains("apiKey"))
+        #expect(!storedPayload.contains("sk-balance-key"))
+        #expect(newAPICredentials.savedBearerKeys[credentialID] == "sk-balance-key")
+        #expect(sub2APICredentials.saveCallCount == 0)
+
+        var reloaded = try #require(store.loadInteractionState(for: .h200Prototype))
+        #expect(reloaded.newAPIBalanceConfiguration(for: 3).apiKey == "sk-balance-key")
+        #expect(reloaded.newAPIBalanceConfiguration(for: 3).credentialID == credentialID)
+
+        reloaded.clearFunction(keyID: 3)
+        #expect(store.saveInteractionState(reloaded, for: .h200Prototype) == .success)
+        #expect(newAPICredentials.deletedCredentialIDs.contains(credentialID))
+        #expect(newAPICredentials.savedBearerKeys[credentialID] == nil)
+
+        let afterCleanup = try #require(store.loadInteractionState(for: .h200Prototype))
+        #expect(afterCleanup.configuration(for: 3)?.function == DeckKeyFunction.none)
+        #expect(afterCleanup.newAPIBalanceConfiguration(for: 3).apiKey.isEmpty)
+    }
+
+    @Test("New API 历史明文 API Key 由 store 在解码前一次性迁入 Keychain")
+    func userDefaultsStoreMigratesLegacyNewAPIPlaintextAPIKeyBeforeDecoding() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let newAPICredentials = FakeSub2APICredentialStore()
+        let sub2APICredentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: sub2APICredentials,
+            newAPICredentialStore: newAPICredentials
+        )
+        defaults.set(
+            Data(#"{"version":2,"layoutIdentifier":"h200Prototype","keys":[],"pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"newAPIBalance","newAPIBalance":{"instanceID":"legacy-instance","baseURL":"https://api.example.com","apiKey":"sk-legacy-plain","refreshInterval":45}}}]}],"rootPageIDs":["root"]}"#.utf8),
+            forKey: storageKey
+        )
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+        let credentialID = try #require(restored.newAPIBalanceConfiguration(for: 3).credentialID)
+
+        #expect(restored.configuration(for: 3)?.function == .newAPIBalance)
+        #expect(restored.newAPIBalanceConfiguration(for: 3).apiKey == "sk-legacy-plain")
+        #expect(restored.newAPIBalanceConfiguration(for: 3).baseURL == "https://api.example.com")
+        #expect(restored.newAPIBalanceConfiguration(for: 3).refreshInterval == 45)
+        #expect(newAPICredentials.savedBearerKeys[credentialID] == "sk-legacy-plain")
+        #expect(sub2APICredentials.saveCallCount == 0)
+        #expect(defaults.stringArray(forKey: "\(storageKey).newAPICredentialIDs") == [credentialID])
+        #expect(!rewrittenJSON.contains("sk-legacy-plain"))
+        #expect(!rewrittenJSON.contains("apiKey"))
+
+        // 明文已从存储移除：再次加载只从 Keychain 注入，不产生新的 Keychain 写入。
+        let reloaded = try #require(store.loadInteractionState(for: .h200Prototype))
+        #expect(reloaded.newAPIBalanceConfiguration(for: 3).apiKey == "sk-legacy-plain")
+        #expect(newAPICredentials.saveCallCount == 1)
+    }
+
+    @Test("New API 历史明文迁移失败时移除明文且不保留凭据引用")
+    func failedNewAPIPlaintextMigrationDeletesPlaintextAndCredentialReference() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let newAPICredentials = FakeSub2APICredentialStore(saveError: .keychain(errSecAuthFailed))
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: FakeSub2APICredentialStore(),
+            newAPICredentialStore: newAPICredentials
+        )
+        defaults.set(
+            Data(#"{"version":2,"layoutIdentifier":"h200Prototype","keys":[],"pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"newAPIBalance","newAPIBalance":{"baseURL":"https://api.example.com","apiKey":"sk-failing-plain"}}}]}],"rootPageIDs":["root"]}"#.utf8),
+            forKey: storageKey
+        )
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+
+        #expect(restored.newAPIBalanceConfiguration(for: 3).apiKey.isEmpty)
+        #expect(restored.newAPIBalanceConfiguration(for: 3).credentialID == nil)
+        #expect(newAPICredentials.saveCallCount == 1)
+        #expect(!rewrittenJSON.contains("sk-failing-plain"))
+        #expect(!rewrittenJSON.contains("apiKey"))
+    }
+
+    @Test("不支持版本携带 New API 明文 API Key 时整个 payload 被丢弃")
+    func userDefaultsStoreDeletesUnsupportedVersionContainingNewAPIPlaintextAPIKey() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let newAPICredentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: FakeSub2APICredentialStore(),
+            newAPICredentialStore: newAPICredentials
+        )
+        defaults.set(
+            Data(#"{"version":99,"layoutIdentifier":"h200Prototype","keys":[],"pages":[{"id":"root","keys":[{"id":3,"configuration":{"function":"newAPIBalance","newAPIBalance":{"apiKey":"sk-future-plain"}}}]}],"rootPageIDs":["root"]}"#.utf8),
+            forKey: storageKey
+        )
+
+        #expect(store.loadInteractionState(for: .h200Prototype) == nil)
+        #expect(defaults.data(forKey: storageKey) == nil)
+        #expect(newAPICredentials.savedBearerKeys.isEmpty)
+    }
+
+    @Test("New API 历史明文 API Key 在 v1 顶层 keys 布局下同样完成迁移")
+    func userDefaultsStoreMigratesLegacyNewAPIPlaintextAPIKeyInV1Layout() throws {
+        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let storageKey = "deckConfiguration"
+        let newAPICredentials = FakeSub2APICredentialStore()
+        let store = UserDefaultsDeckConfigurationStore(
+            defaults: defaults,
+            storageKey: storageKey,
+            credentialStore: FakeSub2APICredentialStore(),
+            newAPICredentialStore: newAPICredentials
+        )
+        defaults.set(
+            Data(#"{"version":1,"layoutIdentifier":"h200Prototype","keys":[{"id":5,"configuration":{"function":"newAPIBalance","newAPIBalance":{"baseURL":"https://api.example.com","apiKey":"sk-v1-plain"}}}],"pages":[],"rootPageIDs":[]}"#.utf8),
+            forKey: storageKey
+        )
+
+        let restored = try #require(store.loadInteractionState(for: .h200Prototype))
+        let rewrittenData = try #require(defaults.data(forKey: storageKey))
+        let rewrittenJSON = try #require(String(data: rewrittenData, encoding: .utf8))
+        let credentialID = try #require(restored.newAPIBalanceConfiguration(for: 5).credentialID)
+
+        #expect(restored.newAPIBalanceConfiguration(for: 5).apiKey == "sk-v1-plain")
+        #expect(restored.newAPIBalanceConfiguration(for: 5).baseURL == "https://api.example.com")
+        #expect(newAPICredentials.savedBearerKeys[credentialID] == "sk-v1-plain")
+        #expect(defaults.stringArray(forKey: "\(storageKey).newAPICredentialIDs") == [credentialID])
+        #expect(!rewrittenJSON.contains("sk-v1-plain"))
+        #expect(!rewrittenJSON.contains("apiKey"))
+    }
+
+    @MainActor
+    @Test func newAPIBalanceRefreshesOnLaunchAndPressUpdatesDisplay() async throws {
+        let fetcher = FakeNewAPIBalanceFetcher(results: [
+            .success(remaining: 8.75),
+            .success(remaining: 6),
+        ])
+        var loadedState = DeckGridInteractionState(layout: .h200Prototype)
+        loadedState.assign(.newAPIBalance, to: 3)
+        loadedState.setNewAPIBalanceBaseURL("api.example.com", for: 3)
+        loadedState.setNewAPIBalanceAPIKey("sk-token", for: 3)
+        loadedState.setNewAPIBalanceServiceName("主站", for: 3)
+        loadedState.setNewAPIBalanceUnit("$", for: 3)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            newAPIBalanceFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.requests.count == 1
+                && model.interactionState.newAPIBalanceConfiguration(for: 3).lastResult
+                    == .success(remaining: 8.75)
+        }
+        #expect(fetcher.requests == [.init(baseURL: "api.example.com", apiKey: "sk-token")])
+        let display = try #require(
+            model.interactionState.displays(for: .h200Prototype).first(where: { $0.id == 3 })
+        )
+        #expect(display.sub2APIButtonContent?.serviceName == "主站")
+        #expect(display.sub2APIButtonContent?.groupName == "余额")
+        #expect(display.sub2APIButtonContent?.availableConcurrencyText == "$8.75")
+        #expect(display.subtitle == "主站 余额")
+        // 刷新成功后必须以局部包把新值推给 H200。
+        try await Self.waitUntil {
+            syncer.partialDisplays.contains { displays in
+                displays.first(where: { $0.id == 3 })?.sub2APIButtonContent?.availableConcurrencyText == "$8.75"
+            }
+        }
+
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Self.waitUntil {
+            fetcher.requests.count == 2
+                && model.interactionState.newAPIBalanceConfiguration(for: 3).lastResult
+                    == .success(remaining: 6)
+        }
+        let pressedDisplay = try #require(
+            model.interactionState.displays(for: .h200Prototype).first(where: { $0.id == 3 })
+        )
+        #expect(pressedDisplay.sub2APIButtonContent?.availableConcurrencyText == "$6")
+    }
+
+    @MainActor
+    @Test func newAPIBalanceFailureKeepsLastSuccessfulSnapshot() async throws {
+        let fetcher = FakeNewAPIBalanceFetcher(results: [
+            .success(remaining: 8.75),
+            .networkError("离线"),
+        ])
+        var loadedState = DeckGridInteractionState(layout: .h200Prototype)
+        loadedState.assign(.newAPIBalance, to: 3)
+        loadedState.setNewAPIBalanceBaseURL("api.example.com", for: 3)
+        loadedState.setNewAPIBalanceAPIKey("sk-token", for: 3)
+        loadedState.setNewAPIBalanceServiceName("主站", for: 3)
+        let syncer = FakeH200DeckSyncer()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            newAPIBalanceFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            model.interactionState.newAPIBalanceConfiguration(for: 3).lastResult
+                == .success(remaining: 8.75)
+        }
+        #expect(
+            model.interactionState.newAPIBalanceConfiguration(for: 3).lastSuccessfulSnapshot
+                == .success(remaining: 8.75)
+        )
+
+        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        try await Self.waitUntil {
+            fetcher.requests.count == 2
+                && model.interactionState.newAPIBalanceConfiguration(for: 3).lastResult
+                    == .networkError("离线")
+        }
+        let afterFailure = model.interactionState.newAPIBalanceConfiguration(for: 3)
+        #expect(afterFailure.lastSuccessfulSnapshot == .success(remaining: 8.75))
+        let display = try #require(
+            model.interactionState.displays(for: .h200Prototype).first(where: { $0.id == 3 })
+        )
+        #expect(display.sub2APIButtonContent?.availableConcurrencyText == "失败")
+        #expect(display.subtitle == "主站 余额")
+    }
+
+    @MainActor
+    @Test func newAPIBalanceDoesNotFetchWithIncompleteConfiguration() async throws {
+        let fetcher = FakeNewAPIBalanceFetcher(defaultResult: .success(remaining: 1))
+        var loadedState = DeckGridInteractionState(layout: .h200Prototype)
+        loadedState.assign(.newAPIBalance, to: 3)
+        loadedState.setNewAPIBalanceBaseURL("api.example.com", for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            newAPIBalanceFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil { model.syncSummary != nil }
+        try await Task.sleep(nanoseconds: 150_000_000)
+
+        #expect(fetcher.requests.isEmpty)
+    }
+
+    @MainActor
+    @Test func newAPIBalanceUnauthorizedPausesAutomaticRefresh() async throws {
+        let fetcher = FakeNewAPIBalanceFetcher(results: [
+            .success(remaining: 8.75),
+            .unauthorized,
+        ])
+        var loadedState = DeckGridInteractionState(layout: .h200Prototype)
+        loadedState.assign(.newAPIBalance, to: 3)
+        loadedState.setNewAPIBalanceBaseURL("api.example.com", for: 3)
+        loadedState.setNewAPIBalanceAPIKey("sk-token", for: 3)
+        loadedState.setNewAPIBalanceRefreshInterval(5, for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            newAPIBalanceFetcher: fetcher,
+            sub2APIRefreshSecondDuration: 0.01
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            fetcher.requests.count == 2
+                && model.interactionState.newAPIBalanceConfiguration(for: 3).lastResult
+                    == .unauthorized
+        }
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        #expect(fetcher.requests.count == 2)
+        #expect(
+            model.interactionState.newAPIBalanceConfiguration(for: 3).lastSuccessfulSnapshot
+                == .success(remaining: 8.75)
+        )
+    }
+
+    @MainActor
+    @Test func newAPIBalanceStaleResultAfterConfigChangeDoesNotOverrideLatest() async throws {
+        let fetcher = FakeNewAPIBalanceFetcher(
+            results: [.success(remaining: 1), .success(remaining: 2)],
+            fetchDelayNanoseconds: 120_000_000
+        )
+        var loadedState = DeckGridInteractionState(layout: .h200Prototype)
+        loadedState.assign(.newAPIBalance, to: 3)
+        loadedState.select(keyID: 3)
+        loadedState.setNewAPIBalanceBaseURL("api.example.com", for: 3)
+        loadedState.setNewAPIBalanceAPIKey("sk-token", for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            newAPIBalanceFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil { fetcher.requests.count == 1 }
+        model.setSelectedNewAPIBalanceBaseURL("api2.example.com")
+        try await Self.waitUntil {
+            fetcher.requests.count == 2
+                && model.interactionState.newAPIBalanceConfiguration(for: 3).lastResult
+                    == .success(remaining: 2)
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        #expect(fetcher.requests.map(\.baseURL) == ["api.example.com", "api2.example.com"])
+        #expect(
+            model.interactionState.newAPIBalanceConfiguration(for: 3).lastResult
+                == .success(remaining: 2)
+        )
+        #expect(
+            model.interactionState.newAPIBalanceConfiguration(for: 3).lastSuccessfulSnapshot
+                == .success(remaining: 2)
+        )
+    }
+
+    @MainActor
+    @Test func newAPIBalanceResumesWithFreshSnapshotWithoutImmediateRefresh() async throws {
+        let fetcher = FakeNewAPIBalanceFetcher(defaultResult: .success(remaining: 8.75))
+        var loadedState = DeckGridInteractionState(layout: .h200Prototype)
+        loadedState.assign(.newAPIBalance, to: 3)
+        loadedState.setNewAPIBalanceBaseURL("api.example.com", for: 3)
+        loadedState.setNewAPIBalanceAPIKey("sk-token", for: 3)
+        loadedState.setNewAPIBalanceLastResult(.success(remaining: 8.75), for: 3)
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: FakeH200DeckSyncer(),
+            configurationStore: FakeDeckConfigurationStore(loadedState: loadedState),
+            newAPIBalanceFetcher: fetcher
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil { model.syncSummary != nil }
+        try await Task.sleep(nanoseconds: 150_000_000)
+
+        #expect(fetcher.requests.isEmpty)
+        #expect(
+            model.interactionState.newAPIBalanceConfiguration(for: 3).lastResult
+                == .success(remaining: 8.75)
+        )
+    }
+
+    @Test("New API 余额经 H200 按键图标渲染输出可绘制内容")
+    func newAPIBalanceRendersThroughH200ButtonPackageOutput() throws {
+        var state = DeckGridInteractionState(layout: .h200Prototype)
+        state.assign(.newAPIBalance, to: 3)
+        state.setNewAPIBalanceServiceName("主站", for: 3)
+        state.setNewAPIBalanceUnit("$", for: 3)
+        state.setNewAPIBalanceLastResult(.success(remaining: 8.75), for: 3)
+        let key = try #require(DeckGridLayout.h200Prototype.keys.first(where: { $0.id == 3 }))
+        let successDisplay = state.display(for: key)
+        #expect(successDisplay.sub2APIButtonContent?.availableConcurrencyText == "$8.75")
+
+        let successPNG = try H200ButtonIconRenderer().pngData(for: successDisplay)
+        #expect(Array(successPNG.prefix(4)) == [0x89, 0x50, 0x4e, 0x47])
+        let successImage = try #require(NSBitmapImageRep(data: successPNG))
+        #expect(Self.brightPixelBounds(in: successImage) != nil)
+
+        state.setNewAPIBalanceLastResult(.networkError("离线"), for: 3)
+        let failedDisplay = state.display(for: key)
+        #expect(failedDisplay.sub2APIButtonContent?.availableConcurrencyText == "失败")
+        let failedPNG = try H200ButtonIconRenderer().pngData(for: failedDisplay)
+        let failedImage = try #require(NSBitmapImageRep(data: failedPNG))
+        #expect(Self.brightPixelBounds(in: failedImage) != nil)
     }
 
     @MainActor
@@ -11419,6 +12054,48 @@ private final class FakeNewAPIFetcher: NewAPIFetching, @unchecked Sendable {
             if let result = resultsByModelName.removeValue(forKey: modelName) {
                 return result
             }
+            return results.isEmpty ? defaultResult : results.removeFirst()
+        }
+        if let fetchDelayNanoseconds {
+            try? await Task.sleep(nanoseconds: fetchDelayNanoseconds)
+        }
+        return result
+    }
+
+    private func locked<Value>(_ body: () -> Value) -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
+    }
+}
+
+private final class FakeNewAPIBalanceFetcher: NewAPIBalanceFetching, @unchecked Sendable {
+    struct Request: Equatable {
+        let baseURL: String
+        let apiKey: String
+    }
+
+    private let lock = NSLock()
+    private var results: [NewAPIBalanceResult]
+    private let defaultResult: NewAPIBalanceResult
+    private let fetchDelayNanoseconds: UInt64?
+    private var storedRequests: [Request] = []
+
+    var requests: [Request] { locked { storedRequests } }
+
+    init(
+        results: [NewAPIBalanceResult] = [],
+        defaultResult: NewAPIBalanceResult = .networkError("未配置响应"),
+        fetchDelayNanoseconds: UInt64? = nil
+    ) {
+        self.results = results
+        self.defaultResult = defaultResult
+        self.fetchDelayNanoseconds = fetchDelayNanoseconds
+    }
+
+    func fetchBalance(baseURL: String, apiKey: String) async -> NewAPIBalanceResult {
+        let result = locked {
+            storedRequests.append(Request(baseURL: baseURL, apiKey: apiKey))
             return results.isEmpty ? defaultResult : results.removeFirst()
         }
         if let fetchDelayNanoseconds {

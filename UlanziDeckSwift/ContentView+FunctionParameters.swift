@@ -298,6 +298,51 @@ extension ContentView {
         )
     }
 
+    var selectedNewAPIBalanceConfiguration: DeckKeyNewAPIBalanceConfiguration? {
+        guard let selectedKeyID = interactionState.selectedKeyID else { return nil }
+        guard interactionState.configuration(for: selectedKeyID)?.function == .newAPIBalance else { return nil }
+        return interactionState.newAPIBalanceConfiguration(for: selectedKeyID)
+    }
+
+    var selectedNewAPIBalanceAutomaticServiceName: String {
+        selectedNewAPIBalanceConfiguration?.serviceDisplayName ?? "New API"
+    }
+
+    var selectedNewAPIBalanceBaseURLBinding: Binding<String> {
+        Binding(
+            get: { selectedNewAPIBalanceConfiguration?.baseURL ?? "" },
+            set: { onNewAPIBalanceBaseURLChange($0) }
+        )
+    }
+
+    var selectedNewAPIBalanceAPIKeyBinding: Binding<String> {
+        Binding(
+            get: { selectedNewAPIBalanceConfiguration?.apiKey ?? "" },
+            set: { onNewAPIBalanceAPIKeyChange($0) }
+        )
+    }
+
+    var selectedNewAPIBalanceRefreshIntervalBinding: Binding<Int> {
+        Binding(
+            get: { selectedNewAPIBalanceConfiguration?.refreshInterval ?? 30 },
+            set: { onNewAPIBalanceRefreshIntervalChange($0) }
+        )
+    }
+
+    var selectedNewAPIBalanceServiceNameBinding: Binding<String> {
+        Binding(
+            get: { selectedNewAPIBalanceConfiguration?.customServiceName ?? "" },
+            set: { onNewAPIBalanceServiceNameChange($0) }
+        )
+    }
+
+    var selectedNewAPIBalanceUnitBinding: Binding<String> {
+        Binding(
+            get: { selectedNewAPIBalanceConfiguration?.unit ?? "" },
+            set: { onNewAPIBalanceUnitChange($0) }
+        )
+    }
+
     nonisolated static func shouldAutomaticallySelectDefaultCodexAuthFile(
         currentFunction: DeckKeyFunction?,
         selectedFunction: DeckKeyFunction
@@ -607,6 +652,64 @@ extension ContentView {
                             label: "号池名",
                             placeholder: selectedNewAPIGroupName,
                             text: selectedNewAPIGroupNameBinding
+                        )
+                    }
+                }
+                .frame(maxWidth: 360, alignment: .leading)
+
+                Spacer()
+            }
+
+        case .newAPIBalance:
+            HStack(alignment: .top, spacing: 28) {
+                functionParameterColumn(for: configuration)
+
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Base URL")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("https://api.mooko.ai", text: selectedNewAPIBalanceBaseURLBinding)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("API Key")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        SecureField("API Key", text: selectedNewAPIBalanceAPIKeyBinding)
+                            .textFieldStyle(.roundedBorder)
+                    }
+
+                    Divider()
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("刷新间隔（秒）")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        HStack(spacing: 10) {
+                            TextField("刷新间隔", value: selectedNewAPIBalanceRefreshIntervalBinding, format: .number)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 96)
+
+                            Stepper("刷新间隔", value: selectedNewAPIBalanceRefreshIntervalBinding, in: 5...3600)
+                                .labelsHidden()
+                        }
+                    }
+
+                    Divider()
+
+                    HStack(alignment: .top, spacing: 8) {
+                        sub2APINameParameterRow(
+                            label: "服务名",
+                            placeholder: selectedNewAPIBalanceAutomaticServiceName,
+                            text: selectedNewAPIBalanceServiceNameBinding
+                        )
+                        sub2APINameParameterRow(
+                            label: "单位",
+                            placeholder: "",
+                            text: selectedNewAPIBalanceUnitBinding
                         )
                     }
                 }
@@ -1255,7 +1358,7 @@ extension ContentView {
             FunctionSection(
                 title: "New API",
                 systemImageName: "chart.xyaxis.line",
-                functions: [.newAPIModelAvailability]
+                functions: [.newAPIModelAvailability, .newAPIBalance]
             ),
             FunctionSection(
                 title: "游戏",

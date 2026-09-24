@@ -303,6 +303,26 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                     title = configuration.visual.displayName(fallback: "可用率")
                     subtitle = availability.groupDisplayName
                 }
+            case .newAPIBalance:
+                let balance = configuration.newAPIBalance
+                let valueText: String
+                let isFailure: Bool
+                if let formattedValue = balance.lastResult?.displayValue {
+                    valueText = "\(balance.displayUnit)\(formattedValue)"
+                    isFailure = false
+                } else {
+                    valueText = "失败"
+                    isFailure = true
+                }
+                let content = Sub2APIButtonContent(
+                    serviceName: balance.serviceDisplayName,
+                    label: "余额",
+                    valueText: valueText,
+                    isFailure: isFailure
+                )
+                title = configuration.visual.displayName(fallback: valueText)
+                subtitle = "\(content.serviceName) 余额"
+                sub2APIButtonContent = content
             case .codexUsage, .zcodeUsage:
                 let presentation = UsagePresentationFormatter.presentation(
                     for: configuration.codexUsage
@@ -1308,6 +1328,10 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations[keyID, default: .tallyDefault].newAPIModelAvailability
     }
 
+    func newAPIBalanceConfiguration(for keyID: Int) -> DeckKeyNewAPIBalanceConfiguration {
+        configurations[keyID, default: .tallyDefault].newAPIBalance
+    }
+
     func codexUsageConfiguration(for keyID: Int) -> DeckKeyCodexUsageConfiguration {
         configurations[keyID, default: .tallyDefault].codexUsage
     }
@@ -1607,6 +1631,113 @@ nonisolated struct DeckGridInteractionState: Equatable {
         configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastResult = nil
         configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulSnapshot = nil
         configurations[keyID, default: .tallyDefault].newAPIModelAvailability.lastSuccessfulRefreshAt = nil
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPIBalanceBaseURL(_ baseURL: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIBalance
+        else { return false }
+        selectedKeyID = keyID
+        let normalized = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if configurations[keyID, default: .tallyDefault].newAPIBalance.baseURL != normalized {
+            configurations[keyID, default: .tallyDefault].newAPIBalance.lastResult = nil
+            configurations[keyID, default: .tallyDefault].newAPIBalance.lastSuccessfulRefreshAt = nil
+            configurations[keyID, default: .tallyDefault].newAPIBalance.lastSuccessfulSnapshot = nil
+        }
+        configurations[keyID, default: .tallyDefault].newAPIBalance.baseURL = normalized
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPIBalanceAPIKey(_ apiKey: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIBalance
+        else { return false }
+        selectedKeyID = keyID
+        var balance = configurations[keyID, default: .tallyDefault].newAPIBalance
+        if balance.apiKey != apiKey {
+            balance.lastResult = nil
+            balance.lastSuccessfulRefreshAt = nil
+            balance.lastSuccessfulSnapshot = nil
+        }
+        if !apiKey.isEmpty, balance.credentialID == nil {
+            balance.credentialID = UUID().uuidString
+        } else if apiKey.isEmpty {
+            balance.credentialID = nil
+        }
+        balance.apiKey = apiKey
+        configurations[keyID, default: .tallyDefault].newAPIBalance = balance
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPIBalanceRefreshInterval(_ interval: Int, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIBalance
+        else { return false }
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].newAPIBalance.refreshInterval = max(5, interval)
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPIBalanceServiceName(_ serviceName: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIBalance
+        else { return false }
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].newAPIBalance.customServiceName =
+            serviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPIBalanceUnit(_ unit: String, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIBalance
+        else { return false }
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].newAPIBalance.unit = unit
+        return true
+    }
+
+    @discardableResult
+    mutating func setNewAPIBalanceLastResult(_ result: NewAPIBalanceResult, for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIBalance
+        else { return false }
+        configurations[keyID, default: .tallyDefault].newAPIBalance.lastResult = result
+        if case .success = result {
+            configurations[keyID, default: .tallyDefault].newAPIBalance.lastSuccessfulRefreshAt = Date()
+            configurations[keyID, default: .tallyDefault].newAPIBalance.lastSuccessfulSnapshot = result
+        }
+        return true
+    }
+
+    @discardableResult
+    mutating func clearNewAPIBalanceRuntimeState(for keyID: Int) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].newAPIBalance.lastResult != nil
+        else { return false }
+        configurations[keyID, default: .tallyDefault].newAPIBalance.lastResult = nil
+        configurations[keyID, default: .tallyDefault].newAPIBalance.lastSuccessfulRefreshAt = nil
+        configurations[keyID, default: .tallyDefault].newAPIBalance.lastSuccessfulSnapshot = nil
+        return true
+    }
+
+    @discardableResult
+    mutating func restoreNewAPIBalanceCredential(
+        apiKey: String,
+        credentialID: String?,
+        for keyID: Int
+    ) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .newAPIBalance
+        else { return false }
+        configurations[keyID, default: .tallyDefault].newAPIBalance.apiKey = apiKey
+        configurations[keyID, default: .tallyDefault].newAPIBalance.credentialID = credentialID
         return true
     }
 
@@ -2554,6 +2685,9 @@ nonisolated struct DeckGridInteractionState: Equatable {
         if function == .newAPIModelAvailability {
             ensureUniqueNewAPIInstanceID(for: keyID)
         }
+        if function == .newAPIBalance {
+            ensureUniqueNewAPIBalanceInstanceID(for: keyID)
+        }
         normalizeSub2APIDataSources()
         return true
     }
@@ -2780,6 +2914,24 @@ nonisolated struct DeckGridInteractionState: Equatable {
         if instanceID.isEmpty || existingInstanceIDs.contains(instanceID) {
             configuration.instanceID = UUID().uuidString
             configurations[keyID, default: .tallyDefault].newAPIModelAvailability = configuration
+        }
+    }
+
+    private mutating func ensureUniqueNewAPIBalanceInstanceID(for keyID: Int) {
+        let existingInstanceIDs = Set(
+            pages.flatMap { pageID, page in
+                page.configurations.compactMap { candidateKeyID, configuration -> String? in
+                    guard configuration.function == .newAPIBalance,
+                          pageID != currentPageID || candidateKeyID != keyID else { return nil }
+                    return configuration.newAPIBalance.instanceID
+                }
+            }
+        )
+        var configuration = configurations[keyID, default: .tallyDefault].newAPIBalance
+        let instanceID = configuration.instanceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if instanceID.isEmpty || existingInstanceIDs.contains(instanceID) {
+            configuration.instanceID = UUID().uuidString
+            configurations[keyID, default: .tallyDefault].newAPIBalance = configuration
         }
     }
 
