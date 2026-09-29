@@ -16,6 +16,22 @@ nonisolated enum CodexAuthSource: String, Codable, Equatable, CaseIterable, Iden
     }
 }
 
+nonisolated enum AntigravityModelFamily: String, Codable, Equatable, CaseIterable, Identifiable, Sendable {
+    case gemini
+    case thirdParty
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .gemini:
+            return "Gemini"
+        case .thirdParty:
+            return "Claude / GPT"
+        }
+    }
+}
+
 nonisolated enum CodexUsageColorMode: String, Codable, Equatable, CaseIterable, Identifiable, Sendable {
     case highIsRed
     case lowIsRed
@@ -119,6 +135,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
     var manualAuthData: String
     var zcodeConfigFilePath: String?
     var zcodeBookmarkData: Data?
+    var antigravityModelFamily: AntigravityModelFamily
     var accountNickname: String
     var refreshIntervalMinutes: Int
     var colorMode: CodexUsageColorMode
@@ -138,6 +155,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         manualAuthData: String = "",
         zcodeConfigFilePath: String? = nil,
         zcodeBookmarkData: Data? = nil,
+        antigravityModelFamily: AntigravityModelFamily = .gemini,
         accountNickname: String = "",
         refreshIntervalMinutes: Int = Self.defaultRefreshIntervalMinutes,
         colorMode: CodexUsageColorMode = .highIsRed,
@@ -154,6 +172,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         self.manualAuthData = manualAuthData
         self.zcodeConfigFilePath = zcodeConfigFilePath
         self.zcodeBookmarkData = zcodeBookmarkData
+        self.antigravityModelFamily = antigravityModelFamily
         self.accountNickname = accountNickname
         self.refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(refreshIntervalMinutes)
         self.colorMode = colorMode
@@ -185,6 +204,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         manualAuthData = ""
         zcodeConfigFilePath = nil
         zcodeBookmarkData = nil
+        antigravityModelFamily = .gemini
         self.accountNickname = accountNickname
         bookmarkData = try authFileURL.bookmarkData(
             options: Self.securityScopedBookmarkCreationOptions,
@@ -202,6 +222,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         switch dataSource {
         case .codex: return authFilePath != nil && bookmarkData == nil
         case .zcode: return zcodeConfigFilePath != nil && zcodeBookmarkData == nil
+        case .antigravity: return false
         }
     }
 
@@ -265,6 +286,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         case manualAuthData
         case zcodeConfigFilePath
         case zcodeBookmarkData
+        case antigravityModelFamily
         case accountNickname
         case refreshIntervalMinutes
         case colorMode
@@ -283,6 +305,10 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         manualAuthData = try container.decodeIfPresent(String.self, forKey: .manualAuthData) ?? ""
         zcodeConfigFilePath = try container.decodeIfPresent(String.self, forKey: .zcodeConfigFilePath)
         zcodeBookmarkData = try container.decodeIfPresent(Data.self, forKey: .zcodeBookmarkData)
+        antigravityModelFamily = try container.decodeIfPresent(
+            AntigravityModelFamily.self,
+            forKey: .antigravityModelFamily
+        ) ?? .gemini
         accountNickname = try container.decodeIfPresent(String.self, forKey: .accountNickname) ?? ""
         refreshIntervalMinutes = Self.normalizedRefreshIntervalMinutes(
             try container.decodeIfPresent(Int.self, forKey: .refreshIntervalMinutes)
@@ -313,6 +339,7 @@ nonisolated struct DeckKeyCodexUsageConfiguration: Codable, Equatable {
         try container.encode(manualAuthData, forKey: .manualAuthData)
         try container.encodeIfPresent(zcodeConfigFilePath, forKey: .zcodeConfigFilePath)
         try container.encodeIfPresent(zcodeBookmarkData, forKey: .zcodeBookmarkData)
+        try container.encodeIfPresent(antigravityModelFamily, forKey: .antigravityModelFamily)
         try container.encode(accountNickname, forKey: .accountNickname)
         try container.encode(refreshIntervalMinutes, forKey: .refreshIntervalMinutes)
         try container.encode(colorMode, forKey: .colorMode)

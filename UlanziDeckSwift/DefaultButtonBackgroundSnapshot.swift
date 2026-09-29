@@ -45,7 +45,7 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "ZcodeUsageBackground"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return function.game?.buttonBackgroundAssetName
-        case .none, .tally, .dailyReminder, .openFile, .openWebPage, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .newAPIBalance, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
+        case .none, .tally, .dailyReminder, .openFile, .openWebPage, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .newAPIBalance, .antigravityUsage, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
             return nil
         }
     }
@@ -62,6 +62,8 @@ nonisolated enum DefaultButtonBackgroundSnapshot {
             return "chevron.left"
         case .nextPage:
             return "chevron.right"
+        case .antigravityUsage:
+            return "sparkles"
         case .none, .tally, .dailyReminder, .openFolder, .openFile, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .newAPIBalance, .codexUsage, .zcodeUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .shellCommand:
             return nil
         }
@@ -159,7 +161,7 @@ extension DeckKeyConfiguration {
             openWebPage.visual.replaceBackground(with: defaultVisual)
         case .connectSMBServer:
             smbServer.visual.replaceBackground(with: defaultVisual)
-        case .codexUsage, .zcodeUsage:
+        case .codexUsage, .zcodeUsage, .antigravityUsage:
             let hadDefaultBackground = codexUsage.visual.backgroundPNGData != nil
             codexUsage.visual.replaceBackground(with: defaultVisual)
             if !hadDefaultBackground && !visual.hasCustomBackground {
@@ -189,7 +191,7 @@ extension DeckKeyConfiguration {
             openWebPage.visual.clearBackground()
         case .connectSMBServer:
             smbServer.visual.clearBackground()
-        case .codexUsage, .zcodeUsage:
+        case .codexUsage, .zcodeUsage, .antigravityUsage:
             codexUsage.visual.clearBackground()
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             mihoyoGame.visual.clearBackground()

@@ -201,12 +201,17 @@ struct UlanziDeckSwiftTests {
 
         #expect(websiteFunctions?.contains(.codexUsage) == true)
         #expect(websiteFunctions?.contains(.zcodeUsage) == true)
+        #expect(websiteFunctions?.contains(.antigravityUsage) == true)
         #expect(DeckKeyFunction.codexUsage.title == "Codex 剩余额度")
         #expect(DeckKeyFunction.zcodeUsage.title == "Zcode 剩余额度")
+        #expect(DeckKeyFunction.antigravityUsage.title == "Antigravity 剩余额度")
         #expect(DeckKeyFunction.codexUsage.usageDataSource == .codex)
         #expect(DeckKeyFunction.zcodeUsage.usageDataSource == .zcode)
+        #expect(DeckKeyFunction.antigravityUsage.usageDataSource == .antigravity)
         #expect(DeckKeyFunction.zcodeUsage.pressRuntimeAction == .refreshCodexUsage)
         #expect(DeckKeyFunction.zcodeUsage.scheduledRuntime == .codexUsage)
+        #expect(DeckKeyFunction.antigravityUsage.pressRuntimeAction == .refreshCodexUsage)
+        #expect(DeckKeyFunction.antigravityUsage.scheduledRuntime == .codexUsage)
     }
 
     @Test("Sub2API 功能独立显示在 Sub2API 卡片")
@@ -10133,6 +10138,219 @@ struct UlanziDeckSwiftTests {
         #expect(request.value(forHTTPHeaderField: "Authorization") != "Bearer secret-token")
     }
 
+    @Test func antigravityUsageFetcherParsesGeminiDualBucketsInStableOrderAndSendsClientHeaders() async throws {
+        let usageURL = try #require(
+            URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary")
+        )
+        let nowSeconds = 1_790_000_000.0
+        let iso8601 = ISO8601DateFormatter()
+        let fiveHourResetAt = nowSeconds + 3_600
+        let weeklyResetAt = nowSeconds + 691_200
+        let responseData = try JSONSerialization.data(withJSONObject: [
+            "groups": [
+                [
+                    "buckets": [
+                        [
+                            "bucketId": "gemini-weekly",
+                            "displayName": "Weekly Limit Remaining",
+                            "remainingFraction": 0.993,
+                            "resetTime": iso8601.string(from: Date(timeIntervalSince1970: weeklyResetAt)),
+                        ],
+                        [
+                            "bucketId": "gemini-5h",
+                            "displayName": "Five Hour Limit Remaining",
+                            "remainingFraction": 0.977,
+                            "resetTime": iso8601.string(from: Date(timeIntervalSince1970: fiveHourResetAt)),
+                        ],
+                    ],
+                ],
+                [
+                    "buckets": [
+                        [
+                            "bucketId": "3p-weekly",
+                            "remainingFraction": 0.99,
+                            "resetTime": iso8601.string(from: Date(timeIntervalSince1970: weeklyResetAt)),
+                        ],
+                        [
+                            "bucketId": "3p-5h",
+                            "remainingFraction": 0.989,
+                            "resetTime": iso8601.string(from: Date(timeIntervalSince1970: fiveHourResetAt)),
+                        ],
+                    ],
+                ],
+            ],
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            usageURL: .init(statusCode: 200, mimeType: "application/json", data: responseData),
+        ])
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let fetcher = AntigravityUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            tokenLoader: FakeAntigravityTokenLoader(result: .success("access-token")),
+            now: { Date(timeIntervalSince1970: nowSeconds) }
+        )
+        let configuration = DeckKeyCodexUsageConfiguration(
+            dataSource: .antigravity,
+            antigravityModelFamily: .gemini
+        )
+
+        let expectedSnapshot = UsageQuotaSnapshot(quotas: [
+            CodexUsageQuota(
+                window: .fiveHours,
+                remainingPercent: 98,
+                resetAfterSeconds: 3_600,
+                resetAt: Int(fiveHourResetAt),
+                limitWindowSeconds: 18_000,
+                usedPercent: 2
+            ),
+            CodexUsageQuota(
+                window: .sevenDays,
+                remainingPercent: 99,
+                resetAfterSeconds: 691_200,
+                resetAt: Int(weeklyResetAt),
+                limitWindowSeconds: 604_800,
+                usedPercent: 1
+            ),
+        ])
+        #expect(await fetcher.fetchUsage(configuration: configuration) == .success(expectedSnapshot))
+
+        let request = try #require(WebPageMetadataURLProtocol.receivedRequests.last)
+        #expect(request.url == usageURL)
+        #expect(request.httpMethod == "POST")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer access-token")
+        #expect(
+            request.value(forHTTPHeaderField: "User-Agent")
+                == "antigravity/1.20.5 darwin/arm64 google-api-nodejs-client/10.3.0"
+        )
+    }
+
+    @Test func antigravityUsageFetcherLimitsThirdPartyFamilyToWeeklyBucket() async throws {
+        let usageURL = try #require(
+            URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary")
+        )
+        let responseData = try JSONSerialization.data(withJSONObject: [
+            "groups": [
+                [
+                    "buckets": [
+                        [
+                            "bucketId": "gemini-weekly",
+                            "remainingFraction": 0.993,
+                            "resetTime": "2026-10-06T01:27:32Z",
+                        ],
+                        [
+                            "bucketId": "gemini-5h",
+                            "remainingFraction": 0.977,
+                            "resetTime": "2026-09-29T06:27:32Z",
+                        ],
+                    ],
+                ],
+                [
+                    "buckets": [
+                        [
+                            "bucketId": "3p-weekly",
+                            "remainingFraction": 0.99,
+                            "resetTime": "2026-10-06T01:35:29Z",
+                        ],
+                        [
+                            "bucketId": "3p-5h",
+                            "remainingFraction": 0.989,
+                            "resetTime": "2026-09-29T06:35:29Z",
+                        ],
+                    ],
+                ],
+            ],
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            usageURL: .init(statusCode: 200, mimeType: "application/json", data: responseData),
+        ])
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let fetcher = AntigravityUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            tokenLoader: FakeAntigravityTokenLoader(result: .success("access-token")),
+            now: { Date(timeIntervalSince1970: 1_790_000_000) }
+        )
+        let configuration = DeckKeyCodexUsageConfiguration(
+            dataSource: .antigravity,
+            antigravityModelFamily: .thirdParty
+        )
+
+        guard case let .success(snapshot) = await fetcher.fetchUsage(configuration: configuration) else {
+            Issue.record("第三方分组应返回 7 天额度")
+            return
+        }
+        #expect(snapshot.quotas.map(\.window) == [.sevenDays])
+        #expect(snapshot.quotas.first?.remainingPercent == 99)
+    }
+
+    @Test func antigravityUsageFetcherMapsCredentialAndHTTPFailures() async throws {
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+
+        let missingCredentialFetcher = AntigravityUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            tokenLoader: FakeAntigravityTokenLoader(result: .notLoggedIn)
+        )
+        #expect(
+            await missingCredentialFetcher.fetchUsage(
+                configuration: DeckKeyCodexUsageConfiguration(dataSource: .antigravity)
+            ) == .authFileNotSelected
+        )
+
+        let invalidCredentialFetcher = AntigravityUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            tokenLoader: FakeAntigravityTokenLoader(result: .invalid)
+        )
+        #expect(
+            await invalidCredentialFetcher.fetchUsage(
+                configuration: DeckKeyCodexUsageConfiguration(dataSource: .antigravity)
+            ) == .invalidAuthFile
+        )
+
+        let usageURL = try #require(
+            URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary")
+        )
+        WebPageMetadataURLProtocol.setStubs([
+            usageURL: .init(statusCode: 401, mimeType: "application/json", data: Data("{}".utf8)),
+        ])
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+        let unauthorizedFetcher = AntigravityUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            tokenLoader: FakeAntigravityTokenLoader(result: .success("access-token"))
+        )
+        #expect(
+            await unauthorizedFetcher.fetchUsage(
+                configuration: DeckKeyCodexUsageConfiguration(dataSource: .antigravity)
+            ) == .unauthorized
+        )
+    }
+
+    @Test func antigravityUsageConfigurationDecodesLegacyPayloadWithDefaultFamily() throws {
+        let legacyJSON = try JSONSerialization.data(withJSONObject: [
+            "dataSource": "antigravity",
+            "refreshIntervalMinutes": 5,
+        ])
+        let configuration = try JSONDecoder().decode(
+            DeckKeyCodexUsageConfiguration.self,
+            from: legacyJSON
+        )
+        #expect(configuration.antigravityModelFamily == .gemini)
+
+        let encoded = try JSONEncoder().encode(
+            DeckKeyCodexUsageConfiguration(
+                dataSource: .antigravity,
+                antigravityModelFamily: .thirdParty
+            )
+        )
+        let roundTrip = try JSONDecoder().decode(DeckKeyCodexUsageConfiguration.self, from: encoded)
+        #expect(roundTrip.antigravityModelFamily == .thirdParty)
+    }
+
     @Test func zcodeUsageFetcherParsesObservedThreeAndNinePercentDualWindowShape() async throws {
         let usageURL = try #require(URL(string: "https://api.z.ai/api/monitor/usage/quota/limit"))
         let responseData = try JSONSerialization.data(withJSONObject: [
@@ -11773,6 +11991,14 @@ private struct FakeZcodeConfigurationFileLoader: ZcodeConfigurationFileLoading {
     func loadConfigurationData(
         configuration: DeckKeyCodexUsageConfiguration
     ) -> CodexAuthFileLoadResult {
+        result
+    }
+}
+
+private struct FakeAntigravityTokenLoader: AntigravityTokenLoading {
+    let result: AntigravityTokenLoadResult
+
+    func loadAccessToken() -> AntigravityTokenLoadResult {
         result
     }
 }

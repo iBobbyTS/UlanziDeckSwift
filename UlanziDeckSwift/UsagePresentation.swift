@@ -205,6 +205,7 @@ typealias CodexUsageResult = UsageFetchResult
 nonisolated enum UsageDataSource: String, Codable, Equatable, CaseIterable, Identifiable, Sendable {
     case codex
     case zcode
+    case antigravity
 
     var id: String { rawValue }
 
@@ -212,6 +213,7 @@ nonisolated enum UsageDataSource: String, Codable, Equatable, CaseIterable, Iden
         switch self {
         case .codex: return "Codex"
         case .zcode: return "Zcode"
+        case .antigravity: return "Antigravity"
         }
     }
 }
@@ -327,7 +329,7 @@ nonisolated enum UsagePresentationFormatter {
 
             let quota = firstQuota
             let percentageColor = configuration.colorMode.metricColor(for: quota.remainingPercent)
-            if source == .zcode {
+            if source != .codex {
                 let resetText = quota.resetAt == nil
                     ? nil
                     : configuration.resetDisplayMode.text(for: quota)
@@ -364,11 +366,23 @@ nonisolated enum UsagePresentationFormatter {
                 )
             )
         case .authFileNotSelected:
-            return UsagePresentation(title: fallbackTitle, subtitle: source == .zcode ? "未选择 config.json" : "未选择 auth.json", buttonContent: nil)
+            let subtitle: String
+            switch source {
+            case .zcode: subtitle = "未选择 config.json"
+            case .antigravity: subtitle = "未找到 Antigravity 登录"
+            case .codex: subtitle = "未选择 auth.json"
+            }
+            return UsagePresentation(title: fallbackTitle, subtitle: subtitle, buttonContent: nil)
         case .authFileNeedsReselection:
             return UsagePresentation(title: fallbackTitle, subtitle: "需重选文件", buttonContent: nil)
         case .invalidAuthFile:
-            return UsagePresentation(title: source == .zcode ? "config.json" : "auth.json", subtitle: "JSON 格式无效", buttonContent: nil)
+            let title: String
+            switch source {
+            case .zcode: title = "config.json"
+            case .antigravity: title = "Antigravity 凭据"
+            case .codex: title = "auth.json"
+            }
+            return UsagePresentation(title: title, subtitle: "格式无效", buttonContent: nil)
         case .invalidConfiguration:
             return UsagePresentation(title: "Zcode 配置", subtitle: "缺少 provider 配置", buttonContent: nil)
         case .unsupportedAuthMode:
@@ -376,13 +390,19 @@ nonisolated enum UsagePresentationFormatter {
         case .unauthorized:
             return UsagePresentation(title: fallbackTitle, subtitle: source == .zcode ? "鉴权失败" : "登录已失效", buttonContent: nil)
         case .missingWeeklyQuota:
-            return UsagePresentation(title: "Zcode 额度", subtitle: "缺少有效额度", buttonContent: nil)
+            return UsagePresentation(title: fallbackTitle, subtitle: "缺少有效额度", buttonContent: nil)
         case .networkError:
             return UsagePresentation(title: fallbackTitle, subtitle: "刷新失败", buttonContent: nil)
         case nil:
+            let subtitle: String
+            switch source {
+            case .antigravity: subtitle = "未刷新"
+            case .codex, .zcode:
+                subtitle = configuration.selectedConfigurationFilePath == nil ? "未配置" : "未刷新"
+            }
             return UsagePresentation(
                 title: fallbackTitle,
-                subtitle: configuration.selectedConfigurationFilePath == nil ? "未配置" : "未刷新",
+                subtitle: subtitle,
                 buttonContent: nil
             )
         }

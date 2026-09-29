@@ -863,7 +863,7 @@ extension ContentView {
                 Spacer()
             }
 
-        case .codexUsage, .zcodeUsage:
+        case .codexUsage, .zcodeUsage, .antigravityUsage:
             codexUsageParameterContent(for: configuration)
 
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
@@ -1041,7 +1041,28 @@ extension ContentView {
             functionParameterColumn(for: configuration)
 
             VStack(alignment: .leading, spacing: 12) {
-                if configuration.function == .zcodeUsage {
+                if configuration.function == .antigravityUsage {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("模型分组")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+
+                        Picker("模型分组", selection: selectedCodexUsageAntigravityModelFamilyBinding) {
+                            ForEach(AntigravityModelFamily.allCases) { family in
+                                Text(family.title).tag(family)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 180, alignment: .leading)
+
+                        Text("凭据自动读取本机 Antigravity CLI 登录（钥匙串）。Gemini 显示 5 小时与 7 天两个额度，Claude / GPT 只显示 7 天额度。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else if configuration.function == .zcodeUsage {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Zcode config.json")
                             .font(.caption.weight(.semibold))
@@ -1348,7 +1369,7 @@ extension ContentView {
             FunctionSection(
                 title: "网站",
                 systemImageName: "globe",
-                functions: [.openWebPage, .codexUsage, .zcodeUsage]
+                functions: [.openWebPage, .codexUsage, .zcodeUsage, .antigravityUsage]
             ),
             FunctionSection(
                 title: "Sub2API",
@@ -1850,6 +1871,17 @@ extension ContentView {
             },
             set: { manualAuthData in
                 onCodexUsageManualAuthDataChange(manualAuthData)
+            }
+        )
+    }
+
+    var selectedCodexUsageAntigravityModelFamilyBinding: Binding<AntigravityModelFamily> {
+        Binding(
+            get: {
+                selectedConfiguration?.codexUsage.antigravityModelFamily ?? .gemini
+            },
+            set: { family in
+                onCodexUsageAntigravityModelFamilyChange(family)
             }
         )
     }

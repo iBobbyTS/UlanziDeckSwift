@@ -323,7 +323,7 @@ nonisolated struct DeckKeyDisplay: Equatable, Identifiable {
                 title = configuration.visual.displayName(fallback: valueText)
                 subtitle = "\(content.serviceName) 余额"
                 sub2APIButtonContent = content
-            case .codexUsage, .zcodeUsage:
+            case .codexUsage, .zcodeUsage, .antigravityUsage:
                 let presentation = UsagePresentationFormatter.presentation(
                     for: configuration.codexUsage
                 )
@@ -2231,6 +2231,22 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
         selectedKeyID = keyID
         configurations[keyID, default: .tallyDefault].codexUsage.manualAuthData = manualAuthData
+        return true
+    }
+
+    @discardableResult
+    mutating func setCodexUsageAntigravityModelFamily(
+        _ family: AntigravityModelFamily,
+        for keyID: Int
+    ) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              configurations[keyID, default: .tallyDefault].function == .antigravityUsage
+        else {
+            return false
+        }
+
+        selectedKeyID = keyID
+        configurations[keyID, default: .tallyDefault].codexUsage.antigravityModelFamily = family
         return true
     }
 

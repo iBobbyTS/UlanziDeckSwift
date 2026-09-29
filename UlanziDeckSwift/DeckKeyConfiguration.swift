@@ -53,6 +53,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
     case newAPIBalance
     case codexUsage
     case zcodeUsage
+    case antigravityUsage
     case genshinStatus
     case starRailStatus
     case zenlessZoneStatus
@@ -76,6 +77,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
         .newAPIBalance,
         .codexUsage,
         .zcodeUsage,
+        .antigravityUsage,
         .genshinStatus,
         .starRailStatus,
         .zenlessZoneStatus,
@@ -117,6 +119,8 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "Codex 剩余额度"
         case .zcodeUsage:
             return "Zcode 剩余额度"
+        case .antigravityUsage:
+            return "Antigravity 剩余额度"
         case .genshinStatus:
             return "原神状态"
         case .starRailStatus:
@@ -156,7 +160,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return "sun.max"
         case .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .newAPIBalance:
             return "globe"
-        case .codexUsage, .zcodeUsage:
+        case .codexUsage, .zcodeUsage, .antigravityUsage:
             return "gauge.with.dots.needle.67percent"
         case .genshinStatus:
             return "sparkles"
@@ -185,7 +189,7 @@ nonisolated enum DeckKeyFunction: String, Codable, Equatable, CaseIterable {
             return .starRail
         case .zenlessZoneStatus:
             return .zenlessZoneZero
-        case .none, .tally, .dailyReminder, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .newAPIBalance, .codexUsage, .zcodeUsage, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
+        case .none, .tally, .dailyReminder, .openFolder, .openFile, .openWebPage, .connectSMBServer, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .newAPIBalance, .codexUsage, .zcodeUsage, .antigravityUsage, .pageFolder, .pageBack, .previousPage, .nextPage, .shellCommand:
             return nil
         }
     }
@@ -234,6 +238,8 @@ extension DeckKeyFunction {
             return .codex
         case .zcodeUsage:
             return .zcode
+        case .antigravityUsage:
+            return .antigravity
         default:
             return nil
         }
@@ -267,7 +273,7 @@ extension DeckKeyFunction {
             return .refreshNewAPIModelAvailability
         case .newAPIBalance:
             return .refreshNewAPIBalance
-        case .codexUsage, .zcodeUsage:
+        case .codexUsage, .zcodeUsage, .antigravityUsage:
             return .refreshCodexUsage
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .refreshMihoyoGame
@@ -298,7 +304,7 @@ extension DeckKeyFunction {
             return .newAPIModelAvailability
         case .newAPIBalance:
             return .newAPIBalance
-        case .codexUsage, .zcodeUsage:
+        case .codexUsage, .zcodeUsage, .antigravityUsage:
             return .codexUsage
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return .mihoyoGame
@@ -2631,7 +2637,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return pageFolder.visual.backgroundPNGData
         case .pageBack:
             return visual.backgroundPNGData
-        case .codexUsage, .zcodeUsage:
+        case .codexUsage, .zcodeUsage, .antigravityUsage:
             return codexUsage.visual.backgroundPNGData
         case .none, .tally, .dailyReminder, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .newAPIBalance:
             return nil
@@ -2658,7 +2664,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return pageFolder.visual.blurredBackgroundPNGData
         case .pageBack:
             return visual.blurredBackgroundPNGData
-        case .codexUsage, .zcodeUsage:
+        case .codexUsage, .zcodeUsage, .antigravityUsage:
             return codexUsage.visual.blurredBackgroundPNGData
         case .none, .tally, .dailyReminder, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .newAPIBalance:
             return nil
@@ -2701,6 +2707,8 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return "Codex 额度"
         case .zcodeUsage:
             return "Zcode 额度"
+        case .antigravityUsage:
+            return "Antigravity 额度"
         case .genshinStatus, .starRailStatus, .zenlessZoneStatus:
             return function.game?.shortDisplayName ?? "游戏"
         case .pageFolder:
@@ -2752,7 +2760,7 @@ nonisolated struct DeckKeyConfiguration: Codable, Equatable {
             return DeckKeyPageFolderConfiguration.migratingLegacyDefaultName(in: pageFolder.visual)
         case .pageBack:
             return DeckKeyVisualConfiguration(dimsBackground: false)
-        case .none, .tally, .dailyReminder, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .newAPIBalance, .codexUsage, .zcodeUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage, .shellCommand:
+        case .none, .tally, .dailyReminder, .brightness, .sub2API, .sub2APIBalance, .sub2APIDailyCost, .newAPIModelAvailability, .newAPIBalance, .codexUsage, .zcodeUsage, .antigravityUsage, .genshinStatus, .starRailStatus, .zenlessZoneStatus, .previousPage, .nextPage, .shellCommand:
             return DeckKeyVisualConfiguration()
         }
     }

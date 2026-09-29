@@ -81,6 +81,9 @@ struct RootView: View {
             onCodexUsageResetDisplayModeChange: { resetDisplayMode in
                 connectionModel.setSelectedCodexUsageResetDisplayMode(resetDisplayMode)
             },
+            onCodexUsageAntigravityModelFamilyChange: { family in
+                connectionModel.setSelectedCodexUsageAntigravityModelFamily(family)
+            },
             onWebPageURLChange: { urlString in
                 connectionModel.setSelectedWebPageURLString(urlString)
             },

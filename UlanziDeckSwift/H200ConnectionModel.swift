@@ -110,6 +110,7 @@ final class H200ConnectionModel: ObservableObject {
     private let newAPIBalanceFetcher: NewAPIBalanceFetching
     private let codexUsageFetcher: CodexUsageFetching
     private let zcodeUsageFetcher: ZcodeUsageFetching
+    private let antigravityUsageFetcher: AntigravityUsageFetching
     private let mihoyoGameService: MihoyoGameServicing
     private let mihoyoSessionStore: MihoyoSessionStoring
     private let pageFolderAutoReturnTimer: PageFolderAutoReturnTimer
@@ -208,6 +209,7 @@ final class H200ConnectionModel: ObservableObject {
         newAPIBalanceFetcher: NewAPIBalanceFetching = NewAPIBalanceFetcher(),
         codexUsageFetcher: CodexUsageFetching = CodexUsageFetcher(),
         zcodeUsageFetcher: ZcodeUsageFetching = ZcodeUsageFetcher(),
+        antigravityUsageFetcher: AntigravityUsageFetching = AntigravityUsageFetcher(),
         mihoyoGameService: MihoyoGameServicing = MihoyoGameClient(),
         mihoyoSessionStore: MihoyoSessionStoring = KeychainMihoyoSessionStore(),
         longPressDurationNanoseconds: UInt64 = 1_000_000_000,
@@ -234,6 +236,7 @@ final class H200ConnectionModel: ObservableObject {
         self.newAPIBalanceFetcher = newAPIBalanceFetcher
         self.codexUsageFetcher = codexUsageFetcher
         self.zcodeUsageFetcher = zcodeUsageFetcher
+        self.antigravityUsageFetcher = antigravityUsageFetcher
         self.mihoyoGameService = mihoyoGameService
         self.mihoyoSessionStore = mihoyoSessionStore
         self.pageFolderAutoReturnTimer = PageFolderAutoReturnTimer(
@@ -936,6 +939,19 @@ final class H200ConnectionModel: ObservableObject {
               interactionState.codexUsageConfiguration(for: selectedKeyID).authSource
                 != authSource,
               interactionState.setCodexUsageAuthSource(authSource, for: selectedKeyID)
+        else {
+            return
+        }
+
+        persistCurrentConfiguration()
+        fetchCodexUsage(for: selectedKeyID)
+    }
+
+    func setSelectedCodexUsageAntigravityModelFamily(_ family: AntigravityModelFamily) {
+        guard let selectedKeyID = interactionState.selectedKeyID,
+              interactionState.codexUsageConfiguration(for: selectedKeyID).antigravityModelFamily
+                != family,
+              interactionState.setCodexUsageAntigravityModelFamily(family, for: selectedKeyID)
         else {
             return
         }
@@ -3080,6 +3096,8 @@ final class H200ConnectionModel: ObservableObject {
         switch configuration.dataSource {
         case .zcode:
             return configuration.zcodeBookmarkData != nil
+        case .antigravity:
+            return true
         case .codex:
             switch configuration.authSource {
             case .authFile:
@@ -3109,8 +3127,10 @@ final class H200ConnectionModel: ObservableObject {
         let dataSource = resolved.config.dataSource
         let zcodeConfigFilePath = resolved.config.zcodeConfigFilePath
         let zcodeBookmarkData = resolved.config.zcodeBookmarkData
+        let antigravityModelFamily = resolved.config.antigravityModelFamily
         let codexFetcher = codexUsageFetcher
         let zcodeFetcher = zcodeUsageFetcher
+        let antigravityFetcher = antigravityUsageFetcher
         codexUsageFetchTasks[instanceID] = Task { @MainActor [weak self] in
             let result: CodexUsageResult
             switch dataSource {
@@ -3118,6 +3138,8 @@ final class H200ConnectionModel: ObservableObject {
                 result = await codexFetcher.fetchUsage(configuration: resolved.config)
             case .zcode:
                 result = await zcodeFetcher.fetchUsage(configuration: resolved.config)
+            case .antigravity:
+                result = await antigravityFetcher.fetchUsage(configuration: resolved.config)
             }
             guard !Task.isCancelled,
                   let self,
@@ -3130,7 +3152,8 @@ final class H200ConnectionModel: ObservableObject {
                   latest.config.bookmarkData == bookmarkData,
                   latest.config.manualAuthData == manualAuthData,
                   latest.config.zcodeConfigFilePath == zcodeConfigFilePath,
-                  latest.config.zcodeBookmarkData == zcodeBookmarkData
+                  latest.config.zcodeBookmarkData == zcodeBookmarkData,
+                  latest.config.antigravityModelFamily == antigravityModelFamily
             else {
                 return
             }
