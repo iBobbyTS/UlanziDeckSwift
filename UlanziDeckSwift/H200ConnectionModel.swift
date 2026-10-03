@@ -122,12 +122,15 @@ final class H200ConnectionModel: ObservableObject {
     private let longPressDurationNanoseconds: UInt64
     private let mihoyoLoginPollNanoseconds: UInt64
     private let deviceCommandQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200DeviceCommands")
+    private let deviceMonitor: H200DeviceMonitoring
+    private var pendingDeviceMatched = false
     private var longPressTasks: [Int: Task<Void, Never>] = [:]
     private var longPressResetKeyIDs: Set<Int> = []
     private var brightnessUpdateRevision = 0
     private var brightnessUpdateInProgress = false
     private var latestBrightnessUpdate: BrightnessUpdateRequest?
     private var deviceCommandGeneration = 0
+    private var hasCompletedStartupSync = false
     private var displayRevision = 0
     private var needsFullDisplaySyncAfterStartup = false
     private var nextRuntimeInstanceRawValue = 0
@@ -195,8 +198,13 @@ final class H200ConnectionModel: ObservableObject {
         let refreshInterval: Int
     }
 
+    nonisolated static func makeDefaultDeviceMonitor() -> H200DeviceMonitoring {
+        H200NoopDeviceMonitor()
+    }
+
     init(
         discovery: H200Discovering = H200HIDDiscovery(),
+        deviceMonitor: H200DeviceMonitoring = makeDefaultDeviceMonitor(),
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         folderOpener: FinderFolderOpening? = nil,
@@ -224,6 +232,7 @@ final class H200ConnectionModel: ObservableObject {
         sub2APILocalTimezoneIDResolver: @escaping () -> String = { TimeZone.current.identifier }
     ) {
         self.discovery = discovery
+        self.deviceMonitor = deviceMonitor
         self.syncer = syncer
         self.configurationStore = configurationStore
         self.folderOpener = folderOpener ?? FinderFolderOpener()
@@ -285,6 +294,17 @@ final class H200ConnectionModel: ObservableObject {
                 self?.handleInputEvent(event)
             }
         }
+        self.deviceMonitor.onDeviceMatched = { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                self?.handleDeviceMatched()
+            }
+        }
+        self.deviceMonitor.onDeviceRemoved = { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                self?.handleDeviceRemoved()
+            }
+        }
+        self.deviceMonitor.start()
         dailyReminderTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             guard let self else { return }
             if self.interactionState.resetDailyReminders() {
@@ -297,6 +317,8 @@ final class H200ConnectionModel: ObservableObject {
     deinit {
         dailyReminderTimer?.invalidate()
         let syncer = syncer
+        let monitor = deviceMonitor
+        monitor.stop()
         mihoyoLoginTask?.cancel()
         for timer in sub2APITimers.values {
             timer.invalidate()
@@ -1667,7 +1689,7 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     private var canRunInternalRefresh: Bool {
-        !isInternalRefreshPaused && connectedDevice != nil && syncSummary != nil
+        !isInternalRefreshPaused && hasCompletedStartupSync
     }
 
     private func handleInternalRefreshPauseChange(wasPaused: Bool) {
@@ -1740,6 +1762,55 @@ final class H200ConnectionModel: ObservableObject {
 
         status = H200ConnectionStatus(result: result)
         alert = H200ConnectionAlert(result: result)
+
+        if case .connected = result {
+            pendingDeviceMatched = false
+        } else {
+            if hasCompletedStartupSync {
+                resumeCurrentPageRuntime()
+            }
+            if pendingDeviceMatched {
+                pendingDeviceMatched = false
+                refresh()
+            }
+        }
+    }
+
+    private func handleDeviceMatched() {
+        switch status {
+        case .notConnected, .occupied, .communicationPortOccupied, .permissionDenied, .openFailed, .managerOpenFailed:
+            pendingDeviceMatched = false
+            refresh()
+        case .checking:
+            pendingDeviceMatched = true
+        case .connected:
+            break
+        }
+    }
+
+    private func handleDeviceRemoved() {
+        switch status {
+        case .checking, .connected, .occupied, .communicationPortOccupied, .permissionDenied, .openFailed:
+            deviceCommandGeneration += 1
+            brightnessUpdateRevision += 1
+            latestBrightnessUpdate = nil
+            brightnessUpdateInProgress = false
+            pendingDeviceMatched = false
+
+            let syncer = syncer
+            deviceCommandQueue.async {
+                syncer.close()
+            }
+
+            status = .notConnected
+            syncSummary = nil
+            alert = .disconnected
+            if hasCompletedStartupSync {
+                resumeCurrentPageRuntime()
+            }
+        case .notConnected, .managerOpenFailed:
+            break
+        }
     }
 
     private func finishStartupSync(
@@ -1754,6 +1825,7 @@ final class H200ConnectionModel: ObservableObject {
         switch result {
         case let .success(summary):
             syncSummary = summary
+            hasCompletedStartupSync = true
             if hasPersistedBrightnessPercent {
                 requestBrightnessUpdate(percent: brightnessPercent)
             }
@@ -1767,6 +1839,9 @@ final class H200ConnectionModel: ObservableObject {
             }
         case let .failure(error, _):
             alert = H200ConnectionAlert(syncFailure: error)
+            if hasCompletedStartupSync {
+                resumeCurrentPageRuntime()
+            }
         }
     }
 
@@ -2538,11 +2613,7 @@ final class H200ConnectionModel: ObservableObject {
             if result.isTokenUnavailable {
                 self.pauseSub2APIForTokenError(instanceID: instanceID)
             }
-            self.syncKeyDisplay(keyID: latest.slot.keyID) { [weak self] (syncResult: H200DeckSyncResult) in
-                guard case .success = syncResult else {
-                    return
-                }
-
+            let scheduleNext = { [weak self] in
                 guard let self,
                       self.canRunInternalRefresh,
                       let latest = self.resolveCurrentSub2APISlot(for: instanceID),
@@ -2553,8 +2624,15 @@ final class H200ConnectionModel: ObservableObject {
                 else {
                     return
                 }
-
                 self.scheduleNextSub2APIRefresh(for: instanceID)
+            }
+            if case .connected = self.status, self.syncSummary != nil {
+                self.syncKeyDisplay(keyID: latest.slot.keyID) { _ in
+                    scheduleNext()
+                }
+            } else {
+                self.syncKeyDisplay(keyID: latest.slot.keyID)
+                scheduleNext()
             }
         }
     }
@@ -2634,11 +2712,7 @@ final class H200ConnectionModel: ObservableObject {
             if result.isTokenUnavailable {
                 self.pauseSub2APIForTokenError(instanceID: instanceID)
             }
-            self.syncKeyDisplay(keyID: latest.slot.keyID) { [weak self] (syncResult: H200DeckSyncResult) in
-                guard case .success = syncResult else {
-                    return
-                }
-
+            let scheduleNext = { [weak self] in
                 guard let self,
                       self.canRunInternalRefresh,
                       let latest = self.resolveCurrentSub2APISlot(for: instanceID),
@@ -2649,8 +2723,15 @@ final class H200ConnectionModel: ObservableObject {
                 else {
                     return
                 }
-
                 self.scheduleNextSub2APIRefresh(for: instanceID)
+            }
+            if case .connected = self.status, self.syncSummary != nil {
+                self.syncKeyDisplay(keyID: latest.slot.keyID) { _ in
+                    scheduleNext()
+                }
+            } else {
+                self.syncKeyDisplay(keyID: latest.slot.keyID)
+                scheduleNext()
             }
         }
     }
@@ -2782,9 +2863,8 @@ final class H200ConnectionModel: ObservableObject {
             if !followerKeyIDs.isEmpty {
                 self.syncKeyDisplays(keyIDs: followerKeyIDs)
             }
-            self.syncKeyDisplay(keyID: currentLeader.slot.keyID) { [weak self] syncResult in
-                guard case .success = syncResult,
-                      let self,
+            let scheduleNext = { [weak self] in
+                guard let self,
                       self.canRunInternalRefresh,
                       let latestLeader = self.resolveCurrentSub2APISlot(for: currentLeaderInstanceID),
                       latestLeader.dataSourceInstanceID == dataSourceInstanceID,
@@ -2795,6 +2875,14 @@ final class H200ConnectionModel: ObservableObject {
                     return
                 }
                 self.scheduleNextSub2APIRefresh(for: currentLeaderInstanceID)
+            }
+            if case .connected = self.status, self.syncSummary != nil {
+                self.syncKeyDisplay(keyID: currentLeader.slot.keyID) { _ in
+                    scheduleNext()
+                }
+            } else {
+                self.syncKeyDisplay(keyID: currentLeader.slot.keyID)
+                scheduleNext()
             }
         }
     }
@@ -4487,14 +4575,18 @@ final class H200ConnectionModel: ObservableObject {
         revision: Int,
         result: H200DeckCommandResult
     ) {
-        if case let .failure(error, _) = result {
-            brightnessUpdateInProgress = false
-            alert = H200ConnectionAlert(syncFailure: error)
+        guard brightnessUpdateInProgress else {
             return
         }
 
         if brightnessUpdateRevision != revision, let latestBrightnessUpdate {
             startBrightnessCommand(request: latestBrightnessUpdate, revision: brightnessUpdateRevision)
+            return
+        }
+
+        if case let .failure(error, _) = result {
+            brightnessUpdateInProgress = false
+            alert = H200ConnectionAlert(syncFailure: error)
             return
         }
 
@@ -4754,6 +4846,18 @@ struct H200ConnectionAlert: Identifiable, Equatable {
     init(syncFailure: H200DeckSyncFailure) {
         title = syncFailure.alertTitle
         message = syncFailure.alertMessage
+    }
+
+    init(title: String, message: String) {
+        self.title = title
+        self.message = message
+    }
+
+    static var disconnected: H200ConnectionAlert {
+        H200ConnectionAlert(
+            title: "H200 已断开",
+            message: "Ulanzi Deck H200 已断开连接。重新连接设备后将自动恢复；也可以点击重试立即重新检测。"
+        )
     }
 }
 

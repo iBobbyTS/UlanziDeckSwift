@@ -76,3 +76,18 @@
 - 米游社游戏状态返回需要登录或登录失效后，会清除共享会话、取消所有游戏状态刷新并标记游戏按键需要重新登录；普通网络错误不会清登录，也不会暂停自动刷新。
 - 亮度不再是按键功能，物理按键不会触发亮度调节。
 - 如果发送阶段发现端口被 Ulanzi Studio 或其他软件占用，会显示“按键包尚未发送”的错误提示。
+
+## 断开感知与重连自动恢复
+
+- 应用通过 `H200HIDDeviceMonitor` 监听 macOS `IOHIDManager` 的设备移除（Removal）与匹配（Matching）事件，基于事件驱动感知物理拔插，不采用轮询。
+- 设备拔出（Removal 事件）处理：
+  - 适用状态集：`.checking`、`.connected`、`.occupied`、`.communicationPortOccupied`、`.permissionDenied`、`.openFailed`。处于已离线（`.notConnected`）或管理接口故障（`.managerOpenFailed`）时幂等忽略。
+  - 状态收敛为 `.notConnected`，并展示中文断线横幅（复用 `H200ConnectionAlert.disconnected`）。
+  - 作废在途操作：递增 `deviceCommandGeneration` 作废正在执行的设备发现和启动同步回调；作废在途亮度命令（递增 `brightnessUpdateRevision`、清空 `latestBrightnessUpdate`、复位 `brightnessUpdateInProgress`，并由 `brightnessUpdateInProgress` 入口守卫防止旧失败结果覆盖断线横幅）。
+  - 清理待处理匹配标志 `pendingDeviceMatched`。
+  - 后台串行调用 `syncer.close()` 关闭失效句柄并停止保活心跳包。
+  - 断线期间应用内定时网络刷新照常进行，但受状态守卫拦截不再向设备端口写入。
+- 设备插入（Matching 事件）处理：
+  - 适用状态集：`.notConnected`、`.occupied`、`.communicationPortOccupied`、`.permissionDenied`、`.openFailed`、`.managerOpenFailed`。已连接（`.connected`）状态下忽略。
+  - 若当前处于 `.checking`（设备发现阶段），不发起并发 refresh，而是记录 `pendingDeviceMatched` 标志；当该轮发现结束且结果仍为非 connected 时，自动补发一次 `refresh()`（启动包发送阶段状态已是 `.connected`，matching 事件会被守卫忽略）。
+  - 其余白名单状态下，立即触发 `refresh()` 完整流程：重新探测设备独占权、发送完整 14 格启动包、恢复当前页所有运行时（Sub2API / 米游社等），无需重启应用或手动点击重试。

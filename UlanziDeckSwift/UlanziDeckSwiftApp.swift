@@ -125,7 +125,7 @@ final class UlanziDeckAppState: ObservableObject {
             return
         }
 
-        let connectionModel = connectionModelFactory?() ?? H200ConnectionModel()
+        let connectionModel = connectionModelFactory?() ?? H200ConnectionModel(deviceMonitor: H200HIDDeviceMonitor())
         self.connectionModel = connectionModel
         self.brightnessRuntime.register(connectionModel)
         connectionModel.checkOnLaunch()
