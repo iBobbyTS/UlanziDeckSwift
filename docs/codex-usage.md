@@ -37,10 +37,11 @@ Codex 读取用户选择的 `auth.json`，查询 ChatGPT Codex 的主额度窗�
 
 “Antigravity 剩余额度”遵循以下规则：
 
-- 凭据来自 login 钥匙串中 Antigravity CLI 的条目（service `gemini`、account `antigravity`），内容为 `go-keyring-base64:` 前缀加 base64 JSON，读取 `token.access_token`；应用不提供或保存任何密钥输入框，也不写入钥匙串。首次访问其他应用创建的钥匙串条目时，macOS 可能弹窗请求授权。
+- 凭据首次从 login 钥匙串中 Antigravity CLI 的条目（service `gemini`、account `antigravity`，内容为 `go-keyring-base64:` 前缀加 base64 JSON，读取 `token` 对象的 `access_token` / `refresh_token` / `expiry`）同步到本应用自有的副本条目（service `com.iBobby.UlanziDeckSwift.antigravity`，account `token`，JSON 格式），之后额度查询只读写副本条目。应用不提供任何密钥输入框。
+- 使用副本条目的原因：agy CLI 刷新 token 后通过 `security add-generic-password -U`（不带 `-T`）回写它自己的条目，该操作会重置条目的授权列表，本应用此前点“始终允许”获得的授权随之丢失，读条目时会再次弹授权窗。应用对自己创建的钥匙串条目始终静默读写（按签名身份匹配，覆盖构建后依然有效），因此正常额度查询不再弹窗；只有首次同步、以及副本中的 `refresh_token` 失效后回读 agy 条目重新同步时，可能弹一次授权窗。
 - 请求 `POST https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary`，`Authorization` 使用 `Bearer <access_token>`，`User-Agent` 模拟 `antigravity/1.20.5 darwin/arm64 google-api-nodejs-client/10.3.0`。
 - 参数面板提供“模型分组”下拉框：“Gemini”显示 `gemini-5h` 与 `gemini-weekly` 两个窗口（按键上显示 `5h` 与 `7d` 两行）；“Claude / GPT”只显示 `3p-weekly` 的 `7d` 窗口。`remainingFraction`（0 到 1）换算为剩余百分比，`resetTime`（RFC3339）换算为重置时间与倒计时，五小时与七天窗口分别按 18000 秒、604800 秒计算颜色。
-- 应用不刷新 OAuth token：Antigravity CLI 进程会自动续期钥匙串。token 过期导致 401/403 时显示“登录已失效”，在终端运行一次 `agy` 即可恢复；钥匙串无条目时显示“未找到 Antigravity 登录”。
+- access token 过期（距 `expiry` 不足 5 分钟）时，应用用副本中的 `refresh_token` 向 `https://oauth2.googleapis.com/token` 换新（使用 agy CLI 内置的官方 OAuth 客户端凭据，与 CLI 属同一客户端），新的 access token 与有效期回写副本，`refresh_token` 沿用；与 agy CLI 各自刷新互不影响。副本刷新返回 `invalid_grant` 时删除副本并回读 agy 条目：源的 `refresh_token` 与失效的不同则采用并重建副本，相同或源不可用时显示“登录已失效，请运行 agy”；额度接口返回 401/403 同样显示登录已失效；钥匙串无条目时显示“未找到 Antigravity 登录”。需要强制重新同步（例如切换 Google 账号）时，删除钥匙串中的副本条目 `com.iBobby.UlanziDeckSwift.antigravity` 即可。
 - 按键背景使用系统符号 `sparkles` 生成的黑白默认背景，无需选择文件，其余昵称、刷新间隔、重置显示与颜色设置与 Codex / Zcode 共用。
 
 ## 显示与刷新

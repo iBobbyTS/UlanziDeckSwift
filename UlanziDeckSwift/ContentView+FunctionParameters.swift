@@ -1056,7 +1056,7 @@ extension ContentView {
                         .pickerStyle(.menu)
                         .frame(width: 180, alignment: .leading)
 
-                        Text("凭据自动读取本机 Antigravity CLI 登录（钥匙串）。Gemini 显示 5 小时与 7 天两个额度，Claude / GPT 只显示 7 天额度。")
+                        Text("凭据首次从本机 Antigravity CLI 登录（钥匙串）读取并同步到本应用自己的钥匙串条目，之后由本应用独立维护，access token 过期时自动刷新，无需运行 CLI。Gemini 显示 5 小时与 7 天两个额度，Claude / GPT 只显示 7 天额度。")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

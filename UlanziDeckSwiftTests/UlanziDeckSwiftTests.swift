@@ -10189,7 +10189,8 @@ struct UlanziDeckSwiftTests {
         sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
         let fetcher = AntigravityUsageFetcher(
             urlSession: URLSession(configuration: sessionConfiguration),
-            tokenLoader: FakeAntigravityTokenLoader(result: .success("access-token")),
+            tokenLoader: FakeAntigravityTokenLoader(result: .success(AntigravityStoredToken(accessToken: "access-token"))),
+            tokenStore: FakeAntigravityTokenStore(),
             now: { Date(timeIntervalSince1970: nowSeconds) }
         )
         let configuration = DeckKeyCodexUsageConfiguration(
@@ -10272,7 +10273,8 @@ struct UlanziDeckSwiftTests {
         sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
         let fetcher = AntigravityUsageFetcher(
             urlSession: URLSession(configuration: sessionConfiguration),
-            tokenLoader: FakeAntigravityTokenLoader(result: .success("access-token")),
+            tokenLoader: FakeAntigravityTokenLoader(result: .success(AntigravityStoredToken(accessToken: "access-token"))),
+            tokenStore: FakeAntigravityTokenStore(),
             now: { Date(timeIntervalSince1970: 1_790_000_000) }
         )
         let configuration = DeckKeyCodexUsageConfiguration(
@@ -10294,7 +10296,8 @@ struct UlanziDeckSwiftTests {
 
         let missingCredentialFetcher = AntigravityUsageFetcher(
             urlSession: URLSession(configuration: sessionConfiguration),
-            tokenLoader: FakeAntigravityTokenLoader(result: .notLoggedIn)
+            tokenLoader: FakeAntigravityTokenLoader(result: .notLoggedIn),
+            tokenStore: FakeAntigravityTokenStore()
         )
         #expect(
             await missingCredentialFetcher.fetchUsage(
@@ -10304,7 +10307,8 @@ struct UlanziDeckSwiftTests {
 
         let invalidCredentialFetcher = AntigravityUsageFetcher(
             urlSession: URLSession(configuration: sessionConfiguration),
-            tokenLoader: FakeAntigravityTokenLoader(result: .invalid)
+            tokenLoader: FakeAntigravityTokenLoader(result: .invalid),
+            tokenStore: FakeAntigravityTokenStore()
         )
         #expect(
             await invalidCredentialFetcher.fetchUsage(
@@ -10321,7 +10325,8 @@ struct UlanziDeckSwiftTests {
         defer { WebPageMetadataURLProtocol.setStubs([:]) }
         let unauthorizedFetcher = AntigravityUsageFetcher(
             urlSession: URLSession(configuration: sessionConfiguration),
-            tokenLoader: FakeAntigravityTokenLoader(result: .success("access-token"))
+            tokenLoader: FakeAntigravityTokenLoader(result: .success(AntigravityStoredToken(accessToken: "access-token"))),
+            tokenStore: FakeAntigravityTokenStore()
         )
         #expect(
             await unauthorizedFetcher.fetchUsage(
@@ -10349,6 +10354,366 @@ struct UlanziDeckSwiftTests {
         )
         let roundTrip = try JSONDecoder().decode(DeckKeyCodexUsageConfiguration.self, from: encoded)
         #expect(roundTrip.antigravityModelFamily == .thirdParty)
+    }
+
+    @Test func antigravityUsageFetcherRefreshesExpiredAccessTokenBeforeQuotaRequest() async throws {
+        let tokenRefreshURL = try #require(URL(string: "https://oauth2.googleapis.com/token"))
+        let usageURL = try #require(
+            URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary")
+        )
+        let nowSeconds = 1_790_000_000.0
+        let refreshData = try JSONSerialization.data(withJSONObject: [
+            "access_token": "refreshed-token",
+            "expires_in": 3_600,
+            "token_type": "Bearer",
+        ])
+        let responseData = try JSONSerialization.data(withJSONObject: [
+            "groups": [
+                [
+                    "buckets": [
+                        [
+                            "bucketId": "gemini-5h",
+                            "remainingFraction": 0.5,
+                            "resetTime": "2026-10-06T01:27:32Z",
+                        ],
+                    ],
+                ],
+            ],
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            tokenRefreshURL: .init(statusCode: 200, mimeType: "application/json", data: refreshData),
+            usageURL: .init(statusCode: 200, mimeType: "application/json", data: responseData),
+        ])
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let tokenStore = FakeAntigravityTokenStore()
+        let fetcher = AntigravityUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            tokenLoader: FakeAntigravityTokenLoader(result: .success(AntigravityStoredToken(
+                accessToken: "expired-token",
+                refreshToken: "stored-refresh-token",
+                expiry: Date(timeIntervalSince1970: nowSeconds - 60)
+            ))),
+            tokenStore: tokenStore,
+            now: { Date(timeIntervalSince1970: nowSeconds) }
+        )
+
+        guard case .success = await fetcher.fetchUsage(
+            configuration: DeckKeyCodexUsageConfiguration(dataSource: .antigravity)
+        ) else {
+            Issue.record("过期 token 刷新后应返回额度")
+            return
+        }
+
+        let requests = WebPageMetadataURLProtocol.receivedRequests
+        #expect(requests.map(\.url) == [tokenRefreshURL, usageURL])
+        #expect(tokenStore.saved == [
+            AntigravityStoredToken(
+                accessToken: "refreshed-token",
+                refreshToken: "stored-refresh-token",
+                expiry: Date(timeIntervalSince1970: nowSeconds + 3_600)
+            )
+        ])
+
+        let refreshRequest = try #require(requests.first)
+        #expect(refreshRequest.httpMethod == "POST")
+        #expect(
+            refreshRequest.value(forHTTPHeaderField: "Content-Type")
+                == "application/x-www-form-urlencoded"
+        )
+        let bodyString = String(
+            decoding: try #require(recordedRequestBody(of: refreshRequest)),
+            as: UTF8.self
+        )
+        var bodyComponents = URLComponents()
+        bodyComponents.query = bodyString
+        let formValues = Dictionary(
+            uniqueKeysWithValues: (bodyComponents.queryItems ?? []).compactMap { item in
+                item.value.map { (item.name, $0) }
+            }
+        )
+        #expect(formValues["grant_type"] == "refresh_token")
+        #expect(
+            formValues["client_id"]
+                == "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+        )
+        #expect(formValues["client_secret"] == "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")
+        #expect(formValues["refresh_token"] == "stored-refresh-token")
+
+        let quotaRequest = try #require(requests.last)
+        #expect(quotaRequest.value(forHTTPHeaderField: "Authorization") == "Bearer refreshed-token")
+    }
+
+    @Test func antigravityUsageFetcherUsesStoredAccessTokenWhileFresh() async throws {
+        let usageURL = try #require(
+            URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary")
+        )
+        let nowSeconds = 1_790_000_000.0
+        let responseData = try JSONSerialization.data(withJSONObject: [
+            "groups": [
+                [
+                    "buckets": [
+                        [
+                            "bucketId": "gemini-5h",
+                            "remainingFraction": 0.5,
+                            "resetTime": "2026-10-06T01:27:32Z",
+                        ],
+                    ],
+                ],
+            ],
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            usageURL: .init(statusCode: 200, mimeType: "application/json", data: responseData),
+        ])
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let tokenStore = FakeAntigravityTokenStore(initial: AntigravityStoredToken(
+            accessToken: "fresh-token",
+            refreshToken: "stored-refresh-token",
+            expiry: Date(timeIntervalSince1970: nowSeconds + 3_600)
+        ))
+        let fetcher = AntigravityUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            tokenLoader: FakeAntigravityTokenLoader(result: .notLoggedIn),
+            tokenStore: tokenStore,
+            now: { Date(timeIntervalSince1970: nowSeconds) }
+        )
+
+        guard case .success = await fetcher.fetchUsage(
+            configuration: DeckKeyCodexUsageConfiguration(dataSource: .antigravity)
+        ) else {
+            Issue.record("未过期 token 应直接返回额度")
+            return
+        }
+
+        let requests = WebPageMetadataURLProtocol.receivedRequests
+        #expect(requests.map(\.url) == [usageURL])
+        #expect(requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer fresh-token")
+        // 副本有效时不应回读 agy CLI 的条目（loader 返回 notLoggedIn 会让本用例失败），
+        // 也不需要写回副本。
+        #expect(tokenStore.saved.isEmpty)
+        #expect(tokenStore.deletes == 0)
+    }
+
+    @Test func antigravityUsageFetcherMapsRefreshInvalidGrantToUnauthorized() async throws {
+        let tokenRefreshURL = try #require(URL(string: "https://oauth2.googleapis.com/token"))
+        let nowSeconds = 1_790_000_000.0
+        let errorData = try JSONSerialization.data(withJSONObject: [
+            "error": "invalid_grant",
+            "error_description": "Token has been expired or revoked.",
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            tokenRefreshURL: .init(statusCode: 400, mimeType: "application/json", data: errorData),
+        ])
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let tokenStore = FakeAntigravityTokenStore(initial: AntigravityStoredToken(
+            accessToken: "expired-token",
+            refreshToken: "revoked-refresh-token",
+            expiry: Date(timeIntervalSince1970: nowSeconds - 60)
+        ))
+        let fetcher = AntigravityUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            tokenLoader: FakeAntigravityTokenLoader(result: .notLoggedIn),
+            tokenStore: tokenStore,
+            now: { Date(timeIntervalSince1970: nowSeconds) }
+        )
+
+        #expect(
+            await fetcher.fetchUsage(
+                configuration: DeckKeyCodexUsageConfiguration(dataSource: .antigravity)
+            ) == .unauthorized
+        )
+        #expect(WebPageMetadataURLProtocol.receivedRequests.map(\.url) == [tokenRefreshURL])
+        // 副本 refresh_token 失效且 agy 条目不可用时，应删除失效副本等待重新登录。
+        #expect(tokenStore.deletes == 1)
+        #expect(tokenStore.saved.isEmpty)
+    }
+
+    @Test func antigravityUsageFetcherFallsBackToStoredTokenWithoutRefreshToken() async throws {
+        let usageURL = try #require(
+            URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary")
+        )
+        let responseData = try JSONSerialization.data(withJSONObject: [
+            "groups": [
+                [
+                    "buckets": [
+                        [
+                            "bucketId": "gemini-5h",
+                            "remainingFraction": 0.5,
+                            "resetTime": "2026-10-06T01:27:32Z",
+                        ],
+                    ],
+                ],
+            ],
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            usageURL: .init(statusCode: 200, mimeType: "application/json", data: responseData),
+        ])
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let fetcher = AntigravityUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            tokenLoader: FakeAntigravityTokenLoader(result: .success(
+                AntigravityStoredToken(accessToken: "legacy-token")
+            )),
+            tokenStore: FakeAntigravityTokenStore()
+        )
+
+        guard case .success = await fetcher.fetchUsage(
+            configuration: DeckKeyCodexUsageConfiguration(dataSource: .antigravity)
+        ) else {
+            Issue.record("没有 refresh_token 时应退回存量 token 查询")
+            return
+        }
+
+        let requests = WebPageMetadataURLProtocol.receivedRequests
+        #expect(requests.map(\.url) == [usageURL])
+        #expect(requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer legacy-token")
+    }
+
+    @Test func antigravityUsageFetcherResyncsOwnStoreFromSourceAfterInvalidGrant() async throws {
+        let tokenRefreshURL = try #require(URL(string: "https://oauth2.googleapis.com/token"))
+        let usageURL = try #require(
+            URL(string: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary")
+        )
+        let nowSeconds = 1_790_000_000.0
+        let errorData = try JSONSerialization.data(withJSONObject: [
+            "error": "invalid_grant",
+            "error_description": "Token has been expired or revoked.",
+        ])
+        let responseData = try JSONSerialization.data(withJSONObject: [
+            "groups": [
+                [
+                    "buckets": [
+                        [
+                            "bucketId": "gemini-5h",
+                            "remainingFraction": 0.5,
+                            "resetTime": "2026-10-06T01:27:32Z",
+                        ],
+                    ],
+                ],
+            ],
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            tokenRefreshURL: .init(statusCode: 400, mimeType: "application/json", data: errorData),
+            usageURL: .init(statusCode: 200, mimeType: "application/json", data: responseData),
+        ])
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        let sourceToken = AntigravityStoredToken(
+            accessToken: "source-access-token",
+            refreshToken: "new-refresh-token",
+            expiry: Date(timeIntervalSince1970: nowSeconds + 3_600)
+        )
+        let tokenStore = FakeAntigravityTokenStore(initial: AntigravityStoredToken(
+            accessToken: "expired-token",
+            refreshToken: "revoked-refresh-token",
+            expiry: Date(timeIntervalSince1970: nowSeconds - 60)
+        ))
+        let fetcher = AntigravityUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            tokenLoader: FakeAntigravityTokenLoader(result: .success(sourceToken)),
+            tokenStore: tokenStore,
+            now: { Date(timeIntervalSince1970: nowSeconds) }
+        )
+
+        guard case .success = await fetcher.fetchUsage(
+            configuration: DeckKeyCodexUsageConfiguration(dataSource: .antigravity)
+        ) else {
+            Issue.record("副本失效后应从 agy 条目重新同步并返回额度")
+            return
+        }
+
+        let requests = WebPageMetadataURLProtocol.receivedRequests
+        #expect(requests.map(\.url) == [tokenRefreshURL, usageURL])
+        #expect(requests.last?.value(forHTTPHeaderField: "Authorization") == "Bearer source-access-token")
+        #expect(tokenStore.deletes == 1)
+        #expect(tokenStore.saved == [sourceToken])
+    }
+
+    @Test func antigravityUsageFetcherKeepsUnauthorizedWhenSourceRefreshTokenUnchanged() async throws {
+        let tokenRefreshURL = try #require(URL(string: "https://oauth2.googleapis.com/token"))
+        let nowSeconds = 1_790_000_000.0
+        let errorData = try JSONSerialization.data(withJSONObject: [
+            "error": "invalid_grant",
+            "error_description": "Token has been expired or revoked.",
+        ])
+        WebPageMetadataURLProtocol.setStubs([
+            tokenRefreshURL: .init(statusCode: 400, mimeType: "application/json", data: errorData),
+        ])
+        defer { WebPageMetadataURLProtocol.setStubs([:]) }
+
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [WebPageMetadataURLProtocol.self]
+        // agy 条目里仍是同一个 refresh_token，重新读取也不会让授权恢复，
+        // 不应对同一失效授权反复刷新。
+        let tokenStore = FakeAntigravityTokenStore(initial: AntigravityStoredToken(
+            accessToken: "expired-token",
+            refreshToken: "shared-refresh-token",
+            expiry: Date(timeIntervalSince1970: nowSeconds - 60)
+        ))
+        let fetcher = AntigravityUsageFetcher(
+            urlSession: URLSession(configuration: sessionConfiguration),
+            tokenLoader: FakeAntigravityTokenLoader(result: .success(AntigravityStoredToken(
+                accessToken: "renewed-access-token",
+                refreshToken: "shared-refresh-token",
+                expiry: Date(timeIntervalSince1970: nowSeconds + 3_600)
+            ))),
+            tokenStore: tokenStore,
+            now: { Date(timeIntervalSince1970: nowSeconds) }
+        )
+
+        #expect(
+            await fetcher.fetchUsage(
+                configuration: DeckKeyCodexUsageConfiguration(dataSource: .antigravity)
+            ) == .unauthorized
+        )
+        #expect(WebPageMetadataURLProtocol.receivedRequests.map(\.url) == [tokenRefreshURL])
+        #expect(tokenStore.deletes == 1)
+        #expect(tokenStore.saved.isEmpty)
+    }
+
+    @Test func antigravityStoredTokenCodableRoundTripsThroughISO8601Expiry() throws {
+        let token = AntigravityStoredToken(
+            accessToken: "access-token",
+            refreshToken: "refresh-token",
+            expiry: AntigravityISO8601Parsing.date(from: "2026-10-06T01:27:32Z")
+        )
+        let data = try JSONEncoder().encode(token)
+        #expect(try JSONDecoder().decode(AntigravityStoredToken.self, from: data) == token)
+
+        let legacyToken = AntigravityStoredToken(accessToken: "legacy-token")
+        let legacyData = try JSONEncoder().encode(legacyToken)
+        #expect(try JSONDecoder().decode(AntigravityStoredToken.self, from: legacyData) == legacyToken)
+
+        // 手工修复副本时写入 Go 风格的小数秒时间也应能解析。
+        let goTimeJSON = Data(
+            #"{"accessToken":"a","refreshToken":"r","expiry":"2026-09-29T11:30:43.27941-06:00"}"#.utf8
+        )
+        let goTimeToken = try JSONDecoder().decode(AntigravityStoredToken.self, from: goTimeJSON)
+        #expect(goTimeToken.expiry != nil)
+    }
+
+    @Test func antigravityISO8601ParsingAcceptsGoTimeFormats() throws {
+        let fractional = try #require(
+            AntigravityISO8601Parsing.date(from: "2026-09-29T11:30:43.27941-06:00")
+        )
+        let reference = try #require(ISO8601DateFormatter().date(from: "2026-09-29T17:30:43Z"))
+        #expect(abs(fractional.timeIntervalSince(reference) - 0.27941) < 0.001)
+
+        #expect(AntigravityISO8601Parsing.date(from: "2026-10-06T01:27:32Z") != nil)
+        #expect(AntigravityISO8601Parsing.date(from: "not-a-date") == nil)
     }
 
     @Test func zcodeUsageFetcherParsesObservedThreeAndNinePercentDualWindowShape() async throws {
@@ -11998,9 +12363,76 @@ private struct FakeZcodeConfigurationFileLoader: ZcodeConfigurationFileLoading {
 private struct FakeAntigravityTokenLoader: AntigravityTokenLoading {
     let result: AntigravityTokenLoadResult
 
-    func loadAccessToken() -> AntigravityTokenLoadResult {
+    func loadStoredToken() -> AntigravityTokenLoadResult {
         result
     }
+}
+
+private final class FakeAntigravityTokenStore: AntigravityTokenStoring, @unchecked Sendable {
+    private let lock = NSLock()
+    private var currentToken: AntigravityStoredToken?
+    private var savedTokens: [AntigravityStoredToken] = []
+    private var deleteCount = 0
+
+    init(initial: AntigravityStoredToken? = nil) {
+        currentToken = initial
+    }
+
+    var saved: [AntigravityStoredToken] {
+        lock.lock()
+        defer { lock.unlock() }
+        return savedTokens
+    }
+
+    var deletes: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return deleteCount
+    }
+
+    func loadToken() -> AntigravityStoredToken? {
+        lock.lock()
+        defer { lock.unlock() }
+        return currentToken
+    }
+
+    func saveToken(_ token: AntigravityStoredToken) {
+        lock.lock()
+        defer { lock.unlock() }
+        currentToken = token
+        savedTokens.append(token)
+    }
+
+    func deleteToken() {
+        lock.lock()
+        defer { lock.unlock() }
+        currentToken = nil
+        deleteCount += 1
+    }
+}
+
+/// URLProtocol 收到的请求会把 httpBody 转成 httpBodyStream，读取时需要还原。
+private func recordedRequestBody(of request: URLRequest) -> Data? {
+    if let body = request.httpBody {
+        return body
+    }
+    guard let stream = request.httpBodyStream else {
+        return nil
+    }
+    stream.open()
+    defer { stream.close() }
+    var data = Data()
+    let bufferSize = 4_096
+    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
+    defer { buffer.deallocate() }
+    while stream.hasBytesAvailable {
+        let bytesRead = stream.read(buffer, maxLength: bufferSize)
+        guard bytesRead > 0 else {
+            break
+        }
+        data.append(buffer, count: bytesRead)
+    }
+    return data.isEmpty ? nil : data
 }
 
 private final class FakeZcodeUsageFetcher: ZcodeUsageFetching, @unchecked Sendable {

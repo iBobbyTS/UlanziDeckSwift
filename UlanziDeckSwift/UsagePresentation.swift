@@ -388,7 +388,13 @@ nonisolated enum UsagePresentationFormatter {
         case .unsupportedAuthMode:
             return UsagePresentation(title: "auth.json", subtitle: "仅支持 ChatGPT 登录", buttonContent: nil)
         case .unauthorized:
-            return UsagePresentation(title: fallbackTitle, subtitle: source == .zcode ? "鉴权失败" : "登录已失效", buttonContent: nil)
+            let subtitle: String
+            switch source {
+            case .zcode: subtitle = "鉴权失败"
+            case .antigravity: subtitle = "登录已失效，请运行 agy"
+            case .codex: subtitle = "登录已失效"
+            }
+            return UsagePresentation(title: fallbackTitle, subtitle: subtitle, buttonContent: nil)
         case .missingWeeklyQuota:
             return UsagePresentation(title: fallbackTitle, subtitle: "缺少有效额度", buttonContent: nil)
         case .networkError:
