@@ -11397,6 +11397,56 @@ struct UlanziDeckSwiftTests {
         }
     }
 
+    @Test(arguments: [DeckKeyFunction.codexUsage, .zcodeUsage, .antigravityUsage])
+    func usageRendererTimeColorsMatchLongestPeriodMarker(function: DeckKeyFunction) throws {
+        let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
+        for dualWindow in [false, true] {
+            for balance in [-0.5, 0, 0.5] {
+                let longestQuota = CodexUsageQuota(
+                    window: .sevenDays, remainingPercent: Int((0.5 - balance) * 100),
+                    resetAfterSeconds: 302_400, resetAt: 1_800_000_000,
+                    limitWindowSeconds: 604_800, usedPercent: (0.5 + balance) * 100
+                )
+                // 短周期故意与长周期反向，防止双周期时间行各自取色。
+                let shorterQuota = CodexUsageQuota(
+                    window: .fiveHours, remainingPercent: Int((0.5 + balance) * 100),
+                    resetAfterSeconds: 9_000, resetAt: 1_800_000_000,
+                    limitWindowSeconds: 18_000, usedPercent: (0.5 - balance) * 100
+                )
+                for colorMode in CodexUsageColorMode.allCases {
+                    for resetMode in CodexUsageResetDisplayMode.allCases {
+                        var configuration = DeckKeyConfiguration(function: function)
+                        configuration.codexUsage.colorMode = colorMode
+                        configuration.codexUsage.resetDisplayMode = resetMode
+                        configuration.codexUsage.lastResult = .success(UsageQuotaSnapshot(
+                            quotas: dualWindow ? [shorterQuota, longestQuota] : [longestQuota]
+                        ))
+                        let display = DeckKeyDisplay(key: key, configuration: configuration, isSelected: false, isPressed: false)
+                        let image = try #require(NSBitmapImageRep(data: H200ButtonIconRenderer().pngData(for: display)))
+                        let width = Double(image.pixelsWide)
+                        let height = Double(image.pixelsHigh)
+                        let radius = max(2, height * 0.035) * 1.5
+                        let offset = balance < 0 ? -0.740_362_689_494 : (balance > 0 ? 0.740_362_689_494 : 0)
+                        let markerX = Int((width / 2 + offset * (width * 0.84 - radius * 2) / 2).rounded())
+                        let markerY = Int(height * 0.018 + radius * 1.4)
+                        let markerColor = try #require(image.colorAt(x: markerX, y: markerY)?.usingColorSpace(.deviceRGB))
+                        // 分别限定到时间文字行，不能用顶部圆点或百分比文字凑出匹配像素。
+                        let timeRows = dualWindow
+                            ? [Int(height * 0.32)..<Int(height * 0.49), Int(height * 0.71)..<Int(height * 0.88)]
+                            : [Int(height * 0.67)..<Int(height * 0.82)]
+                        for rows in timeRows {
+                            #expect(Self.bitmapContainsPixel(in: image, xRange: 20..<(image.pixelsWide - 20), yRange: rows) { color in
+                                abs(color.redComponent - markerColor.redComponent) < 0.02
+                                    && abs(color.greenComponent - markerColor.greenComponent) < 0.02
+                                    && abs(color.blueComponent - markerColor.blueComponent) < 0.02
+                            }, "单周期或双周期的每行时间都应与最长周期圆点同色，且不受颜色模式和时间格式影响")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     @Test func usageQuotaBarOmitsUnknownResetTiming() throws {
         let quota = CodexUsageQuota(
             window: .sevenDays,
@@ -12029,13 +12079,13 @@ struct UlanziDeckSwiftTests {
         #expect(quota.remainingTimeVsUsage == 1)
     }
 
-    @Test func codexUsageRendererUsesMihoyoMetricColorPreset() throws {
+    @Test func codexUsageRendererUsesMetricColorPresetWhenQuotaBarIsUnavailable() throws {
         let layout = DeckGridLayout.h200Prototype
         var configuration = DeckKeyConfiguration(function: .codexUsage)
         configuration.codexUsage.colorMode = .highIsRed
         configuration.codexUsage.lastResult = .success(CodexUsageQuota(
             remainingPercent: 4,
-            resetAfterSeconds: 3_600,
+            resetAfterSeconds: 0,
             limitWindowSeconds: 604_800,
             usedPercent: 96
         ))
