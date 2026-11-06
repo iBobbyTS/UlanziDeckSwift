@@ -1066,7 +1066,7 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         buttonRect: NSRect
     ) {
         let thickness = max(2, buttonRect.height * 0.035)
-        let markerRadius = thickness
+        let markerRadius = thickness * 1.5
         let topMargin = buttonRect.height * 0.018
         let centerY = buttonRect.maxY - topMargin - markerRadius * 1.4
         let barRect = NSRect(

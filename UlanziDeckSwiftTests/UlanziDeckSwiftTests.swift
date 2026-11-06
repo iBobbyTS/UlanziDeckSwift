@@ -11357,7 +11357,7 @@ struct UlanziDeckSwiftTests {
                 // 从实际设备像素尺寸定位；±10 个百分点应移动半条长度的约 28%。
                 let width = Double(image.pixelsWide)
                 let height = Double(image.pixelsHigh)
-                let radius = max(2, height * 0.035)
+                let radius = max(2, height * 0.035) * 1.5
                 let topMargin = height * 0.018
                 let barWidth = width * 0.84 - radius * 2
                 let offset = balance < 0 ? -0.278_753_600_953 : (balance > 0 ? 0.278_753_600_953 : 0)
@@ -11378,6 +11378,13 @@ struct UlanziDeckSwiftTests {
                 #expect(abs(markerColor.redComponent - expectedRGB.redComponent) < 0.015)
                 #expect(abs(markerColor.greenComponent - expectedRGB.greenComponent) < 0.015)
                 #expect(abs(markerColor.blueComponent - expectedRGB.blueComponent) < 0.015)
+                // 验证三倍条厚的圆点在条上下均有足够填色，防止只改测试定位而未放大圆点。
+                for sampleY in [Int(topMargin + radius * 0.6), Int(topMargin + radius * 2.2)] {
+                    let bodyColor = try #require(image.colorAt(x: markerX, y: sampleY)?.usingColorSpace(.deviceRGB))
+                    #expect(abs(bodyColor.redComponent - expectedRGB.redComponent) < 0.015)
+                    #expect(abs(bodyColor.greenComponent - expectedRGB.greenComponent) < 0.015)
+                    #expect(abs(bodyColor.blueComponent - expectedRGB.blueComponent) < 0.015)
+                }
                 let centerX = Int(width / 2)
                 let tickRows = [Int(ceil(topMargin)), Int(floor(topMargin + radius * 2.8 - 1))]
                 for tickY in tickRows {
