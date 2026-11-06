@@ -385,6 +385,9 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             return
         }
         if display.buttonVisualContent.hasCustomDisplayName {
+            if let quotaBar = display.codexUsageButtonContent?.quotaBar {
+                drawUsageQuotaBar(quotaBar, in: cardRect, buttonRect: rect)
+            }
             drawShortcutContent(display.title, in: cardRect, buttonRect: rect)
             return
         }
@@ -889,6 +892,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         in rect: NSRect,
         buttonRect: NSRect
     ) {
+        if let quotaBar = content.quotaBar {
+            drawUsageQuotaBar(quotaBar, in: rect, buttonRect: buttonRect)
+        }
+
         guard content.metrics.count == 1 else {
             drawMultipleUsageMetrics(content, in: rect, buttonRect: buttonRect)
             return
@@ -1049,6 +1056,115 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
                 cursor -= windowGap
             }
         }
+    }
+
+    /// 在按钮顶端绘制额度周期条：左蓝、中绿、右红，圆点按
+    /// “已用比例 - 已过周期比例”的对数映射连续移动，圆内填充所在位置的颜色。
+    private func drawUsageQuotaBar(
+        _ bar: UsageQuotaBar,
+        in contentRect: NSRect,
+        buttonRect: NSRect
+    ) {
+        let thickness = max(2, buttonRect.height * 0.035)
+        let markerRadius = thickness
+        let topMargin = buttonRect.height * 0.018
+        let centerY = buttonRect.maxY - topMargin - markerRadius * 1.4
+        let barRect = NSRect(
+            x: contentRect.minX + markerRadius,
+            y: centerY - thickness / 2,
+            width: max(1, contentRect.width - markerRadius * 2),
+            height: thickness
+        )
+        guard barRect.width > 1,
+              let context = NSGraphicsContext.current?.cgContext
+        else { return }
+
+        let colors = usageQuotaBarColors()
+        let barPath = NSBezierPath(
+            roundedRect: barRect,
+            xRadius: thickness / 2,
+            yRadius: thickness / 2
+        )
+        context.saveGState()
+        barPath.addClip()
+        let gradientColors = [colors.blue.cgColor, colors.green.cgColor, colors.red.cgColor] as CFArray
+        let locations: [CGFloat] = [0, 0.5, 1]
+        if let gradient = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: gradientColors,
+            locations: locations
+        ) {
+            context.drawLinearGradient(
+                gradient,
+                start: CGPoint(x: barRect.minX, y: barRect.midY),
+                end: CGPoint(x: barRect.maxX, y: barRect.midY),
+                options: []
+            )
+        }
+        context.restoreGState()
+
+        // 固定中心刻度高于圆点，上下露出端点；深色描边保证亮背景下也可辨认。
+        let centerTick = NSBezierPath()
+        centerTick.move(to: NSPoint(x: barRect.midX, y: centerY - markerRadius * 1.4))
+        centerTick.line(to: NSPoint(x: barRect.midX, y: centerY + markerRadius * 1.4))
+        let tickWidth = max(1, thickness * 0.22)
+        NSColor(calibratedWhite: 0, alpha: 0.75).setStroke()
+        centerTick.lineWidth = tickWidth + 2
+        centerTick.stroke()
+        NSColor(calibratedWhite: 1, alpha: 0.9).setStroke()
+        centerTick.lineWidth = tickWidth
+        centerTick.stroke()
+
+        let progress = CGFloat(bar.markerProgress)
+        let markerCenter = NSPoint(
+            x: barRect.minX + progress * barRect.width,
+            y: barRect.midY
+        )
+        let markerPath = NSBezierPath(ovalIn: NSRect(
+            x: markerCenter.x - markerRadius,
+            y: markerCenter.y - markerRadius,
+            width: markerRadius * 2,
+            height: markerRadius * 2
+        ))
+        usageQuotaBarColor(at: progress, colors: colors).setFill()
+        markerPath.fill()
+        NSColor(calibratedWhite: 0, alpha: 0.55).setStroke()
+        markerPath.lineWidth = max(1, thickness * 0.18)
+        markerPath.stroke()
+    }
+
+    private func usageQuotaBarColors() -> (blue: NSColor, green: NSColor, red: NSColor) {
+        (
+            blue: NSColor(deviceRed: 0.16, green: 0.52, blue: 0.96, alpha: 1),
+            green: NSColor(deviceRed: 0.21, green: 0.73, blue: 0.36, alpha: 1),
+            red: NSColor(deviceRed: 0.90, green: 0.25, blue: 0.22, alpha: 1)
+        )
+    }
+
+    private func usageQuotaBarColor(
+        at progress: CGFloat,
+        colors: (blue: NSColor, green: NSColor, red: NSColor)
+    ) -> NSColor {
+        let t = min(1, max(0, progress))
+        let start: NSColor
+        let end: NSColor
+        let localProgress: CGFloat
+        if t <= 0.5 {
+            start = colors.blue
+            end = colors.green
+            localProgress = t / 0.5
+        } else {
+            start = colors.green
+            end = colors.red
+            localProgress = (t - 0.5) / 0.5
+        }
+
+        return NSColor(
+            deviceRed: start.redComponent + (end.redComponent - start.redComponent) * localProgress,
+            green: start.greenComponent + (end.greenComponent - start.greenComponent) * localProgress,
+            blue: start.blueComponent + (end.blueComponent - start.blueComponent) * localProgress,
+            alpha: 1
+        )
     }
 
     private func mihoyoGameMetricColor(for color: MihoyoGameMetricColor) -> NSColor {

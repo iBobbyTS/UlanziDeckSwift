@@ -71,6 +71,22 @@ nonisolated struct UsageQuota: Codable, Equatable, Sendable {
         return remainingWindowFraction / usedFraction
     }
 
+    /// 当前周期已经过去的时间比例，0 表示周期刚开始，1 表示已到重置时间。
+    var elapsedWindowFraction: Double {
+        guard limitWindowSeconds > 0 else { return 0 }
+        let remainingSeconds = min(
+            Double(limitWindowSeconds),
+            max(0, Double(resetAfterSeconds))
+        )
+        return min(1, max(0, 1 - remainingSeconds / Double(limitWindowSeconds)))
+    }
+
+    /// 已用额度比例减去已过周期比例：正值表示消耗快于平均，负值表示慢于平均。
+    var periodBalance: Double {
+        let usedFraction = min(1, max(0, usedPercent * 0.01))
+        return min(1, max(-1, usedFraction - elapsedWindowFraction))
+    }
+
     var resetAfterText: String {
         let clampedSeconds = max(0, resetAfterSeconds)
         let days = clampedSeconds / 86_400
@@ -114,6 +130,11 @@ nonisolated struct UsageQuotaSnapshot: Codable, Equatable, Sendable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(quotas: try container.decode([UsageQuota].self, forKey: .quotas))
+    }
+
+    /// 多窗口快照中周期最长的额度；单窗口快照直接返回该窗口。
+    var longestPeriodQuota: UsageQuota? {
+        quotas.max { $0.limitWindowSeconds < $1.limitWindowSeconds }
     }
 }
 
@@ -226,9 +247,36 @@ nonisolated struct UsageButtonMetric: Equatable, Sendable {
     let detailValueColor: MihoyoGameMetricColor
 }
 
+nonisolated struct UsageQuotaBar: Equatable, Sendable {
+    let balance: Double
+    let window: UsageQuotaWindow
+
+    /// 仅放大显示偏移，保留原始消耗差值；0.5 为平均速度，左右端点为 0 和 1。
+    var markerProgress: Double {
+        let magnitude = log1p(9 * abs(balance)) / log(10)
+        let offset = balance < 0 ? -magnitude : magnitude
+        return (offset + 1) / 2
+    }
+
+    init(balance: Double, window: UsageQuotaWindow) {
+        let normalized = balance.isFinite ? balance : 0
+        self.balance = min(1, max(-1, normalized))
+        self.window = window
+    }
+
+    init?(quota: UsageQuota) {
+        guard quota.limitWindowSeconds > 0,
+              quota.resetAt != nil || quota.resetAfterSeconds > 0
+        else { return nil }
+
+        self.init(balance: quota.periodBalance, window: quota.window)
+    }
+}
+
 nonisolated struct UsageButtonContent: Equatable, Sendable {
     let accountNickname: String?
     let metrics: [UsageButtonMetric]
+    let quotaBar: UsageQuotaBar?
 
     init(
         accountNickname: String?,
@@ -236,21 +284,30 @@ nonisolated struct UsageButtonContent: Equatable, Sendable {
         detailLabelText: String,
         detailValueText: String?,
         percentageColor: MihoyoGameMetricColor,
-        detailValueColor: MihoyoGameMetricColor
+        detailValueColor: MihoyoGameMetricColor,
+        quotaBar: UsageQuotaBar? = nil
     ) {
-        self.accountNickname = accountNickname
-        metrics = [UsageButtonMetric(
-            percentageText: percentageText,
-            detailLabelText: detailLabelText,
-            detailValueText: detailValueText,
-            percentageColor: percentageColor,
-            detailValueColor: detailValueColor
-        )]
+        self.init(
+            accountNickname: accountNickname,
+            metrics: [UsageButtonMetric(
+                percentageText: percentageText,
+                detailLabelText: detailLabelText,
+                detailValueText: detailValueText,
+                percentageColor: percentageColor,
+                detailValueColor: detailValueColor
+            )],
+            quotaBar: quotaBar
+        )
     }
 
-    init(accountNickname: String?, metrics: [UsageButtonMetric]) {
+    init(
+        accountNickname: String?,
+        metrics: [UsageButtonMetric],
+        quotaBar: UsageQuotaBar? = nil
+    ) {
         self.accountNickname = accountNickname
         self.metrics = metrics
+        self.quotaBar = quotaBar
     }
 
     init(
@@ -259,7 +316,8 @@ nonisolated struct UsageButtonContent: Equatable, Sendable {
         resetLabelText: String,
         resetAfterText: String,
         percentageColor: MihoyoGameMetricColor,
-        resetAfterColor: MihoyoGameMetricColor
+        resetAfterColor: MihoyoGameMetricColor,
+        quotaBar: UsageQuotaBar? = nil
     ) {
         self.init(
             accountNickname: accountNickname,
@@ -267,7 +325,8 @@ nonisolated struct UsageButtonContent: Equatable, Sendable {
             detailLabelText: resetLabelText,
             detailValueText: resetAfterText,
             percentageColor: percentageColor,
-            detailValueColor: resetAfterColor
+            detailValueColor: resetAfterColor,
+            quotaBar: quotaBar
         )
     }
 
@@ -303,6 +362,7 @@ nonisolated enum UsagePresentationFormatter {
                 return UsagePresentation(title: fallbackTitle, subtitle: "额度不可用", buttonContent: nil)
             }
             if quotas.count > 1 {
+                let quotaBar = snapshot.longestPeriodQuota.flatMap { UsageQuotaBar(quota: $0) }
                 let metrics = quotas.map { quota in
                     let resetText = quota.resetAt == nil
                         ? nil
@@ -322,12 +382,14 @@ nonisolated enum UsagePresentationFormatter {
                     subtitle: quotas.map(\.window.displayName).joined(separator: " / "),
                     buttonContent: UsageButtonContent(
                         accountNickname: configuration.displayAccountNickname,
-                        metrics: metrics
+                        metrics: metrics,
+                        quotaBar: quotaBar
                     )
                 )
             }
 
             let quota = firstQuota
+            let quotaBar = UsageQuotaBar(quota: quota)
             let percentageColor = configuration.colorMode.metricColor(for: quota.remainingPercent)
             if source != .codex {
                 let resetText = quota.resetAt == nil
@@ -345,7 +407,8 @@ nonisolated enum UsagePresentationFormatter {
                         percentageColor: percentageColor,
                         detailValueColor: resetText == nil
                             ? .yellow
-                            : configuration.colorMode.resetTimeMetricColor(for: quota.remainingTimeVsUsage)
+                            : configuration.colorMode.resetTimeMetricColor(for: quota.remainingTimeVsUsage),
+                        quotaBar: quotaBar
                     )
                 )
             }
@@ -362,7 +425,8 @@ nonisolated enum UsagePresentationFormatter {
                     percentageColor: percentageColor,
                     detailValueColor: configuration.colorMode.resetTimeMetricColor(
                         for: quota.remainingTimeVsUsage
-                    )
+                    ),
+                    quotaBar: quotaBar
                 )
             )
         case .authFileNotSelected:

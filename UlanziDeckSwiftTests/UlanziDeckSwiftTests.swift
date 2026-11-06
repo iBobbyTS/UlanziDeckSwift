@@ -11174,6 +11174,7 @@ struct UlanziDeckSwiftTests {
         )
         #expect(remainingDisplay.title == "99% / 91%")
         #expect(remainingDisplay.subtitle == "5h / 7d")
+        let expectedQuotaBar = try #require(UsageQuotaBar(quota: sevenDayQuota))
         #expect(remainingDisplay.codexUsageButtonContent == UsageButtonContent(
             accountNickname: "工作账号",
             metrics: [
@@ -11191,7 +11192,8 @@ struct UlanziDeckSwiftTests {
                     percentageColor: .yellow,
                     detailValueColor: .red
                 ),
-            ]
+            ],
+            quotaBar: expectedQuotaBar
         ))
 
         configuration.codexUsage.resetDisplayMode = .resetTime
@@ -11245,6 +11247,220 @@ struct UlanziDeckSwiftTests {
         #expect(singleDisplay.codexUsageButtonContent?.percentageText == "97%")
         #expect(singleDisplay.codexUsageButtonContent?.detailLabelText == "5h")
         #expect(singleDisplay.codexUsageButtonContent?.detailValueText == nil)
+    }
+
+    @Test func usageQuotaBarUsesLongestPeriodAndComparesUsagePaceWithElapsedFraction() throws {
+        var configuration = DeckKeyConfiguration(function: .zcodeUsage)
+        let fiveHourQuota = CodexUsageQuota(
+            window: .fiveHours,
+            remainingPercent: 10,
+            resetAfterSeconds: 900,
+            resetAt: 1_800_000_000,
+            limitWindowSeconds: 18_000,
+            usedPercent: 90
+        )
+        let sevenDayQuota = CodexUsageQuota(
+            window: .sevenDays,
+            remainingPercent: 50,
+            resetAfterSeconds: 302_400,
+            resetAt: 1_800_000_000,
+            limitWindowSeconds: 604_800,
+            usedPercent: 50
+        )
+        configuration.codexUsage.lastResult = .success(UsageQuotaSnapshot(
+            quotas: [fiveHourQuota, sevenDayQuota]
+        ))
+        let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
+        let display = DeckKeyDisplay(
+            key: key,
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+
+        let quotaBar = try #require(display.codexUsageButtonContent?.quotaBar)
+        #expect(quotaBar.window == .sevenDays)
+        #expect(abs(quotaBar.balance) < 0.000_001)
+        #expect(abs(sevenDayQuota.elapsedWindowFraction - 0.5) < 0.000_001)
+        #expect(abs(sevenDayQuota.periodBalance) < 0.000_001)
+
+        let oneDayAverageQuota = CodexUsageQuota(
+            window: .sevenDays,
+            remainingPercent: 86,
+            resetAfterSeconds: 6 * 86_400,
+            limitWindowSeconds: 604_800,
+            usedPercent: 100.0 / 7.0
+        )
+        #expect(abs(oneDayAverageQuota.periodBalance) < 0.000_001)
+
+        let oneDayFastQuota = CodexUsageQuota(
+            window: .sevenDays,
+            remainingPercent: 70,
+            resetAfterSeconds: 6 * 86_400,
+            limitWindowSeconds: 604_800,
+            usedPercent: 30
+        )
+        #expect(abs(oneDayFastQuota.periodBalance - (0.30 - 1.0 / 7.0)) < 0.000_001)
+        #expect(oneDayFastQuota.periodBalance > 0)
+
+        let oneDaySlowQuota = CodexUsageQuota(
+            window: .sevenDays,
+            remainingPercent: 95,
+            resetAfterSeconds: 6 * 86_400,
+            limitWindowSeconds: 604_800,
+            usedPercent: 5
+        )
+        #expect(oneDaySlowQuota.periodBalance < 0)
+    }
+
+    @Test func usageQuotaBarLogMappingAmplifiesSmallOffsetsWithoutChangingBalance() {
+        let cases: [(Double, Double)] = [
+            (-1, -1), (-0.5, -0.740_362_689_494),
+            (-0.2, -0.447_158_031_342), (-0.1, -0.278_753_600_953),
+            (-0.05, -0.161_368_002_235), (0, 0),
+            (0.05, 0.161_368_002_235), (0.1, 0.278_753_600_953),
+            (0.2, 0.447_158_031_342), (0.5, 0.740_362_689_494), (1, 1)
+        ]
+        for (balance, expectedOffset) in cases {
+            let bar = UsageQuotaBar(balance: balance, window: .sevenDays)
+            #expect(bar.balance == balance, "显示映射不应改变原始额度偏差")
+            #expect(abs((bar.markerProgress * 2 - 1) - expectedOffset) < 0.000_001)
+        }
+        var previousProgress = -1.0
+        for step in -100...100 {
+            let progress = UsageQuotaBar(balance: Double(step) / 100, window: .sevenDays).markerProgress
+            #expect(progress > previousProgress, "圆点应从左到右连续单调移动")
+            #expect((0...1).contains(progress))
+            previousProgress = progress
+        }
+        let tinyOffset = UsageQuotaBar(balance: 0.000_001, window: .sevenDays).markerProgress - 0.5
+        #expect(tinyOffset > 0 && tinyOffset < 0.000_002, "零点附近不应跳变")
+    }
+
+    @Test(arguments: [DeckKeyFunction.codexUsage, .zcodeUsage, .antigravityUsage])
+    func usageRendererShowsLogMappedMarkerColorAndFixedCenterTick(function: DeckKeyFunction) throws {
+        let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
+        for name in ["", "额度"] {
+            for balance in [-0.1, 0, 0.1] {
+                var configuration = DeckKeyConfiguration(function: function)
+                configuration.visual.name = name
+                configuration.codexUsage.lastResult = .success(CodexUsageQuota(
+                    window: .sevenDays,
+                    remainingPercent: Int((0.5 - balance) * 100),
+                    resetAfterSeconds: 302_400,
+                    resetAt: 1_800_000_000,
+                    limitWindowSeconds: 604_800,
+                    usedPercent: (0.5 + balance) * 100
+                ))
+                let display = DeckKeyDisplay(key: key, configuration: configuration, isSelected: false, isPressed: false)
+                let image = try #require(NSBitmapImageRep(data: H200ButtonIconRenderer().pngData(for: display)))
+                // 从实际设备像素尺寸定位；±10 个百分点应移动半条长度的约 28%。
+                let width = Double(image.pixelsWide)
+                let height = Double(image.pixelsHigh)
+                let radius = max(2, height * 0.035)
+                let topMargin = height * 0.018
+                let barWidth = width * 0.84 - radius * 2
+                let offset = balance < 0 ? -0.278_753_600_953 : (balance > 0 ? 0.278_753_600_953 : 0)
+                let markerX = Int((width / 2 + offset * barWidth / 2).rounded())
+                let markerY = Int(topMargin + radius * 0.8)
+                let markerColor = try #require(image.colorAt(x: markerX, y: markerY)?.usingColorSpace(.deviceRGB))
+                // 同一渲染器导出的中性按键在偏移位置没有圆点，直接对比当地渐变色，
+                // 避免把 NSColor 与 PNG 导出之间的颜色空间转换误差当成显示偏差。
+                var centeredConfiguration = configuration
+                centeredConfiguration.codexUsage.lastResult = .success(CodexUsageQuota(
+                    window: .sevenDays, remainingPercent: 50, resetAfterSeconds: 302_400,
+                    resetAt: 1_800_000_000, limitWindowSeconds: 604_800, usedPercent: 50
+                ))
+                let centeredDisplay = DeckKeyDisplay(key: key, configuration: centeredConfiguration, isSelected: false, isPressed: false)
+                let centeredImage = try #require(NSBitmapImageRep(data: H200ButtonIconRenderer().pngData(for: centeredDisplay)))
+                let barY = Int(topMargin + radius * 1.4)
+                let expectedRGB = try #require(centeredImage.colorAt(x: markerX, y: barY)?.usingColorSpace(.deviceRGB))
+                #expect(abs(markerColor.redComponent - expectedRGB.redComponent) < 0.015)
+                #expect(abs(markerColor.greenComponent - expectedRGB.greenComponent) < 0.015)
+                #expect(abs(markerColor.blueComponent - expectedRGB.blueComponent) < 0.015)
+                let centerX = Int(width / 2)
+                let tickRows = [Int(ceil(topMargin)), Int(floor(topMargin + radius * 2.8 - 1))]
+                for tickY in tickRows {
+                    // 刻度细线位于像素边界，抗锯齿后仍应明显亮于黑色描边。
+                    #expect(Self.bitmapContainsPixel(in: image, xRange: (centerX - 1)..<(centerX + 1), yRange: tickY..<(tickY + 1)) { color in
+                        color.redComponent > 0.65 && color.greenComponent > 0.65 && color.blueComponent > 0.65
+                    }, "中心刻度应固定并露出圆点上下边缘")
+                }
+            }
+        }
+    }
+
+    @Test func usageQuotaBarOmitsUnknownResetTiming() throws {
+        let quota = CodexUsageQuota(
+            window: .sevenDays,
+            remainingPercent: 91,
+            resetAfterSeconds: 0,
+            resetAt: nil,
+            limitWindowSeconds: 604_800,
+            usedPercent: 9
+        )
+        var configuration = DeckKeyConfiguration(function: .zcodeUsage)
+        configuration.codexUsage.lastResult = .success(quota)
+        let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
+        let display = DeckKeyDisplay(
+            key: key,
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+
+        #expect(UsageQuotaBar(quota: quota) == nil)
+        #expect(display.codexUsageButtonContent?.quotaBar == nil)
+    }
+
+    @Test func usageRendererDrawsTriColorQuotaBarAtButtonTop() throws {
+        var configuration = DeckKeyConfiguration(function: .zcodeUsage)
+        configuration.codexUsage.lastResult = .success(CodexUsageQuota(
+            window: .sevenDays,
+            remainingPercent: 50,
+            resetAfterSeconds: 302_400,
+            resetAt: 1_800_000_000,
+            limitWindowSeconds: 604_800,
+            usedPercent: 50
+        ))
+        let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
+        let display = DeckKeyDisplay(
+            key: key,
+            configuration: configuration,
+            isSelected: false,
+            isPressed: false
+        )
+        let png = try H200ButtonIconRenderer().pngData(for: display)
+        let image = try #require(NSBitmapImageRep(data: png))
+        let topBarYRange = 0..<22
+
+        #expect(Self.bitmapContainsPixel(
+            in: image,
+            xRange: 22..<50,
+            yRange: topBarYRange
+        ) { color in
+            color.blueComponent > 0.7
+                && color.greenComponent < 0.7
+                && color.redComponent < 0.5
+        })
+        #expect(Self.bitmapContainsPixel(
+            in: image,
+            xRange: 88..<108,
+            yRange: topBarYRange
+        ) { color in
+            color.greenComponent > 0.6
+                && color.redComponent < 0.5
+                && color.blueComponent < 0.5
+        })
+        #expect(Self.bitmapContainsPixel(
+            in: image,
+            xRange: 150..<175,
+            yRange: topBarYRange
+        ) { color in
+            color.redComponent > 0.7
+                && color.greenComponent < 0.4
+                && color.blueComponent < 0.4
+        })
     }
 
     @Test func newCodexUsageComponentDirectlySelectsDefaultAuthFileOnlyFromEmptyKey() throws {
@@ -11706,12 +11922,13 @@ struct UlanziDeckSwiftTests {
 
     @Test func codexUsageDisplayShowsRemainingPercentAndFormattedResetTime() throws {
         var configuration = DeckKeyConfiguration(function: .codexUsage)
-        configuration.codexUsage.lastResult = .success(CodexUsageQuota(
+        let quota = CodexUsageQuota(
             remainingPercent: 74,
             resetAfterSeconds: 593_588,
             limitWindowSeconds: 604_800,
             usedPercent: 26
-        ))
+        )
+        configuration.codexUsage.lastResult = .success(quota)
         let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
 
         let display = DeckKeyDisplay(
@@ -11723,13 +11940,15 @@ struct UlanziDeckSwiftTests {
 
         #expect(display.title == "74%")
         #expect(display.subtitle == "6天 20:53")
+        let expectedQuotaBar = try #require(UsageQuotaBar(quota: quota))
         #expect(display.codexUsageButtonContent == CodexUsageButtonContent(
             accountNickname: nil,
             percentageText: "74%",
             resetLabelText: "下次重设",
             resetAfterText: "6天 20:53",
             percentageColor: .yellow,
-            resetAfterColor: .green
+            resetAfterColor: .green,
+            quotaBar: expectedQuotaBar
         ))
 
         configuration.codexUsage.accountNickname = "  主账号  "
