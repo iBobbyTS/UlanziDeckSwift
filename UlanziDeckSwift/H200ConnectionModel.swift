@@ -833,16 +833,33 @@ final class H200ConnectionModel: ObservableObject {
     }
 
     func previewButtonVisualName(_ name: String, for keyID: Int) {
-        if interactionState.setButtonVisualName(name, for: keyID, selectsKey: false) {
-            syncKeyDisplay(keyID: keyID)
+        previewButtonVisualName(name, for: keyID, pageID: interactionState.currentPageID)
+    }
+
+    func previewButtonVisualName(_ name: String, for keyID: Int, pageID: String) {
+        if interactionState.setButtonVisualName(name, for: keyID, pageID: pageID, selectsKey: false) {
+            syncButtonVisualNameDisplayIfVisible(keyID: keyID, pageID: pageID)
         }
     }
 
     func setButtonVisualName(_ name: String, for keyID: Int) {
-        if interactionState.setButtonVisualName(name, for: keyID, selectsKey: false) {
+        setButtonVisualName(name, for: keyID, pageID: interactionState.currentPageID)
+    }
+
+    func setButtonVisualName(_ name: String, for keyID: Int, pageID: String) {
+        if interactionState.setButtonVisualName(name, for: keyID, pageID: pageID, selectsKey: false) {
             persistCurrentConfiguration()
-            syncKeyDisplay(keyID: keyID)
+            syncButtonVisualNameDisplayIfVisible(keyID: keyID, pageID: pageID)
         }
+    }
+
+    /// 隐藏页面上的名称变化不应触发设备局部位图更新；设备当前只显示 currentPageID。
+    private func syncButtonVisualNameDisplayIfVisible(keyID: Int, pageID: String) {
+        guard pageID == interactionState.currentPageID else {
+            return
+        }
+
+        syncKeyDisplay(keyID: keyID)
     }
 
     func setButtonVisualConfiguration(_ visual: DeckKeyVisualConfiguration, for keyID: Int) {

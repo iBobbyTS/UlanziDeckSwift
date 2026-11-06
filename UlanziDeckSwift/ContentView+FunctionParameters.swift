@@ -1416,6 +1416,7 @@ extension ContentView {
             get: {
                 if focusedParameterField == .buttonVisualName,
                    let draft = buttonVisualNameDraft,
+                   draft.pageID == interactionState.currentPageID,
                    draft.keyID == interactionState.selectedKeyID {
                     return draft.text
                 }
@@ -1427,17 +1428,21 @@ extension ContentView {
                     return
                 }
 
-                let originalName = if buttonVisualNameDraft?.keyID == selectedKeyID {
+                let pageID = interactionState.currentPageID
+                let continuesExistingDraft = buttonVisualNameDraft?.pageID == pageID
+                    && buttonVisualNameDraft?.keyID == selectedKeyID
+                let originalName = if continuesExistingDraft {
                     buttonVisualNameDraft?.originalNormalizedText ?? ""
                 } else {
                     selectedConfiguration?.buttonVisualConfiguration?.name ?? ""
                 }
                 buttonVisualNameDraft = ParameterNameDraft(
+                    pageID: pageID,
                     keyID: selectedKeyID,
                     originalNormalizedText: originalName,
                     text: name
                 )
-                onButtonVisualNamePreview(selectedKeyID, name)
+                onButtonVisualNamePreview(selectedKeyID, pageID, name)
             }
         )
     }
@@ -1476,6 +1481,19 @@ extension ContentView {
     }
 
     func selectedKeyChangedDuringParameterEditing() {
+        endParameterEditingIfNeeded()
+    }
+
+    func currentPageChangedDuringParameterEditing() {
+        // 网页地址仍按当前页提交；页面切换只处理已带页面身份的显示名称草稿。
+        guard activeParameterFocusField == .buttonVisualName else {
+            return
+        }
+
+        endParameterEditingIfNeeded()
+    }
+
+    private func endParameterEditingIfNeeded() {
         guard activeParameterFocusField != nil else {
             return
         }
@@ -1498,6 +1516,7 @@ extension ContentView {
                 return
             }
             buttonVisualNameDraft = ParameterNameDraft(
+                pageID: interactionState.currentPageID,
                 keyID: selectedKeyID,
                 originalNormalizedText: visual.name,
                 text: visual.name
@@ -1527,16 +1546,12 @@ extension ContentView {
             buttonVisualNameDraft = nil
         }
 
-        guard interactionState.configuration(for: draft.keyID)?.buttonVisualConfiguration != nil else {
-            return
-        }
-
         let normalizedName = DeckKeyVisualConfiguration.normalizedName(draft.text)
         guard draft.originalNormalizedText != normalizedName else {
             return
         }
 
-        onButtonVisualNameChange(draft.keyID, draft.text)
+        onButtonVisualNameChange(draft.keyID, draft.pageID, draft.text)
     }
 
     var selectedSub2APIBaseURLBinding: Binding<String> {

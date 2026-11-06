@@ -90,11 +90,11 @@ struct RootView: View {
             onWebPageURLSubmit: {
                 connectionModel.submitSelectedWebPageURLString()
             },
-            onButtonVisualNamePreview: { keyID, name in
-                connectionModel.previewButtonVisualName(name, for: keyID)
+            onButtonVisualNamePreview: { keyID, pageID, name in
+                connectionModel.previewButtonVisualName(name, for: keyID, pageID: pageID)
             },
-            onButtonVisualNameChange: { keyID, name in
-                connectionModel.setButtonVisualName(name, for: keyID)
+            onButtonVisualNameChange: { keyID, pageID, name in
+                connectionModel.setButtonVisualName(name, for: keyID, pageID: pageID)
             },
             onButtonVisualChange: { keyID, visual in
                 connectionModel.setButtonVisualConfiguration(visual, for: keyID)

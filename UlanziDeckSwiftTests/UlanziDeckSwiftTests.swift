@@ -2472,6 +2472,43 @@ struct UlanziDeckSwiftTests {
         #expect(state.configuration(for: 6)?.buttonVisualConfiguration?.name == "报告")
     }
 
+    @Test func buttonVisualNameCommitTargetsEditedPageAfterReturn() throws {
+        let layout = DeckGridLayout.h200Prototype
+        var state = DeckGridInteractionState(layout: layout)
+        let folderKey = try #require(layout.keys.first { $0.id == 3 })
+
+        let didAssignFolder = state.assign(.pageFolder, to: 3)
+        #expect(didAssignFolder)
+        let childPageID = try #require(state.pageID(for: 3))
+        let didEnterFolder = state.enterPageFolder(keyID: 3)
+        #expect(didEnterFolder)
+        state.select(keyID: 3)
+        let didPreviewChildName = state.setButtonVisualName("子页名称", for: 3)
+        #expect(didPreviewChildName)
+        #expect(state.buttonVisualConfiguration(for: 3)?.name == "子页名称")
+
+        let didReturnToRoot = state.goBackPage()
+        #expect(didReturnToRoot)
+        #expect(state.currentPageID == DeckGridInteractionState.rootPageID)
+        #expect(state.display(for: folderKey).pageFolderButtonContent?.displayName == "功能夹")
+
+        let didCommitToChildPage = state.setButtonVisualName(
+            "子页名称",
+            for: 3,
+            pageID: childPageID,
+            selectsKey: false
+        )
+        #expect(didCommitToChildPage)
+        #expect(state.display(for: folderKey).pageFolderButtonContent?.displayName == "功能夹")
+        #expect(state.selectedKeyID == 1)
+        #expect(
+            state.persistedPages
+                .first { $0.id == childPageID }?
+                .configurations[3]?
+                .buttonVisualConfiguration?.name == "子页名称"
+        )
+    }
+
     @Test func legacyBrightnessKeyFunctionIsNormalizedToNoFunction() {
         let layout = DeckGridLayout.h200Prototype
         var state = DeckGridInteractionState(
@@ -7851,6 +7888,58 @@ struct UlanziDeckSwiftTests {
         #expect(model.interactionState.currentPageID == DeckGridInteractionState.rootPageID)
         #expect(syncer.sentDisplays.last?.count == 14)
         #expect(syncer.sentDisplays.last?[1].pageFolderButtonContent?.displayName == "功能夹")
+    }
+
+    @MainActor
+    @Test func hiddenPageNameCommitPersistsWithoutRenamingVisibleFolder() async throws {
+        let syncer = FakeH200DeckSyncer()
+        let store = FakeDeckConfigurationStore()
+        let model = H200ConnectionModel(
+            discovery: FakeH200Discovery(results: [.connected(Self.protocolInterfaceIdentity())]),
+            syncer: syncer,
+            configurationStore: store
+        )
+
+        model.checkOnLaunch()
+        try await Self.waitUntil {
+            syncer.sentDisplays.count == 1 && model.syncSummary != nil
+        }
+
+        model.selectKey(keyID: 3)
+        model.assignSelectedFunction(.pageFolder)
+        let childPageID = try #require(model.interactionState.pageID(for: 3))
+        model.navigateKey(keyID: 3)
+        try await Self.waitUntil {
+            model.interactionState.currentPageID == childPageID
+                && syncer.sentDisplays.count == 2
+        }
+
+        model.selectKey(keyID: 3)
+        model.previewButtonVisualName("子页名称", for: 3, pageID: childPageID)
+        model.navigateKey(keyID: 13)
+        try await Self.waitUntil {
+            model.interactionState.currentPageID == DeckGridInteractionState.rootPageID
+                && syncer.sentDisplays.count == 3
+        }
+        let partialDisplayCountBeforeCommit = syncer.partialDisplays.count
+
+        model.setButtonVisualName("子页名称", for: 3, pageID: childPageID)
+
+        let folderKey = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
+        #expect(model.interactionState.display(for: folderKey).pageFolderButtonContent?.displayName == "功能夹")
+        #expect(
+            model.interactionState.persistedPages
+                .first { $0.id == childPageID }?
+                .configurations[3]?
+                .buttonVisualConfiguration?.name == "子页名称"
+        )
+        #expect(syncer.partialDisplays.count == partialDisplayCountBeforeCommit)
+        #expect(
+            store.savedStates.last?.persistedPages
+                .first { $0.id == childPageID }?
+                .configurations[3]?
+                .buttonVisualConfiguration?.name == "子页名称"
+        )
     }
 
     @MainActor

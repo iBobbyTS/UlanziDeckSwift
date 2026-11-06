@@ -2481,12 +2481,42 @@ nonisolated struct DeckGridInteractionState: Equatable {
 
     @discardableResult
     mutating func setButtonVisualName(_ name: String, for keyID: Int, selectsKey: Bool = true) -> Bool {
-        guard var visual = buttonVisualConfiguration(for: keyID) else {
+        setButtonVisualName(
+            name,
+            for: keyID,
+            pageID: currentPageID,
+            selectsKey: selectsKey
+        )
+    }
+
+    /// 名称编辑可能跨越页面切换，写入目标必须由调用方显式指定页面；
+    /// 只有目标页仍是当前页时才允许改变选中按键。
+    @discardableResult
+    mutating func setButtonVisualName(
+        _ name: String,
+        for keyID: Int,
+        pageID: String,
+        selectsKey: Bool = true
+    ) -> Bool {
+        guard validKeyIDs.contains(keyID),
+              var page = pages[pageID],
+              var configuration = page.configurations[keyID],
+              var visual = configuration.buttonVisualConfiguration
+        else {
             return false
         }
 
         visual.name = DeckKeyVisualConfiguration.normalizedName(name)
-        return setButtonVisualConfiguration(visual, for: keyID, selectsKey: selectsKey)
+        guard configuration.setButtonVisualConfiguration(visual) else {
+            return false
+        }
+
+        page.configurations[keyID] = configuration
+        pages[pageID] = page
+        if selectsKey, pageID == currentPageID {
+            selectedKeyID = keyID
+        }
+        return true
     }
 
     @discardableResult

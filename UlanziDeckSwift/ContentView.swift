@@ -15,6 +15,7 @@ struct ContentView: View {
     }
 
     struct ParameterNameDraft: Equatable {
+        let pageID: String
         let keyID: Int
         let originalNormalizedText: String
         var text: String
@@ -62,8 +63,8 @@ struct ContentView: View {
     let onCodexUsageAntigravityModelFamilyChange: (AntigravityModelFamily) -> Void
     let onWebPageURLChange: (String) -> Void
     let onWebPageURLSubmit: () -> Void
-    let onButtonVisualNamePreview: (Int, String) -> Void
-    let onButtonVisualNameChange: (Int, String) -> Void
+    let onButtonVisualNamePreview: (Int, String, String) -> Void
+    let onButtonVisualNameChange: (Int, String, String) -> Void
     let onButtonVisualChange: (Int, DeckKeyVisualConfiguration) -> Void
     let onShellConfigurationChange: (Int, String?, String?) -> Void
     let onSMBServerAddressChange: (String) -> Void
@@ -125,6 +126,9 @@ struct ContentView: View {
         }
         .onChange(of: interactionState.selectedKeyID) { _, _ in
             selectedKeyChangedDuringParameterEditing()
+        }
+        .onChange(of: interactionState.currentPageID) { _, _ in
+            currentPageChangedDuringParameterEditing()
         }
     }
 
@@ -974,8 +978,8 @@ struct MihoyoQRCodeView: View {
         onCodexUsageAntigravityModelFamilyChange: { _ in },
         onWebPageURLChange: { _ in },
         onWebPageURLSubmit: {},
-        onButtonVisualNamePreview: { _, _ in },
-        onButtonVisualNameChange: { _, _ in },
+        onButtonVisualNamePreview: { _, _, _ in },
+        onButtonVisualNameChange: { _, _, _ in },
         onButtonVisualChange: { _, _ in },
         onShellConfigurationChange: { _, _, _ in },
         onSMBServerAddressChange: { _ in },
