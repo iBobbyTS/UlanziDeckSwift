@@ -91,3 +91,10 @@
   - 适用状态集：`.notConnected`、`.occupied`、`.communicationPortOccupied`、`.permissionDenied`、`.openFailed`、`.managerOpenFailed`。已连接（`.connected`）状态下忽略。
   - 若当前处于 `.checking`（设备发现阶段），不发起并发 refresh，而是记录 `pendingDeviceMatched` 标志；当该轮发现结束且结果仍为非 connected 时，自动补发一次 `refresh()`（启动包发送阶段状态已是 `.connected`，matching 事件会被守卫忽略）。
   - 其余白名单状态下，立即触发 `refresh()` 完整流程：重新探测设备独占权、发送完整 14 格启动包、恢复当前页所有运行时（Sub2API / 米游社等），无需重启应用或手动点击重试。
+
+## 网络恢复触发补抓
+
+- 应用通过 `DeckNetworkMonitor` 监听 `NWPathMonitor` 路径事件，只在「上次不可用且本次可用」的翻转时产生一次恢复事件；首个事件仅记录基线，不触发。
+- 恢复事件复用 `resumeCurrentPageRuntime()`：各联网按键类型按既有的 `DeckRefreshResumeDecision` 判定——因断网错过刷新周期（成功时间已超过间隔或尚无成功快照）的按键立即补抓，仍在周期内的按键保持原定节奏，不重复请求。
+- 该机制与设备连接状态正交：设备离线期间网络恢复同样补抓（结果落回应用状态，待重连后随启动包/待同步标记恢复显示）；启动同步尚未完成或内部刷新暂停时事件被既有守卫挡下，之后由正常启动/恢复流程接管。
+- 事件回调经主线程 FIFO 派发，与设备事件同序；与设备监听（`H200DeviceMonitoring`）一致采用协议 + Noop 默认实现 + 测试注入 fake 的装配方式。

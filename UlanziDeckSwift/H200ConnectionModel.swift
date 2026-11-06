@@ -123,6 +123,7 @@ final class H200ConnectionModel: ObservableObject {
     private let mihoyoLoginPollNanoseconds: UInt64
     private let deviceCommandQueue = DispatchQueue(label: "com.iBobby.UlanziDeckSwift.H200DeviceCommands")
     private let deviceMonitor: H200DeviceMonitoring
+    private let networkMonitor: DeckNetworkMonitoring
     private var pendingDeviceMatched = false
     private var longPressTasks: [Int: Task<Void, Never>] = [:]
     private var longPressResetKeyIDs: Set<Int> = []
@@ -202,9 +203,14 @@ final class H200ConnectionModel: ObservableObject {
         H200NoopDeviceMonitor()
     }
 
+    nonisolated static func makeDefaultNetworkMonitor() -> DeckNetworkMonitoring {
+        DeckNoopNetworkMonitor()
+    }
+
     init(
         discovery: H200Discovering = H200HIDDiscovery(),
         deviceMonitor: H200DeviceMonitoring = makeDefaultDeviceMonitor(),
+        networkMonitor: DeckNetworkMonitoring = makeDefaultNetworkMonitor(),
         syncer: H200DeckSyncing = H200HIDDeckSyncer(),
         configurationStore: DeckConfigurationStoring = UserDefaultsDeckConfigurationStore(),
         folderOpener: FinderFolderOpening? = nil,
@@ -233,6 +239,7 @@ final class H200ConnectionModel: ObservableObject {
     ) {
         self.discovery = discovery
         self.deviceMonitor = deviceMonitor
+        self.networkMonitor = networkMonitor
         self.syncer = syncer
         self.configurationStore = configurationStore
         self.folderOpener = folderOpener ?? FinderFolderOpener()
@@ -305,6 +312,12 @@ final class H200ConnectionModel: ObservableObject {
             }
         }
         self.deviceMonitor.start()
+        self.networkMonitor.onPathSatisfied = { [weak self] in
+            DispatchQueue.main.async { [weak self] in
+                self?.handleNetworkPathSatisfied()
+            }
+        }
+        self.networkMonitor.start()
         dailyReminderTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             guard let self else { return }
             if self.interactionState.resetDailyReminders() {
@@ -319,6 +332,8 @@ final class H200ConnectionModel: ObservableObject {
         let syncer = syncer
         let monitor = deviceMonitor
         monitor.stop()
+        let networkMonitor = self.networkMonitor
+        networkMonitor.stop()
         mihoyoLoginTask?.cancel()
         for timer in sub2APITimers.values {
             timer.invalidate()
@@ -1811,6 +1826,13 @@ final class H200ConnectionModel: ObservableObject {
         case .notConnected, .managerOpenFailed:
             break
         }
+    }
+
+    /// 网络从不可用恢复为可用：复用当前页 runtime 恢复入口，让因断网
+    /// 错过刷新周期的联网按键立即补抓；仍在周期内的按键按原节奏继续。
+    /// 设备离线期间同样生效（离线网络刷新不受影响）。
+    private func handleNetworkPathSatisfied() {
+        resumeCurrentPageRuntime()
     }
 
     private func finishStartupSync(
