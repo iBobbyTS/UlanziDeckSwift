@@ -53,6 +53,7 @@ struct UlanziDeckSwiftTests {
         #expect(configuration.rankedGroupItem == nil)
 
         // C 消失后 rank=2 仍指向 B
+        configuration.poolRank = 2
         configuration.groupListState = .success(items: [item(1, 9, "A"), item(2, 9, "B")])
         #expect(configuration.rankedGroupItem?.groupID == 2)
 
@@ -66,16 +67,13 @@ struct UlanziDeckSwiftTests {
         // 已提交集合持久化，重启后继续生效
         configuration.poolRank = 1
         let data = try JSONEncoder().encode(configuration)
-        let restored = try JSONDecoder().decode(DeckKeySub2APIConfiguration.self, from: data)
+        var restored = try JSONDecoder().decode(DeckKeySub2APIConfiguration.self, from: data)
         #expect(restored.selectedPoolIDs == [1, 2])
         #expect(restored.rankedPoolItemCount == 0)
-        configuration.groupListState = .success(items: [item(1, 9, "A"), item(2, 9, "B")])
-        let restoredWithList = try JSONDecoder().decode(
-            DeckKeySub2APIConfiguration.self,
-            from: JSONEncoder().encode(configuration)
-        )
-        #expect(restoredWithList.rankedGroupItem?.groupID == 1)
-        #expect(restoredWithList.isPoolSelectionUnlocked == false)
+        // groupListState 是瞬时态不参与持久化：重启后重新获取列表成功，已提交集合继续约束排名
+        restored.groupListState = .success(items: [item(1, 9, "A"), item(2, 9, "B")])
+        #expect(restored.rankedGroupItem?.groupID == 1)
+        #expect(restored.isPoolSelectionUnlocked == false)
 
         // 旧配置缺集合字段：nil 按全选兼容
         let legacyJSON = #"{"instanceID":"legacy","baseURL":"","targetGroupID":0,"poolSelectionMode":"availableConcurrency","poolRank":2,"refreshInterval":30,"bearerKey":"","customServiceName":"","customGroupName":""}"#
@@ -4710,8 +4708,11 @@ struct UlanziDeckSwiftTests {
 
     @MainActor
     @Test func sub2APIDailyCostAutomaticallyRefreshesAtItsOwnInterval() async throws {
+        // 脚本值只给首抓；定时间隔的后续抓取返回同一终值，避免结果耗尽后
+        // 默认错误值覆盖 lastResult 造成 50ms 窗口竞态
         let fetcher = FakeSub2APIFetcher(
-            dailyCostResults: [.success(actualCost: 1), .success(actualCost: 2)]
+            dailyCostResults: [.success(actualCost: 1)],
+            defaultDailyCostResult: .success(actualCost: 2)
         )
         var state = DeckGridInteractionState(layout: .h200Prototype)
         _ = state.assign(.sub2APIDailyCost, to: 3)
@@ -5026,9 +5027,10 @@ struct UlanziDeckSwiftTests {
 
     @MainActor
     @Test func sub2APIBalanceAutomaticallyRefreshesAtItsOwnInterval() async throws {
+        // 同 dailyCost：默认值即终值，保证 lastResult 稳定等于定时间隔抓取结果
         let fetcher = FakeSub2APIFetcher(
-            balanceResults: [.success(remaining: 5), .success(remaining: 4)],
-            defaultBalanceResult: .success(remaining: 3)
+            balanceResults: [.success(remaining: 5)],
+            defaultBalanceResult: .success(remaining: 4)
         )
         var state = DeckGridInteractionState(layout: .h200Prototype)
         _ = state.assign(.sub2APIBalance, to: 3)
@@ -5257,8 +5259,9 @@ struct UlanziDeckSwiftTests {
             }
         }
 
-        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
-        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        // 输入 index 为行主序 0 基：key 3 对应 index 2
+        syncer.emitInput(H200InputEvent(state: 1, index: 2, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 2, type: .button, action: .release))
         try await Self.waitUntil {
             fetcher.requests.count == 2
                 && model.interactionState.newAPIBalanceConfiguration(for: 3).lastResult
@@ -5299,8 +5302,9 @@ struct UlanziDeckSwiftTests {
                 == .success(remaining: 8.75)
         )
 
-        syncer.emitInput(H200InputEvent(state: 1, index: 3, type: .button, action: .press))
-        syncer.emitInput(H200InputEvent(state: 0, index: 3, type: .button, action: .release))
+        // 输入 index 为行主序 0 基：key 3 对应 index 2
+        syncer.emitInput(H200InputEvent(state: 1, index: 2, type: .button, action: .press))
+        syncer.emitInput(H200InputEvent(state: 0, index: 2, type: .button, action: .release))
         try await Self.waitUntil {
             fetcher.requests.count == 2
                 && model.interactionState.newAPIBalanceConfiguration(for: 3).lastResult
