@@ -1,4 +1,5 @@
 .codegraph/
 .agent-work/
+.build/
 build/
 /git-worktree/
