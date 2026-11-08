@@ -965,7 +965,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
                 weight: .semibold,
                 maxFontSize: buttonRect.height * 0.145,
                 minFontSize: buttonRect.height * 0.09,
-                color: usageTimeColor(for: content, fallback: content.detailValueColor),
+                color: usageTimeColor(
+                    for: content.metrics.first?.paceBar ?? content.quotaBar,
+                    fallback: content.detailValueColor
+                ),
                 rect: NSRect(
                     x: rect.minX,
                     y: metricsTop - metricsHeight,
@@ -1040,7 +1043,7 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
                     weight: .semibold,
                     maxFontSize: buttonRect.height * 0.14,
                     minFontSize: buttonRect.height * 0.09,
-                    color: usageTimeColor(for: content, fallback: metric.detailValueColor),
+                    color: usageTimeColor(for: metric.paceBar, fallback: metric.detailValueColor),
                     rect: NSRect(
                         x: rect.minX,
                         y: cursor - detailHeight,
@@ -1135,10 +1138,11 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         markerPath.stroke()
     }
 
-    /// 所有时间行跟随顶部圆点（最长周期）取色；没有周期条时保留原有颜色规则。
-    private func usageTimeColor(for content: UsageButtonContent, fallback: MihoyoGameMetricColor) -> NSColor {
-        guard let bar = content.quotaBar else { return mihoyoGameMetricColor(for: fallback) }
-        return usageQuotaBarColor(at: CGFloat(bar.markerProgress), colors: usageQuotaBarColors())
+    /// 每个周期的时间行按该周期自身节奏独立取色（与顶部圆点同一套对数映射和渐变）；
+    /// 周期条只绘制最长周期，短周期仅用时间文字颜色表达节奏；无法计算节奏时保留原有颜色规则。
+    private func usageTimeColor(for paceBar: UsageQuotaBar?, fallback: MihoyoGameMetricColor) -> NSColor {
+        guard let paceBar else { return mihoyoGameMetricColor(for: fallback) }
+        return usageQuotaBarColor(at: CGFloat(paceBar.markerProgress), colors: usageQuotaBarColors())
     }
 
     /// 黄锚点插在绿、红正中：绿→红直线插值会在 R≈G 处穿过一段低饱和的土黄色，

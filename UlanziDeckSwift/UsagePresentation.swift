@@ -245,6 +245,25 @@ nonisolated struct UsageButtonMetric: Equatable, Sendable {
     let detailValueText: String?
     let percentageColor: MihoyoGameMetricColor
     let detailValueColor: MihoyoGameMetricColor
+    /// 该周期自身的节奏条数据（与顶部周期条同一套算法），时间行据此独立取色；
+    /// 周期缺少重置时间或周期长度而无法计算节奏时为 nil。
+    let paceBar: UsageQuotaBar?
+
+    init(
+        percentageText: String,
+        detailLabelText: String?,
+        detailValueText: String?,
+        percentageColor: MihoyoGameMetricColor,
+        detailValueColor: MihoyoGameMetricColor,
+        paceBar: UsageQuotaBar? = nil
+    ) {
+        self.percentageText = percentageText
+        self.detailLabelText = detailLabelText
+        self.detailValueText = detailValueText
+        self.percentageColor = percentageColor
+        self.detailValueColor = detailValueColor
+        self.paceBar = paceBar
+    }
 }
 
 nonisolated struct UsageQuotaBar: Equatable, Sendable {
@@ -294,7 +313,8 @@ nonisolated struct UsageButtonContent: Equatable, Sendable {
                 detailLabelText: detailLabelText,
                 detailValueText: detailValueText,
                 percentageColor: percentageColor,
-                detailValueColor: detailValueColor
+                detailValueColor: detailValueColor,
+                paceBar: quotaBar
             )],
             quotaBar: quotaBar
         )
@@ -374,7 +394,9 @@ nonisolated enum UsagePresentationFormatter {
                         percentageColor: configuration.colorMode.metricColor(for: quota.remainingPercent),
                         detailValueColor: resetText == nil
                             ? .yellow
-                            : configuration.colorMode.resetTimeMetricColor(for: quota.remainingTimeVsUsage)
+                            : configuration.colorMode.resetTimeMetricColor(for: quota.remainingTimeVsUsage),
+                        // 每个周期的时间行按自身节奏独立取色，不跟随最长周期的圆点。
+                        paceBar: UsageQuotaBar(quota: quota)
                     )
                 }
                 return UsagePresentation(

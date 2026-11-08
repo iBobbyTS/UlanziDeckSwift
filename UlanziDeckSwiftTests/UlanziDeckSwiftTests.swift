@@ -11175,6 +11175,8 @@ struct UlanziDeckSwiftTests {
         #expect(remainingDisplay.title == "99% / 91%")
         #expect(remainingDisplay.subtitle == "5h / 7d")
         let expectedQuotaBar = try #require(UsageQuotaBar(quota: sevenDayQuota))
+        let expectedFiveHourPaceBar = try #require(UsageQuotaBar(quota: fiveHourQuota))
+        let expectedSevenDayPaceBar = try #require(UsageQuotaBar(quota: sevenDayQuota))
         #expect(remainingDisplay.codexUsageButtonContent == UsageButtonContent(
             accountNickname: "工作账号",
             metrics: [
@@ -11183,14 +11185,16 @@ struct UlanziDeckSwiftTests {
                     detailLabelText: nil,
                     detailValueText: "0:30",
                     percentageColor: .red,
-                    detailValueColor: .green
+                    detailValueColor: .green,
+                    paceBar: expectedFiveHourPaceBar
                 ),
                 UsageButtonMetric(
                     percentageText: "7d 91%",
                     detailLabelText: nil,
                     detailValueText: "1:00",
                     percentageColor: .yellow,
-                    detailValueColor: .red
+                    detailValueColor: .red,
+                    paceBar: expectedSevenDayPaceBar
                 ),
             ],
             quotaBar: expectedQuotaBar
@@ -11398,7 +11402,7 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test(arguments: [DeckKeyFunction.codexUsage, .zcodeUsage, .antigravityUsage])
-    func usageRendererTimeColorsMatchLongestPeriodMarker(function: DeckKeyFunction) throws {
+    func usageRendererTimeColorsFollowEachWindowPace(function: DeckKeyFunction) throws {
         let key = try #require(DeckGridLayout.h200Prototype.keys.first { $0.id == 3 })
         for dualWindow in [false, true] {
             for balance in [-0.5, 0, 0.5] {
@@ -11407,44 +11411,83 @@ struct UlanziDeckSwiftTests {
                     resetAfterSeconds: 302_400, resetAt: 1_800_000_000,
                     limitWindowSeconds: 604_800, usedPercent: (0.5 + balance) * 100
                 )
-                // 短周期故意与长周期反向，防止双周期时间行各自取色。
+                // 短周期故意与长周期反向：两行时间必须各自跟随自己周期的节奏，
+                // 而不是统一跟随最长周期的圆点。
                 let shorterQuota = CodexUsageQuota(
                     window: .fiveHours, remainingPercent: Int((0.5 + balance) * 100),
                     resetAfterSeconds: 9_000, resetAt: 1_800_000_000,
                     limitWindowSeconds: 18_000, usedPercent: (0.5 - balance) * 100
                 )
+                var centeredConfiguration = DeckKeyConfiguration(function: function)
+                centeredConfiguration.codexUsage.lastResult = .success(UsageQuotaSnapshot(
+                    quotas: dualWindow ? [shorterQuota, longestQuota] : [longestQuota]
+                ))
+                // 期望色从中心圆点渲染的周期条上读取：条上任意位置的像素就是该进度的节奏色。
+                // 圆点只覆盖正中，不影响两侧采样；balance 为 0 时所有周期同色。
+                let centeredDisplay = DeckKeyDisplay(
+                    key: key, configuration: centeredConfiguration, isSelected: false, isPressed: false
+                )
+                let centeredImage = try #require(NSBitmapImageRep(data: H200ButtonIconRenderer().pngData(for: centeredDisplay)))
+                let barRowY = Int(Double(centeredImage.pixelsHigh) * 0.018 + max(2, Double(centeredImage.pixelsHigh) * 0.035) * 1.5 * 1.4)
                 for colorMode in CodexUsageColorMode.allCases {
                     for resetMode in CodexUsageResetDisplayMode.allCases {
-                        var configuration = DeckKeyConfiguration(function: function)
+                        var configuration = centeredConfiguration
                         configuration.codexUsage.colorMode = colorMode
                         configuration.codexUsage.resetDisplayMode = resetMode
-                        configuration.codexUsage.lastResult = .success(UsageQuotaSnapshot(
-                            quotas: dualWindow ? [shorterQuota, longestQuota] : [longestQuota]
-                        ))
                         let display = DeckKeyDisplay(key: key, configuration: configuration, isSelected: false, isPressed: false)
                         let image = try #require(NSBitmapImageRep(data: H200ButtonIconRenderer().pngData(for: display)))
                         let width = Double(image.pixelsWide)
                         let height = Double(image.pixelsHigh)
                         let radius = max(2, height * 0.035) * 1.5
-                        let offset = balance < 0 ? -0.740_362_689_494 : (balance > 0 ? 0.740_362_689_494 : 0)
-                        let markerX = Int((width / 2 + offset * (width * 0.84 - radius * 2) / 2).rounded())
-                        let markerY = Int(height * 0.018 + radius * 1.4)
-                        let markerColor = try #require(image.colorAt(x: markerX, y: markerY)?.usingColorSpace(.deviceRGB))
-                        // 分别限定到时间文字行，不能用顶部圆点或百分比文字凑出匹配像素。
-                        let timeRows = dualWindow
-                            ? [Int(height * 0.32)..<Int(height * 0.49), Int(height * 0.71)..<Int(height * 0.88)]
-                            : [Int(height * 0.67)..<Int(height * 0.82)]
-                        for rows in timeRows {
-                            #expect(Self.bitmapContainsPixel(in: image, xRange: 20..<(image.pixelsWide - 20), yRange: rows) { color in
-                                abs(color.redComponent - markerColor.redComponent) < 0.02
-                                    && abs(color.greenComponent - markerColor.greenComponent) < 0.02
-                                    && abs(color.blueComponent - markerColor.blueComponent) < 0.02
-                            }, "单周期或双周期的每行时间都应与最长周期圆点同色，且不受颜色模式和时间格式影响")
+                        let barWidth = width * 0.84 - radius * 2
+                        let longestOffset = balance < 0 ? -0.740_362_689_494 : (balance > 0 ? 0.740_362_689_494 : 0)
+                        func expectedColor(atProgressOffset offset: Double) throws -> NSColor {
+                            let x = Int((width / 2 + offset * barWidth / 2).rounded())
+                            return try #require(centeredImage.colorAt(x: x, y: barRowY)?.usingColorSpace(.deviceRGB))
+                        }
+                        let longestExpected = try expectedColor(atProgressOffset: longestOffset)
+                        let shorterExpected = try expectedColor(atProgressOffset: -longestOffset)
+                        // 单周期：唯一时间行跟随该周期（即最长）节奏；双周期：第一行 5h、第二行 7d 各自跟随。
+                        let timeRows: [(rows: Range<Int>, expected: NSColor)] = dualWindow
+                            ? [(Int(height * 0.32)..<Int(height * 0.49), shorterExpected),
+                               (Int(height * 0.71)..<Int(height * 0.88), longestExpected)]
+                            : [(Int(height * 0.67)..<Int(height * 0.82), longestExpected)]
+                        for rowExpectation in timeRows {
+                            #expect(Self.bitmapContainsPixel(in: image, xRange: 20..<(image.pixelsWide - 20), yRange: rowExpectation.rows) { color in
+                                abs(color.redComponent - rowExpectation.expected.redComponent) < 0.02
+                                    && abs(color.greenComponent - rowExpectation.expected.greenComponent) < 0.02
+                                    && abs(color.blueComponent - rowExpectation.expected.blueComponent) < 0.02
+                            }, "每行时间应与该周期自身节奏同色：双周期时 5h 与 7d 各自独立取色，不跟随最长周期圆点")
                         }
                     }
                 }
             }
         }
+    }
+
+    @Test func usagePresentationAttachesEachWindowPaceToItsOwnMetric() throws {
+        var configuration = DeckKeyConfiguration(function: .zcodeUsage)
+        // 5h 用量偏慢、7d 用量偏快：两个周期的节奏数据应各自挂到自己的 metric 上。
+        let fiveHourQuota = CodexUsageQuota(
+            window: .fiveHours, remainingPercent: 90,
+            resetAfterSeconds: 9_000, resetAt: 1_800_000_000,
+            limitWindowSeconds: 18_000, usedPercent: 10
+        )
+        let sevenDayQuota = CodexUsageQuota(
+            window: .sevenDays, remainingPercent: 20,
+            resetAfterSeconds: 302_400, resetAt: 1_800_000_000,
+            limitWindowSeconds: 604_800, usedPercent: 80
+        )
+        configuration.codexUsage.lastResult = .success(UsageQuotaSnapshot(quotas: [fiveHourQuota, sevenDayQuota]))
+        let content = try #require(
+            UsagePresentationFormatter.presentation(for: configuration.codexUsage).buttonContent
+        )
+
+        #expect(content.metrics.map(\.paceBar?.window) == [.fiveHours, .sevenDays])
+        #expect(try #require(content.metrics.first?.paceBar).balance < 0)
+        #expect(try #require(content.metrics.last?.paceBar).balance > 0)
+        // 顶部周期条仍只取最长周期。
+        #expect(content.quotaBar?.window == .sevenDays)
     }
 
     @Test func usageQuotaBarOmitsUnknownResetTiming() throws {
