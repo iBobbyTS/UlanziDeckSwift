@@ -11470,7 +11470,7 @@ struct UlanziDeckSwiftTests {
         #expect(display.codexUsageButtonContent?.quotaBar == nil)
     }
 
-    @Test func usageRendererDrawsTriColorQuotaBarAtButtonTop() throws {
+    @Test func usageRendererDrawsBlueGreenYellowRedQuotaBarAtButtonTop() throws {
         var configuration = DeckKeyConfiguration(function: .zcodeUsage)
         configuration.codexUsage.lastResult = .success(CodexUsageQuota(
             window: .sevenDays,
@@ -11508,6 +11508,17 @@ struct UlanziDeckSwiftTests {
             color.greenComponent > 0.6
                 && color.redComponent < 0.5
                 && color.blueComponent < 0.5
+        })
+        // 绿、红之间必须经过鲜艳的黄色（R、G 同高而 B 低）；
+        // 绿→红直连时该位置是低饱和土黄色（R≈G≈0.52），会因红色分量不足而失败。
+        #expect(Self.bitmapContainsPixel(
+            in: image,
+            xRange: 126..<140,
+            yRange: topBarYRange
+        ) { color in
+            color.redComponent > 0.7
+                && color.greenComponent > 0.65
+                && color.blueComponent < 0.4
         })
         #expect(Self.bitmapContainsPixel(
             in: image,

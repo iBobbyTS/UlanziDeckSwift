@@ -1087,8 +1087,10 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         )
         context.saveGState()
         barPath.addClip()
-        let gradientColors = [colors.blue.cgColor, colors.green.cgColor, colors.red.cgColor] as CFArray
-        let locations: [CGFloat] = [0, 0.5, 1]
+        let gradientColors = [
+            colors.blue.cgColor, colors.green.cgColor, colors.yellow.cgColor, colors.red.cgColor
+        ] as CFArray
+        let locations: [CGFloat] = [0, 0.5, 0.75, 1]
         if let gradient = CGGradient(
             colorsSpace: CGColorSpaceCreateDeviceRGB(),
             colors: gradientColors,
@@ -1139,17 +1141,20 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         return usageQuotaBarColor(at: CGFloat(bar.markerProgress), colors: usageQuotaBarColors())
     }
 
-    private func usageQuotaBarColors() -> (blue: NSColor, green: NSColor, red: NSColor) {
+    /// 黄锚点插在绿、红正中：绿→红直线插值会在 R≈G 处穿过一段低饱和的土黄色，
+    /// 看起来像灰点；加入黄色锚点后整条渐变保持鲜艳，节奏语义不变（蓝=偏慢、绿=持平、红=偏快）。
+    private func usageQuotaBarColors() -> (blue: NSColor, green: NSColor, yellow: NSColor, red: NSColor) {
         (
             blue: NSColor(deviceRed: 0.16, green: 0.52, blue: 0.96, alpha: 1),
             green: NSColor(deviceRed: 0.21, green: 0.73, blue: 0.36, alpha: 1),
+            yellow: NSColor(deviceRed: 0.95, green: 0.80, blue: 0.16, alpha: 1),
             red: NSColor(deviceRed: 0.90, green: 0.25, blue: 0.22, alpha: 1)
         )
     }
 
     private func usageQuotaBarColor(
         at progress: CGFloat,
-        colors: (blue: NSColor, green: NSColor, red: NSColor)
+        colors: (blue: NSColor, green: NSColor, yellow: NSColor, red: NSColor)
     ) -> NSColor {
         let t = min(1, max(0, progress))
         let start: NSColor
@@ -1159,10 +1164,14 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             start = colors.blue
             end = colors.green
             localProgress = t / 0.5
-        } else {
+        } else if t <= 0.75 {
             start = colors.green
+            end = colors.yellow
+            localProgress = (t - 0.5) / 0.25
+        } else {
+            start = colors.yellow
             end = colors.red
-            localProgress = (t - 0.5) / 0.5
+            localProgress = (t - 0.75) / 0.25
         }
 
         return NSColor(
