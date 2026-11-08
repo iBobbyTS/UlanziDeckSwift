@@ -1096,11 +1096,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func legacySandboxDefaultsMigrationCopiesKnownConfigurationKeysOnce() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let sourceURL = FileManager.default.temporaryDirectory
             .appending(path: "UlanziDeckSwiftSandboxDefaults-\(UUID().uuidString).plist")
@@ -1164,11 +1161,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func legacySandboxDefaultsMigrationPreservesExistingDeckConfiguration() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let existingDeckData = Data("existing".utf8)
         defaults.set(
@@ -2527,11 +2521,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreRestoresSavedKeyConfiguration() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let layout = DeckGridLayout.h200Prototype
         let store = UserDefaultsDeckConfigurationStore(
@@ -2705,11 +2696,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreMigratesLegacyFlatConfigurationToRootPage() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: storageKey)
@@ -2744,11 +2732,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStorePersistsPageTreeAndRestoresToRootPage() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let layout = DeckGridLayout.h200Prototype
         let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: "deckConfiguration")
@@ -2772,11 +2757,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStorePersistsRootPageOrderAndFolderTree() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let layout = DeckGridLayout.h200Prototype
         let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: "deckConfiguration")
@@ -2810,11 +2792,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreClearsOnlyKeyContainingUnknownConfigurationValue() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let credentialID = "unknown-key-owned-credential"
@@ -2841,11 +2820,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreDeletesMalformedConfigurationThatMayContainPlaintextCredential() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let credentialID = "malformed-orphan"
@@ -2868,9 +2844,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreDeletesMalformedSupportedVersionWithoutPlaintext() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let credentialID = "supported-malformed-owned"
@@ -2893,9 +2868,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreDeletesUnsupportedVersionContainingPlaintextCredential() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let credentialID = "unsupported-orphan"
@@ -2918,9 +2892,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreDeletesUndecodableFutureVersionContainingSMBPlaintextCredential() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let credentialID = "future-smb-orphan"
@@ -2943,9 +2916,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStorePreservesSameLayoutPayloadWithUnknownVersion() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let credentialID = "future-version-owned"
@@ -2968,9 +2940,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStorePreservesUndecodableSameLayoutPayloadWithUnknownVersion() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let credentialID = "future-schema-owned"
@@ -2993,9 +2964,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreRetriesIndexedCredentialCleanupWhenConfigurationIsAbsent() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let credentialID = "retry-orphan"
@@ -3020,9 +2990,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStorePreservesValidConfigurationForDifferentLayout() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let credentialID = "different-layout-owned"
@@ -3045,9 +3014,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreMigratesLegacyPlaintextCredentialForDifferentLayout() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore()
@@ -3074,9 +3042,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreMigratesBalanceOnlyLegacyPlaintextCredentialForDifferentLayout() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore()
@@ -3119,9 +3086,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreSanitizesLegacySMBCredentialForDifferentKnownLayout() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let store = UserDefaultsDeckConfigurationStore(
@@ -3144,9 +3110,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreDeletesSensitiveDifferentLayoutPayloadWithUnknownVersion() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let store = UserDefaultsDeckConfigurationStore(
@@ -3168,9 +3133,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStorePreservesNonSensitiveDifferentLayoutPayloadWithUnknownVersion() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let store = UserDefaultsDeckConfigurationStore(
@@ -3186,9 +3150,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreNormalizesDuplicatePersistedKeyIDsWithoutCrashing() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let store = UserDefaultsDeckConfigurationStore(
@@ -3206,9 +3169,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStorePrunesCredentialOwnerBeyondRootPageLimit() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let discardedCredentialID = "discarded-root-credential"
@@ -3266,9 +3228,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStorePrunesOrphanAndCyclicCredentialOwners() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let discardedCredentialIDs = ["orphan-credential", "cycle-a-credential", "cycle-b-credential"]
@@ -3322,9 +3283,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func userDefaultsStoreKeepsReachablePageCredentialOwner() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let storageKey = "deckConfiguration"
         let credentialID = "reachable-credential"
@@ -3372,9 +3332,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func sub2APIBearerKeyMigratesToPerConfigurationCredentialWithoutPersistingPlaintext() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
@@ -3397,9 +3356,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func failedSub2APIBearerMigrationDeletesPlaintextAndDoesNotUseSecret() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore(saveError: .keychain(errSecAuthFailed))
         let store = UserDefaultsDeckConfigurationStore(
@@ -3420,9 +3378,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func legacyV1DuplicateKeysMigrateOnlyLastRetainedBearerKey() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
@@ -3444,9 +3401,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func legacyV2DuplicateKeysMigrateOnlyLastRetainedBearerKey() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
@@ -3463,9 +3419,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func legacyV2DuplicatePagesMigrateOnlyLastRetainedPageCredentials() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
@@ -3483,9 +3438,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func restoredCredentialIDsBecomeNonemptyAndIndependentAcrossPages() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore()
         try credentials.saveBearerKey("shared-secret", credentialID: "shared-id")
@@ -3518,9 +3472,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func sharedCredentialRefreshPrefersNewBearerAcrossPagesOnSaveAndReload() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
             defaults: defaults,
@@ -3599,9 +3552,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func clearingSharedCredentialRemovesAllReferencesAndDoesNotReviveAfterReload() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
@@ -3653,9 +3605,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func sub2APIBearerKeysUseIndependentCredentialIDsAndRoundTripThroughCredentialStore() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
             defaults: defaults,
@@ -3810,9 +3761,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func sub2APIDataSourceReferenceRoundTripsWithoutDuplicatingSecret() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
             defaults: defaults,
@@ -3848,9 +3798,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func unrelatedConfigurationSavesDoNotRewriteUnchangedSub2APICredential() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
             defaults: defaults,
@@ -3898,9 +3847,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func missingKeychainCredentialClearsPersistedCredentialIDOnLoad() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let credentialID = "missing-credential"
         let credentials = FakeSub2APICredentialStore()
@@ -3928,9 +3876,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func temporaryKeychainLoadFailurePreservesCredentialIDWithoutOrdinarySaveAccess() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let credentialID = "temporarily-unavailable-credential"
         let credentials = FakeSub2APICredentialStore()
@@ -3965,9 +3912,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func sub2APICredentialSurvivesTemporaryFunctionSwitchInRealStore() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
             defaults: defaults,
@@ -3992,9 +3938,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func sub2APIBalanceCredentialSurvivesTemporaryFunctionSwitchInRealStore() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
             defaults: defaults,
@@ -4026,9 +3971,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func failedSub2APICredentialWriteDoesNotDeletePreviousSecretOrForgetIndex() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
@@ -4067,9 +4011,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func failedCredentialIDReplacementPreservesOldCredentialUntilRetrySucceeds() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let newCredentialID = "replacement-credential"
         let credentials = FakeSub2APICredentialStore()
@@ -4114,9 +4057,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func failedSub2APICredentialDeletionRemainsIndexedAndRetries() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
@@ -4152,9 +4094,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func deletingRootPageCleansUpItsSub2APICredential() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
@@ -5115,9 +5056,8 @@ struct UlanziDeckSwiftTests {
 
     @Test("New API 余额 API Key 存入独立 Keychain 集合且删除按键后清理孤儿")
     func newAPIBalanceCredentialRoundTripAndOrphanCleanupInRealStore() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let newAPICredentials = FakeSub2APICredentialStore()
         let sub2APICredentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
@@ -5159,9 +5099,8 @@ struct UlanziDeckSwiftTests {
 
     @Test("New API 历史明文 API Key 由 store 在解码前一次性迁入 Keychain")
     func userDefaultsStoreMigratesLegacyNewAPIPlaintextAPIKeyBeforeDecoding() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let newAPICredentials = FakeSub2APICredentialStore()
         let sub2APICredentials = FakeSub2APICredentialStore()
@@ -5199,9 +5138,8 @@ struct UlanziDeckSwiftTests {
 
     @Test("New API 历史明文迁移失败时移除明文且不保留凭据引用")
     func failedNewAPIPlaintextMigrationDeletesPlaintextAndCredentialReference() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let newAPICredentials = FakeSub2APICredentialStore(saveError: .keychain(errSecAuthFailed))
         let store = UserDefaultsDeckConfigurationStore(
@@ -5228,9 +5166,8 @@ struct UlanziDeckSwiftTests {
 
     @Test("不支持版本携带 New API 明文 API Key 时整个 payload 被丢弃")
     func userDefaultsStoreDeletesUnsupportedVersionContainingNewAPIPlaintextAPIKey() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let newAPICredentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
@@ -5251,9 +5188,8 @@ struct UlanziDeckSwiftTests {
 
     @Test("New API 历史明文 API Key 在 v1 顶层 keys 布局下同样完成迁移")
     func userDefaultsStoreMigratesLegacyNewAPIPlaintextAPIKeyInV1Layout() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
         let storageKey = "deckConfiguration"
         let newAPICredentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
@@ -7339,9 +7275,8 @@ struct UlanziDeckSwiftTests {
 
     @MainActor
     @Test func sub2APIAutomaticRefreshDoesNotRewriteUnchangedKeychainCredential() async throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let credentials = FakeSub2APICredentialStore()
         let store = UserDefaultsDeckConfigurationStore(
@@ -9550,11 +9485,8 @@ struct UlanziDeckSwiftTests {
     }
 
     @Test func gameRuntimeSuccessSnapshotPersistsWithDeckConfiguration() throws {
-        let suiteName = "UlanziDeckSwiftTests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        let (defaults, cleanupTestDefaults) = try makeIsolatedTestDefaults()
+        defer { cleanupTestDefaults() }
 
         let layout = DeckGridLayout.h200Prototype
         let store = UserDefaultsDeckConfigurationStore(defaults: defaults, storageKey: "deckConfiguration")
