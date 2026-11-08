@@ -1138,14 +1138,15 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
         markerPath.stroke()
     }
 
-    /// 每个周期的时间行按该周期自身节奏独立取色（与顶部圆点同一套三态规则）；
+    /// 每个周期的时间行按该周期自身节奏独立取色：与周期条相同的对数映射和渐变，
+    /// 取该周期映射位置的渐变色，不跟随圆点的三态色；
     /// 周期条只绘制最长周期，短周期仅用时间文字颜色表达节奏；无法计算节奏时保留原有颜色规则。
     private func usageTimeColor(for paceBar: UsageQuotaBar?, fallback: MihoyoGameMetricColor) -> NSColor {
         guard let paceBar else { return mihoyoGameMetricColor(for: fallback) }
-        return usagePaceIndicatorColor(for: paceBar, colors: usageQuotaBarColors())
+        return usageQuotaBarColor(at: CGFloat(paceBar.markerProgress), colors: usageQuotaBarColors())
     }
 
-    /// 圆点与时间行共用的节奏指示色：偏差为正（消耗偏快）显红、为负（偏慢）显蓝、恰好为 0 显绿；
+    /// 圆点的节奏指示色：偏差为正（消耗偏快）显红、为负（偏慢）显蓝、恰好为 0 显绿；
     /// 不随位置渐变，位置仍按对数映射连续移动。
     private func usagePaceIndicatorColor(
         for bar: UsageQuotaBar,
@@ -1164,6 +1165,36 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             green: NSColor(deviceRed: 0.21, green: 0.73, blue: 0.36, alpha: 1),
             yellow: NSColor(deviceRed: 0.95, green: 0.80, blue: 0.16, alpha: 1),
             red: NSColor(deviceRed: 0.90, green: 0.25, blue: 0.22, alpha: 1)
+        )
+    }
+
+    private func usageQuotaBarColor(
+        at progress: CGFloat,
+        colors: (blue: NSColor, green: NSColor, yellow: NSColor, red: NSColor)
+    ) -> NSColor {
+        let t = min(1, max(0, progress))
+        let start: NSColor
+        let end: NSColor
+        let localProgress: CGFloat
+        if t <= 0.5 {
+            start = colors.blue
+            end = colors.green
+            localProgress = t / 0.5
+        } else if t <= 0.75 {
+            start = colors.green
+            end = colors.yellow
+            localProgress = (t - 0.5) / 0.25
+        } else {
+            start = colors.yellow
+            end = colors.red
+            localProgress = (t - 0.75) / 0.25
+        }
+
+        return NSColor(
+            deviceRed: start.redComponent + (end.redComponent - start.redComponent) * localProgress,
+            green: start.greenComponent + (end.greenComponent - start.greenComponent) * localProgress,
+            blue: start.blueComponent + (end.blueComponent - start.blueComponent) * localProgress,
+            alpha: 1
         )
     }
 
