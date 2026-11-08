@@ -10045,6 +10045,19 @@ struct UlanziDeckSwiftTests {
         return false
     }
 
+    /// 节奏三态色的绝对锚定：偏快=红、偏慢=蓝、持平=绿。
+    /// 阈值按真实渲染的纯填充值留出余量：红 (0.93,0.34,0.28)、蓝 (0.19,0.61,0.97)、绿 (0.24,0.76,0.44)；
+    /// 旧“跟随位置渐变”的填充在中间位置会因通道不足而失败，可检测回归。
+    private static func matchesUsagePaceTriState(_ color: NSColor, sign: Double) -> Bool {
+        if sign > 0 {
+            return color.redComponent > 0.85 && color.greenComponent < 0.45 && color.blueComponent < 0.40
+        }
+        if sign < 0 {
+            return color.blueComponent > 0.90 && color.redComponent < 0.35 && color.greenComponent < 0.70
+        }
+        return color.greenComponent > 0.70 && color.redComponent < 0.35 && color.blueComponent < 0.55
+    }
+
     private static func brightPixelBounds(in image: NSBitmapImageRep) -> NSRect? {
         var minX = Int.max
         var minY = Int.max
@@ -11368,26 +11381,18 @@ struct UlanziDeckSwiftTests {
                 let markerX = Int((width / 2 + offset * barWidth / 2).rounded())
                 let markerY = Int(topMargin + radius * 0.8)
                 let markerColor = try #require(image.colorAt(x: markerX, y: markerY)?.usingColorSpace(.deviceRGB))
-                // 同一渲染器导出的中性按键在偏移位置没有圆点，直接对比当地渐变色，
-                // 避免把 NSColor 与 PNG 导出之间的颜色空间转换误差当成显示偏差。
-                var centeredConfiguration = configuration
-                centeredConfiguration.codexUsage.lastResult = .success(CodexUsageQuota(
-                    window: .sevenDays, remainingPercent: 50, resetAfterSeconds: 302_400,
-                    resetAt: 1_800_000_000, limitWindowSeconds: 604_800, usedPercent: 50
-                ))
-                let centeredDisplay = DeckKeyDisplay(key: key, configuration: centeredConfiguration, isSelected: false, isPressed: false)
-                let centeredImage = try #require(NSBitmapImageRep(data: H200ButtonIconRenderer().pngData(for: centeredDisplay)))
-                let barY = Int(topMargin + radius * 1.4)
-                let expectedRGB = try #require(centeredImage.colorAt(x: markerX, y: barY)?.usingColorSpace(.deviceRGB))
-                #expect(abs(markerColor.redComponent - expectedRGB.redComponent) < 0.015)
-                #expect(abs(markerColor.greenComponent - expectedRGB.greenComponent) < 0.015)
-                #expect(abs(markerColor.blueComponent - expectedRGB.blueComponent) < 0.015)
+                // 三态绝对锚定：偏快=红、偏慢=蓝、持平=绿，与位置无关；
+                // 旧“填充所在位置渐变色”的做法在 0.36/0.64 这类中间位置会失败。
+                #expect(
+                    Self.matchesUsagePaceTriState(markerColor, sign: balance),
+                    "圆点应为三态色（偏快红、偏慢蓝、持平绿），不随位置渐变"
+                )
                 // 验证三倍条厚的圆点在条上下均有足够填色，防止只改测试定位而未放大圆点。
                 for sampleY in [Int(topMargin + radius * 0.6), Int(topMargin + radius * 2.2)] {
                     let bodyColor = try #require(image.colorAt(x: markerX, y: sampleY)?.usingColorSpace(.deviceRGB))
-                    #expect(abs(bodyColor.redComponent - expectedRGB.redComponent) < 0.015)
-                    #expect(abs(bodyColor.greenComponent - expectedRGB.greenComponent) < 0.015)
-                    #expect(abs(bodyColor.blueComponent - expectedRGB.blueComponent) < 0.015)
+                    #expect(abs(bodyColor.redComponent - markerColor.redComponent) < 0.015)
+                    #expect(abs(bodyColor.greenComponent - markerColor.greenComponent) < 0.015)
+                    #expect(abs(bodyColor.blueComponent - markerColor.blueComponent) < 0.015)
                 }
                 let centerX = Int(width / 2)
                 let tickRows = [Int(ceil(topMargin)), Int(floor(topMargin + radius * 2.8 - 1))]
@@ -11418,20 +11423,13 @@ struct UlanziDeckSwiftTests {
                     resetAfterSeconds: 9_000, resetAt: 1_800_000_000,
                     limitWindowSeconds: 18_000, usedPercent: (0.5 - balance) * 100
                 )
-                var centeredConfiguration = DeckKeyConfiguration(function: function)
-                centeredConfiguration.codexUsage.lastResult = .success(UsageQuotaSnapshot(
+                var baseConfiguration = DeckKeyConfiguration(function: function)
+                baseConfiguration.codexUsage.lastResult = .success(UsageQuotaSnapshot(
                     quotas: dualWindow ? [shorterQuota, longestQuota] : [longestQuota]
                 ))
-                // 期望色从中心圆点渲染的周期条上读取：条上任意位置的像素就是该进度的节奏色。
-                // 圆点只覆盖正中，不影响两侧采样；balance 为 0 时所有周期同色。
-                let centeredDisplay = DeckKeyDisplay(
-                    key: key, configuration: centeredConfiguration, isSelected: false, isPressed: false
-                )
-                let centeredImage = try #require(NSBitmapImageRep(data: H200ButtonIconRenderer().pngData(for: centeredDisplay)))
-                let barRowY = Int(Double(centeredImage.pixelsHigh) * 0.018 + max(2, Double(centeredImage.pixelsHigh) * 0.035) * 1.5 * 1.4)
                 for colorMode in CodexUsageColorMode.allCases {
                     for resetMode in CodexUsageResetDisplayMode.allCases {
-                        var configuration = centeredConfiguration
+                        var configuration = baseConfiguration
                         configuration.codexUsage.colorMode = colorMode
                         configuration.codexUsage.resetDisplayMode = resetMode
                         let display = DeckKeyDisplay(key: key, configuration: configuration, isSelected: false, isPressed: false)
@@ -11440,24 +11438,25 @@ struct UlanziDeckSwiftTests {
                         let height = Double(image.pixelsHigh)
                         let radius = max(2, height * 0.035) * 1.5
                         let barWidth = width * 0.84 - radius * 2
+                        // 圆点三态色作为最长周期时间行的同色基准；同一渲染管线，PNG 对 PNG 可直接比较。
                         let longestOffset = balance < 0 ? -0.740_362_689_494 : (balance > 0 ? 0.740_362_689_494 : 0)
-                        func expectedColor(atProgressOffset offset: Double) throws -> NSColor {
-                            let x = Int((width / 2 + offset * barWidth / 2).rounded())
-                            return try #require(centeredImage.colorAt(x: x, y: barRowY)?.usingColorSpace(.deviceRGB))
-                        }
-                        let longestExpected = try expectedColor(atProgressOffset: longestOffset)
-                        let shorterExpected = try expectedColor(atProgressOffset: -longestOffset)
+                        let markerX = Int((width / 2 + longestOffset * barWidth / 2).rounded())
+                        let markerY = Int(height * 0.018 + radius * 1.4)
+                        let markerColor = try #require(image.colorAt(x: markerX, y: markerY)?.usingColorSpace(.deviceRGB))
                         // 单周期：唯一时间行跟随该周期（即最长）节奏；双周期：第一行 5h、第二行 7d 各自跟随。
-                        let timeRows: [(rows: Range<Int>, expected: NSColor)] = dualWindow
-                            ? [(Int(height * 0.32)..<Int(height * 0.49), shorterExpected),
-                               (Int(height * 0.71)..<Int(height * 0.88), longestExpected)]
-                            : [(Int(height * 0.67)..<Int(height * 0.82), longestExpected)]
+                        // 每行先做三态绝对锚定，最长周期行还必须与圆点像素一致；双周期反向时两行互为红蓝。
+                        let timeRows: [(rows: Range<Int>, sign: Double, mustMatchMarker: Bool)] = dualWindow
+                            ? [(Int(height * 0.32)..<Int(height * 0.49), -balance, false),
+                               (Int(height * 0.71)..<Int(height * 0.88), balance, true)]
+                            : [(Int(height * 0.67)..<Int(height * 0.82), balance, true)]
                         for rowExpectation in timeRows {
                             #expect(Self.bitmapContainsPixel(in: image, xRange: 20..<(image.pixelsWide - 20), yRange: rowExpectation.rows) { color in
-                                abs(color.redComponent - rowExpectation.expected.redComponent) < 0.02
-                                    && abs(color.greenComponent - rowExpectation.expected.greenComponent) < 0.02
-                                    && abs(color.blueComponent - rowExpectation.expected.blueComponent) < 0.02
-                            }, "每行时间应与该周期自身节奏同色：双周期时 5h 与 7d 各自独立取色，不跟随最长周期圆点")
+                                guard Self.matchesUsagePaceTriState(color, sign: rowExpectation.sign) else { return false }
+                                guard rowExpectation.mustMatchMarker else { return true }
+                                return abs(color.redComponent - markerColor.redComponent) < 0.02
+                                    && abs(color.greenComponent - markerColor.greenComponent) < 0.02
+                                    && abs(color.blueComponent - markerColor.blueComponent) < 0.02
+                            }, "每行时间应与该周期节奏符号同色（偏快红、偏慢蓝、持平绿，不过渡），最长周期行与圆点一致，双周期各自独立")
                         }
                     }
                 }

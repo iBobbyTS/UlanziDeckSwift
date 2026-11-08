@@ -1131,18 +1131,29 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             width: markerRadius * 2,
             height: markerRadius * 2
         ))
-        usageQuotaBarColor(at: progress, colors: colors).setFill()
+        usagePaceIndicatorColor(for: bar, colors: colors).setFill()
         markerPath.fill()
         NSColor(calibratedWhite: 0, alpha: 0.55).setStroke()
         markerPath.lineWidth = max(1, thickness * 0.18)
         markerPath.stroke()
     }
 
-    /// 每个周期的时间行按该周期自身节奏独立取色（与顶部圆点同一套对数映射和渐变）；
+    /// 每个周期的时间行按该周期自身节奏独立取色（与顶部圆点同一套三态规则）；
     /// 周期条只绘制最长周期，短周期仅用时间文字颜色表达节奏；无法计算节奏时保留原有颜色规则。
     private func usageTimeColor(for paceBar: UsageQuotaBar?, fallback: MihoyoGameMetricColor) -> NSColor {
         guard let paceBar else { return mihoyoGameMetricColor(for: fallback) }
-        return usageQuotaBarColor(at: CGFloat(paceBar.markerProgress), colors: usageQuotaBarColors())
+        return usagePaceIndicatorColor(for: paceBar, colors: usageQuotaBarColors())
+    }
+
+    /// 圆点与时间行共用的节奏指示色：偏差为正（消耗偏快）显红、为负（偏慢）显蓝、恰好为 0 显绿；
+    /// 不随位置渐变，位置仍按对数映射连续移动。
+    private func usagePaceIndicatorColor(
+        for bar: UsageQuotaBar,
+        colors: (blue: NSColor, green: NSColor, yellow: NSColor, red: NSColor)
+    ) -> NSColor {
+        if bar.balance > 0 { return colors.red }
+        if bar.balance < 0 { return colors.blue }
+        return colors.green
     }
 
     /// 黄锚点插在绿、红正中：绿→红直线插值会在 R≈G 处穿过一段低饱和的土黄色，
@@ -1153,36 +1164,6 @@ nonisolated struct H200ButtonIconRenderer: H200ButtonIconRendering {
             green: NSColor(deviceRed: 0.21, green: 0.73, blue: 0.36, alpha: 1),
             yellow: NSColor(deviceRed: 0.95, green: 0.80, blue: 0.16, alpha: 1),
             red: NSColor(deviceRed: 0.90, green: 0.25, blue: 0.22, alpha: 1)
-        )
-    }
-
-    private func usageQuotaBarColor(
-        at progress: CGFloat,
-        colors: (blue: NSColor, green: NSColor, yellow: NSColor, red: NSColor)
-    ) -> NSColor {
-        let t = min(1, max(0, progress))
-        let start: NSColor
-        let end: NSColor
-        let localProgress: CGFloat
-        if t <= 0.5 {
-            start = colors.blue
-            end = colors.green
-            localProgress = t / 0.5
-        } else if t <= 0.75 {
-            start = colors.green
-            end = colors.yellow
-            localProgress = (t - 0.5) / 0.25
-        } else {
-            start = colors.yellow
-            end = colors.red
-            localProgress = (t - 0.75) / 0.25
-        }
-
-        return NSColor(
-            deviceRed: start.redComponent + (end.redComponent - start.redComponent) * localProgress,
-            green: start.greenComponent + (end.greenComponent - start.greenComponent) * localProgress,
-            blue: start.blueComponent + (end.blueComponent - start.blueComponent) * localProgress,
-            alpha: 1
         )
     }
 
